@@ -63,20 +63,10 @@ _STRIP_COLOR_BY_STATUS = {
     Status.SKIPPED: "#444",
 }
 # Dim slot rendered before history has filled up - mirrors the web
-# dashboard's `{noData: true}` padding behaviour.
-_STRIP_COLOR_EMPTY = "#222"
-
-# Eighth-block characters drawn from bottom up. Each one occupies a
-# single terminal cell; the filled portion grows as the index climbs.
-# We use these so each strip cell can encode the refresh's pass ratio
-# (height) in addition to the worst-check status (colour).
-_HEIGHT_BLOCKS = ("▁", "▂", "▃", "▄", "▅", "▆", "▇", "█")
-
-
-def _height_block(ratio: float) -> str:
-    """Return the eighth-block character that visually fills ``ratio``."""
-    idx = max(0, min(len(_HEIGHT_BLOCKS) - 1, int(round(ratio * (len(_HEIGHT_BLOCKS) - 1)))))
-    return _HEIGHT_BLOCKS[idx]
+# dashboard's `{noData: true}` padding behaviour. Lifted slightly
+# above the tile background (#161616) so the placeholder cells stay
+# visible instead of melting into the surrounding panel.
+_STRIP_COLOR_EMPTY = "#3a3a3a"
 
 
 def columns_for(n_instances: int) -> int:
@@ -374,12 +364,10 @@ class InstanceTile(Container):
         self.ping_total = 0
         self.last_report: RunReport | None = None
         self.last_refresh: datetime | None = None
-        # Rolling per-refresh history for the uptime sparkline. Each
-        # entry is (worst_status, ok_count, total_count) so the strip
-        # can render colour (status) and height (pass ratio) per cell.
+        # Rolling per-refresh worst-status history for the uptime strip.
         # Refreshes where every check was SKIPPED are dropped so the
         # strip stays meaningful while upstream services flap.
-        self.history: deque[tuple[Status, int, int]] = deque(maxlen=_HISTORY_LEN)
+        self.history: deque[Status] = deque(maxlen=_HISTORY_LEN)
 
     def compose(self) -> ComposeResult:
         with Horizontal(classes="row"):
@@ -403,7 +391,7 @@ class InstanceTile(Container):
                 id="uptime-header",
             )
             yield Static(
-                f"[{_STRIP_COLOR_EMPTY}]" + ("▁" * _HISTORY_LEN) + "[/]",
+                f"[{_STRIP_COLOR_EMPTY}]" + ("█" * _HISTORY_LEN) + "[/]",
                 classes="uptime-strip",
                 id="uptime-strip",
             )
@@ -431,14 +419,12 @@ class InstanceTile(Container):
             self.ping_total += 1
             if ping.status is Status.OK:
                 self.ping_ok += 1
-        # Append the refresh's worst non-skipped status + the pass
-        # ratio to history. The strip reflects "how the last 30
-        # refreshes went overall", not just whether ping reached the
-        # server, and per-cell height calls out partial outages.
+        # Append the refresh's worst non-skipped status to history. The
+        # strip reflects "how the last 30 refreshes went overall", not
+        # just whether ping reached the server.
         ran_statuses: list[Status] = [r.status for r in report.results if r.status is not Status.SKIPPED]
         if ran_statuses:
-            ok_n = sum(1 for s in ran_statuses if s is Status.OK)
-            self.history.append((_worst(ran_statuses), ok_n, len(ran_statuses)))
+            self.history.append(_worst(ran_statuses))
 
         # UI updates only when the widget is actually mounted in an app.
         # Unit tests construct tiles outside an app and just inspect data fields.
@@ -503,7 +489,7 @@ class InstanceTile(Container):
         """Render the 'UPTIME · LAST 30 CHECKS    100%' header line."""
         label = f"UPTIME · LAST {_HISTORY_LEN} CHECKS"
         if self.history:
-            clean = sum(1 for status, _ok, _total in self.history if status is Status.OK)
+            clean = sum(1 for s in self.history if s is Status.OK)
             pct = int(round(100 * clean / len(self.history)))
             return f"{label}  [#888]{pct}%[/]"
         return label
@@ -511,20 +497,16 @@ class InstanceTile(Container):
     def _render_history_strip(self) -> str:
         """Render the coloured block strip below the header.
 
-        Each cell carries two pieces of information:
-
-        - colour from the worst non-skipped status of that refresh
-          (green / amber / red / magenta-error)
-        - height from the pass ratio (``ok_count / total_count``) using
-          the eighth-block glyphs so partial outages are visible at a
-          glance without losing the colour signal.
+        Each cell is a full-height block coloured by the refresh's
+        worst non-skipped status (green / amber / red / magenta).
+        Slots that haven't been filled yet show in a dim grey so the
+        row reserves its full width from the first paint.
         """
         pad = _HISTORY_LEN - len(self.history)
-        parts: list[str] = [f"[{_STRIP_COLOR_EMPTY}]▁[/]"] * pad
-        for status, ok_n, total_n in self.history:
+        parts: list[str] = [f"[{_STRIP_COLOR_EMPTY}]█[/]"] * pad
+        for status in self.history:
             color = _STRIP_COLOR_BY_STATUS.get(status, _STRIP_COLOR_EMPTY)
-            ratio = (ok_n / total_n) if total_n > 0 else 0.0
-            parts.append(f"[{color}]{_height_block(ratio)}[/]")
+            parts.append(f"[{color}]█[/]")
         return "".join(parts)
 
     def _tick_updated(self) -> None:

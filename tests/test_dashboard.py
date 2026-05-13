@@ -153,10 +153,8 @@ def test_tile_records_last_refresh_timestamp() -> None:
 
 def test_tile_history_appends_worst_status_per_refresh() -> None:
     tile = InstanceTile(_entry())
-    # Two clean refreshes (ping OK, info OK -> 2/2 pass), then a refresh
-    # where ping warns (1/2 pass), then a refresh where ping fails (1/2
-    # pass), then a refresh where everything is skipped (which must NOT
-    # be recorded).
+    # Two clean refreshes, then a WARN, then a FAIL, then a refresh
+    # where everything is skipped (which must NOT be recorded).
     for status in (Status.OK, Status.OK, Status.WARN, Status.FAIL):
         tile.update_from(
             RunReport(
@@ -178,12 +176,7 @@ def test_tile_history_appends_worst_status_per_refresh() -> None:
             ],
         ),
     )
-    assert list(tile.history) == [
-        (Status.OK, 2, 2),
-        (Status.OK, 2, 2),
-        (Status.WARN, 1, 2),
-        (Status.FAIL, 1, 2),
-    ]
+    assert list(tile.history) == [Status.OK, Status.OK, Status.WARN, Status.FAIL]
 
 
 def test_tile_history_caps_at_max_len() -> None:
@@ -197,4 +190,4 @@ def test_tile_history_caps_at_max_len() -> None:
             ),
         )
     assert len(tile.history) == 30
-    assert all(entry == (Status.OK, 1, 1) for entry in tile.history)
+    assert all(s is Status.OK for s in tile.history)
