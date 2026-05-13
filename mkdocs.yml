@@ -42,6 +42,7 @@ nav:
       - Web dashboard: guides/web.md
       - Adding a custom check: guides/custom-checks.md
       - Development: guides/development.md
+      - Releasing: guides/releasing.md
   - CLI reference: cli-reference.md
 
 markdown_extensions:
