@@ -58,7 +58,11 @@ class AlertTestReport(BaseModel):
 
 app = typer.Typer(
     name="chap-checker",
-    help="Run a suite of checks against a DHIS2 server with chap-core / chap route.",
+    help=(
+        "Health-check CLI for DHIS2 instances integrated with chap-core. "
+        "Cron-friendly with Slack alerts on status transitions and a TUI "
+        "dashboard for at-a-glance monitoring."
+    ),
     rich_markup_mode="rich",
 )
 
@@ -161,15 +165,20 @@ def verify_command(
         max=100,
     ),
 ) -> None:
-    """Run all registered checks against one or more DHIS2 instances.
+    """Run every registered check against one or more DHIS2 instances.
 
-    Resolution order:
+    Source of targets is decided as follows:
 
-    1. ``--url`` (with ``--username`` / ``--password``): ad-hoc, ignores config.
-    2. ``--config <path>``: load that file.
-    3. ``./chap-checker.toml`` if it exists.
+    1. If `--url` is given (together with `--username` and `--password`),
+       chap-checker runs in *ad-hoc* mode against that single URL and
+       ignores any TOML config.
+    2. Otherwise the TOML file is loaded from `--config` if given, or
+       from `./chap-checker.toml` if present. Every `[instances.*]`
+       block runs unless `--instance` narrows the run to one.
 
-    Without ``--instance``, every instance in the config is checked.
+    Exit code is 0 when every check on every target is `OK`, non-zero
+    otherwise. Alert dispatch (Slack etc.) honors each instance's
+    `alerts = [...]` opt-in; skip dispatch entirely with `--no-alerts`.
     """
     state_obj = _state(ctx)
     targets, cfg, config_path = _resolve_run_context(
@@ -235,9 +244,15 @@ def dashboard_command(
 ) -> None:
     """Launch the Textual TUI dashboard.
 
-    Adaptive grid of tiles (1-4 columns depending on instance count).
-    Press ``r`` to refresh immediately, ``q`` to quit. Whether alerts
-    fire is decided at launch via ``--alerts`` / ``--no-alerts``.
+    One tile per configured instance, in an adaptive grid (1-4 columns
+    depending on instance count). Each tile shows the rolled-up status,
+    the cumulative ping success ratio, and a per-check breakdown. The
+    tile's left accent stripe color tracks the worst status, so a FAIL
+    tile is unmistakable from across the room.
+
+    Inside the TUI, press `r` to refresh immediately or `q` to quit.
+    Whether alerts fire is decided at launch via `--alerts` (off by
+    default - the "TUI is enough, do not page anyone" case).
     """
     config_path = config if config is not None else default_config_path()
     if not config_path.exists():
@@ -354,9 +369,13 @@ def alerts_test_command(
         envvar="CHAP_CHECKER_CONFIG",
     ),
 ) -> None:
-    """Send a synthetic transition to every (or a named) configured alerter.
+    """Send a synthetic transition to every configured alerter (or a named one).
 
-    Verifies the webhook URL works without waiting for a real failure.
+    Useful after rotating a Slack webhook or when you suspect the alert
+    pipeline is broken. Each invocation posts a real message to the
+    configured channel, so do not put this on a cron - run it manually.
+
+    Exit code is 0 only when every alerter delivered successfully.
     """
     state_obj = _state(ctx)
     config_path = config if config is not None else default_config_path()
