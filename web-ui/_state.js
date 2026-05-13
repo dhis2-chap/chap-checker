@@ -32,10 +32,26 @@
   }
 
   /**
+   * Deterministic integer hash of an instance name. The artifact's
+   * ``buildHistory`` uses ``inst.seed * 17 + 1`` as the mulberry32 seed;
+   * without a valid integer here the sparkline rng degenerates to all-
+   * zero and every history sample shows as a hiccup (red bar). Any
+   * non-zero integer fixed per instance works; we use sum-of-chars.
+   */
+  function hashSeed(name) {
+    let h = 0;
+    for (let i = 0; i < name.length; i++) {
+      h = (h * 31 + name.charCodeAt(i)) | 0;
+    }
+    return h || 1;
+  }
+
+  /**
    * Map one server tile -> one artifact instance.
    * Designer artifact expects: id, name, platform, version, url, status,
    * checksPassed/Total, pingPassed/Total/Pct, latency, updated, uptime,
-   * checks:[{name,ok,down?}].
+   * checks:[{name,ok,down?}], seed, baseLat (seed/baseLat feed the
+   * sparkline RNG inside ``buildHistory``).
    */
   function mapTile(tile) {
     const status = mapStatus(tile.worst_status);
@@ -44,6 +60,7 @@
       ok: c.status === "ok",
       down: status === "down",
     }));
+    const latency = typeof tile.latency_ms === "number" ? tile.latency_ms : 0;
     return {
       id: tile.name,
       name: tile.name.toUpperCase(),
@@ -58,10 +75,13 @@
       pingPct: tile.ping_total > 0
         ? Math.round((100 * tile.ping_ok) / tile.ping_total)
         : 100,
-      latency: typeof tile.latency_ms === "number" ? tile.latency_ms : 0,
+      latency,
       updated: "—", // app.jsx recomputes this from lastRefreshAt
       uptime: typeof tile.uptime_pct === "number" ? tile.uptime_pct : 100,
       checks,
+      // Sparkline RNG inputs - see hashSeed() above for why these matter.
+      seed: hashSeed(tile.name),
+      baseLat: latency || 150,
     };
   }
 

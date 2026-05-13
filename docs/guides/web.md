@@ -28,12 +28,14 @@ The command palette currently exposes:
 
 - **Refresh now**
 - **Toggle fullscreen**
+- **Density:** default / comfortable / TV / wall
+- **Theme:** phosphor green / amber / high contrast
 - **Open GitHub repository**
 - **Open documentation**
 
 Type to filter the list. Click an item or hit `Enter` to run it. New
-commands are a small JS addition in
-[`src/chap_checker/web.py`](https://github.com/dhis2-chap/chap-checker/blob/main/src/chap_checker/web.py).
+commands are a small JSX addition in
+[`web-ui/src/app.jsx`](https://github.com/dhis2-chap/chap-checker/blob/main/web-ui/src/app.jsx).
 
 ![Command palette open in the web dashboard](../assets/web-dashboard-palette.png)
 
@@ -43,13 +45,16 @@ same muscle memory works in both surfaces.
 
 ## Themes & density
 
-The command palette exposes runtime tweaks for the look:
+The command palette exposes two runtime tweaks for the look:
 
 - **Themes**: `phosphor green` (default), `amber`, `high contrast`.
 - **Density**: `default`, `comfortable`, `TV`, `wall (big numbers)`.
-- **Status mode**: `subtle`, `card tint`, `edge bar`.
 
-Settings persist via `localStorage` and survive a page reload.
+Defined as CSS custom-property bundles in
+[`web-ui/src/app.jsx`](https://github.com/dhis2-chap/chap-checker/blob/main/web-ui/src/app.jsx)
+(`THEMES`, `DENSITY`) and applied by `applyTheme()` on every tweak
+change. Selections live in React state for the session; a page reload
+resets to the defaults.
 
 ## Architecture
 

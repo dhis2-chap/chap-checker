@@ -253,15 +253,22 @@ function App() {
     { id:'density-comfy',   label:'Density: comfortable', run:() => setTweak('density','comfy') },
     { id:'density-tv',      label:'Density: TV', run:() => setTweak('density','tv') },
     { id:'density-wall',    label:'Density: wall (big numbers)', run:() => setTweak('density','wall') },
-    { id:'status-subtle', label:'Status: subtle (default)', run:() => setTweak('statusMode','subtle') },
-    { id:'status-tint',   label:'Status: card tint', run:() => setTweak('statusMode','tint') },
-    { id:'status-strip',  label:'Status: edge bar', run:() => setTweak('statusMode','strip') },
+    // CK-WIRING: status-subtle/tint/strip were designer-time tweaks for
+    // picking how to render status (no color, card tint, or coloured
+    // edge bar). The default 'subtle' is what we ship; the other two
+    // are kept reachable from the (hidden) TweaksPanel for design work.
     { id:'theme-phosphor', label:'Theme: phosphor green', run:() => setTweak('theme','phosphor') },
     { id:'theme-amber',    label:'Theme: amber', run:() => setTweak('theme','amber') },
     { id:'theme-high',     label:'Theme: high contrast', run:() => setTweak('theme','high') },
-    { id:'demo-down', label:'Demo: toggle PLAY-41 DOWN', hint:'d', run:() => setTweak('demoDown', !t.demoDown) },
-    { id:'gh',  label:'Open GitHub repository', run:() => {} },
-    { id:'docs',label:'Open documentation', run:() => {} },
+    // CK-WIRING: the artifact ships a demoDown toggle that swaps PLAY-41
+    // into a FAIL state for design preview. With live data that's
+    // misleading (real failures show real), so it's omitted from the
+    // palette. The tweak + buildHistory branch stay so the rest of the
+    // artifact code is untouched.
+    { id:'gh',   label:'Open GitHub repository',
+      run:() => window.open('https://github.com/dhis2-chap/chap-checker', '_blank', 'noopener') },
+    { id:'docs', label:'Open documentation',
+      run:() => window.open('https://dhis2-chap.github.io/chap-checker/', '_blank', 'noopener') },
   ], [t.demoDown]);
 
   // global keybindings
@@ -273,13 +280,21 @@ function App() {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault(); setPaletteOpen(o => !o); return;
       }
+      // CK-WIRING: Esc closes the palette from anywhere on the page, not
+      // just when the palette's input has focus. The original artifact
+      // only handled Esc inside the palette input; if focus moved
+      // elsewhere (e.g. user clicked outside) Esc was dead.
+      if (paletteOpen && e.key === 'Escape') {
+        e.preventDefault(); setPaletteOpen(false); return;
+      }
       if (isTyping || paletteOpen) return;
       if (e.key === 'r') { setLastRefreshAt(Date.now()); setRefreshTick(x=>x+1); }
       else if (e.key === 'f') {
         if (document.fullscreenElement) document.exitFullscreen?.();
         else document.documentElement.requestFullscreen?.();
       }
-      else if (e.key === 'd') setTweak('demoDown', !t.demoDown);
+      // CK-WIRING: the artifact's `d` keybind toggled demoDown; removed
+      // along with the palette entry. See the commands array above.
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
