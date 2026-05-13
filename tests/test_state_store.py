@@ -207,3 +207,66 @@ def test_skipped_to_ok_does_not_transition_when_no_prior_failure() -> None:
     assert transitions == []
     # State is preserved (curr_status == prev_status implicit OK).
     assert "prod::chap-route" in new_state.states
+
+
+def test_partial_run_preserves_unseen_states() -> None:
+    """Verify --instance / --check share the state file with the full run.
+
+    A partial run that only reports on one instance must NOT drop the
+    other instances' states - otherwise the next full run sees those
+    states as missing, treats a sustained failure as fresh, and
+    re-alerts on something the operator was already notified about.
+    """
+    now = datetime.now(UTC)
+    earlier = datetime(2026, 5, 13, 12, 0, 0, tzinfo=UTC)
+    # Two instances were known previously: prod (currently failing) and
+    # staging (currently OK). The current run only inspects prod.
+    previous = StateFile(
+        states={
+            "prod::ping": CheckState(status=Status.FAIL, since=earlier),
+            "staging::ping": CheckState(status=Status.OK, since=earlier),
+        },
+    )
+    reports = [_report("prod", _result("ping", Status.FAIL, "still down"))]
+    transitions, new_state = compute_transitions(previous, reports, {Status.FAIL}, now)
+
+    # No alert: prod is sustained FAIL, staging wasn't run.
+    assert transitions == []
+    # Both instances' state survives the partial run.
+    assert new_state.states["prod::ping"].status is Status.FAIL
+    assert new_state.states["prod::ping"].since == earlier  # since unchanged
+    assert new_state.states["staging::ping"].status is Status.OK
+    assert new_state.states["staging::ping"].since == earlier
+
+
+def test_partial_run_does_not_resurrect_fail_as_new_first_failure() -> None:
+    """After a partial run, the next full run sees the preserved state.
+
+    Regression guard: before the carry-forward, a partial ``--instance
+    prod`` run would drop ``staging::ping`` from the state file, and the
+    next full run treated staging's sustained FAIL as a fresh first-
+    failure and re-alerted.
+    """
+    now = datetime.now(UTC)
+    earlier = datetime(2026, 5, 13, 12, 0, 0, tzinfo=UTC)
+    previous = StateFile(
+        states={
+            "staging::ping": CheckState(status=Status.FAIL, since=earlier),
+        },
+    )
+    # Partial run: only prod, doesn't touch staging.
+    _, after_partial = compute_transitions(
+        previous,
+        [_report("prod", _result("ping", Status.OK, "fine"))],
+        {Status.FAIL},
+        now,
+    )
+    # Now a full run with both targets, staging still failing.
+    full_reports = [
+        _report("prod", _result("ping", Status.OK, "fine")),
+        _report("staging", _result("ping", Status.FAIL, "still down")),
+    ]
+    transitions, _ = compute_transitions(after_partial, full_reports, {Status.FAIL}, now)
+    # Critical: no re-alert for staging - the partial run preserved its
+    # FAIL state so the full run sees it as sustained, not fresh.
+    assert transitions == []
