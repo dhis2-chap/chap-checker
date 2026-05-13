@@ -207,6 +207,63 @@ def verify_command(
     raise typer.Exit(0 if verify_report.ok else 1)
 
 
+@app.command("dashboard")
+def dashboard_command(
+    ctx: typer.Context,
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help=f"Path to a TOML config (defaults to ./{DEFAULT_CONFIG_FILENAME} if present).",
+        envvar="CHAP_CHECKER_CONFIG",
+    ),
+    interval: float = typer.Option(30.0, "--interval", help="Refresh interval in seconds.", min=2.0),
+    alerts_enabled: bool = typer.Option(
+        False,
+        "--alerts/--no-alerts",
+        help=(
+            "Dispatch Slack/etc. alerts from refresh cycles. Off by default - the TUI is "
+            "usually all you need; flip this on if you want this dashboard to also page."
+        ),
+    ),
+    state: Path | None = typer.Option(
+        None,
+        "--state",
+        help=f"State file path (default: ./{DEFAULT_STATE_FILENAME} next to the config).",
+        envvar="CHAP_CHECKER_STATE",
+    ),
+) -> None:
+    """Launch the Textual TUI dashboard.
+
+    Adaptive grid of tiles (1-4 columns depending on instance count).
+    Press ``r`` to refresh immediately, ``q`` to quit. Whether alerts
+    fire is decided at launch via ``--alerts`` / ``--no-alerts``.
+    """
+    config_path = config if config is not None else default_config_path()
+    if not config_path.exists():
+        raise typer.BadParameter(
+            f"No config at {config_path}. Provide --config <path> or create a ./{DEFAULT_CONFIG_FILENAME}.",
+        )
+    cfg = load_config(config_path)
+    if not cfg.instances:
+        raise typer.BadParameter(f"{config_path} contains no [instances.<name>] entries.")
+
+    targets = [entry.to_target_entry(name) for name, entry in cfg.instances.items()]
+    state_path = state if state is not None else config_path.parent / DEFAULT_STATE_FILENAME
+
+    # Late import so the textual dependency only loads when the dashboard runs.
+    from chap_checker.dashboard import run as run_dashboard
+
+    run_dashboard(
+        targets=targets,
+        cfg=cfg,
+        config_path=config_path,
+        state_path=state_path,
+        interval_s=interval,
+        alerts_enabled=alerts_enabled,
+    )
+
+
 alerts_app = typer.Typer(
     name="alerts",
     help="Inspect or test configured alerters.",
@@ -490,28 +547,13 @@ def _build_alerters(cfg: AlertsConfig) -> list[AlerterBinding]:
     return out
 
 
-def _dispatch_alerts(
+async def dispatch_alerts_async(
     reports: list[RunReport],
     targets: list[TargetEntry],
     alerts_cfg: AlertsConfig,
     state_path: Path,
 ) -> None:
-    """Compute transitions, notify alerters, then persist state (only if delivery succeeded).
-
-    Per-target opt-in: each ``TargetEntry.alerts`` lists which configured
-    alerter names should fire for that target. A transition only reaches an
-    alerter when the source target opted into that alerter's name. State is
-    still tracked for every target (it's cheap and lets the operator flip an
-    instance from silent to alerting later without spurious "first failure"
-    pings for sustained outages).
-
-    Delivery failures (Slack 5xx, transport errors) are caught so they cannot
-    change the run's exit code, but on failure the new state is *not* saved.
-    Next run will recompute the same transitions and retry. With multiple
-    alerters this is conservative (any failure suppresses the save and may
-    re-deliver to alerters that already succeeded); per-alerter dedupe is a
-    later-day problem.
-    """
+    """Async core of alert dispatch; safe to call from inside an event loop."""
     bindings = _build_alerters(alerts_cfg)
     if not bindings:
         return
@@ -530,30 +572,52 @@ def _dispatch_alerts(
         save_state(state_path, new_state)
         return
 
-    async def _send_all() -> bool:
-        all_ok = True
-        for binding in bindings:
-            alerter_name = binding.alerter.name
-            filtered = [
-                t
-                for t in transitions
-                if alerter_name in target_alerts.get(t.target_name, set())
-                and (t.current_status in binding.notify_on or t.previous_status in binding.notify_on)
-            ]
-            if not filtered:
-                continue
-            try:
-                await binding.alerter.notify(filtered)
-            except Exception:  # noqa: BLE001 - alerts must not change exit code
-                all_ok = False
-                _log.exception("alerter %s failed", binding.alerter.name)
-        return all_ok
+    all_ok = True
+    for binding in bindings:
+        alerter_name = binding.alerter.name
+        filtered = [
+            t
+            for t in transitions
+            if alerter_name in target_alerts.get(t.target_name, set())
+            and (t.current_status in binding.notify_on or t.previous_status in binding.notify_on)
+        ]
+        if not filtered:
+            continue
+        try:
+            await binding.alerter.notify(filtered)
+        except Exception:  # noqa: BLE001 - alerts must not change exit code
+            all_ok = False
+            _log.exception("alerter %s failed", binding.alerter.name)
 
-    delivery_ok = asyncio.run(_send_all())
-    if delivery_ok:
+    if all_ok:
         save_state(state_path, new_state)
     else:
         _log.warning("alerter delivery failed; not saving state so transitions will retry on the next run")
+
+
+def _dispatch_alerts(
+    reports: list[RunReport],
+    targets: list[TargetEntry],
+    alerts_cfg: AlertsConfig,
+    state_path: Path,
+) -> None:
+    """Sync wrapper used by ``verify``. See :func:`dispatch_alerts_async`.
+
+    Per-target opt-in: each ``TargetEntry.alerts`` lists which configured
+    alerter names should fire for that target. A transition only reaches an
+    alerter when the source target opted into that alerter's name. State is
+    still tracked for every target (it's cheap and lets the operator flip an
+    instance from silent to alerting later without spurious "first failure"
+    pings for sustained outages).
+
+    Delivery failures (Slack 5xx, transport errors) are caught so they cannot
+    change the run's exit code, but on failure the new state is *not* saved.
+    Next run will recompute the same transitions and retry. With multiple
+    alerters this is conservative (any failure suppresses the save and may
+    re-deliver to alerters that already succeeded); per-alerter dedupe is a
+    later-day problem.
+    """
+    asyncio.run(dispatch_alerts_async(reports, targets, alerts_cfg, state_path))
 
 
 def _state(ctx: typer.Context) -> GlobalState:
