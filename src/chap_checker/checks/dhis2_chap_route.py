@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from typing import ClassVar
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from chap_checker.checks.base import CheckResult, Status, register_check
 from chap_checker.client import Dhis2Client
@@ -80,7 +80,21 @@ class Dhis2ChapRouteCheck:
                 message="DHIS2 returned malformed JSON when listing routes.",
                 duration_ms=duration_ms,
             )
-        listing = Dhis2RouteList.model_validate(body)
+        # The response shape must be ``{"routes": [...]}`` with each
+        # entry shaped like Dhis2Route. A list at the top level, a
+        # bare string, or a routes entry of the wrong type would
+        # otherwise propagate a ValidationError out of the check loop;
+        # convert to a clean FAIL so the table row is readable and the
+        # exit code is correct.
+        try:
+            listing = Dhis2RouteList.model_validate(body)
+        except ValidationError as exc:
+            return CheckResult(
+                name=self.name,
+                status=Status.FAIL,
+                message=f"Unexpected shape from /api/{ROUTE_LIST_PATH}: {exc.error_count()} validation error(s).",
+                duration_ms=duration_ms,
+            )
         match = next((r for r in listing.routes if r.code == CHAP_ROUTE_CODE), None)
         if match is None:
             return CheckResult(

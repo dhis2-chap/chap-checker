@@ -205,3 +205,86 @@ def test_cli_token_env_flag_declared() -> None:
         flags.update(getattr(param, "opts", []))
     assert "--token" in flags
     assert "--token-env" in flags
+
+
+# ---------- Regression: ambient env vars must not trigger the mutex ----------
+
+
+def test_dhis2_password_in_env_does_not_block_token_env_flag(
+    monkeypatch: pytest.MonkeyPatch,
+    clean_env: None,
+) -> None:
+    """`--token-env FOO` with ambient `DHIS2_PASSWORD` must be accepted.
+
+    Regression for: env-backed Typer values were treated as explicit
+    flags, so any operator with `DHIS2_PASSWORD` exported in their
+    shell saw token auth fail with a spurious mutex error.
+    """
+    monkeypatch.setenv("DHIS2_PASSWORD", "ambient-pw")
+    monkeypatch.setenv("TOK_FROM_ENV", "the-token")
+    result = runner.invoke(
+        app,
+        ["verify", "--url", "https://nope.example.invalid", "--token-env", "TOK_FROM_ENV"],
+    )
+    # We don't care about the network outcome - just that the resolver
+    # didn't reject the invocation as a mutex error.
+    assert result.exit_code != 2 or "not both" not in (result.stdout + result.output).lower()
+
+
+def test_dhis2_token_in_env_does_not_block_password_env_flag(
+    monkeypatch: pytest.MonkeyPatch,
+    clean_env: None,
+) -> None:
+    """Symmetric: `--password-env FOO` + ambient `DHIS2_TOKEN` must work."""
+    monkeypatch.setenv("DHIS2_TOKEN", "ambient-token")
+    monkeypatch.setenv("PW_FROM_ENV", "the-pw")
+    result = runner.invoke(
+        app,
+        [
+            "verify",
+            "--url",
+            "https://nope.example.invalid",
+            "--username",
+            "u",
+            "--password-env",
+            "PW_FROM_ENV",
+        ],
+    )
+    assert result.exit_code != 2 or "not both" not in (result.stdout + result.output).lower()
+
+
+def test_both_env_vars_ambient_with_no_flags_errors_clearly(
+    monkeypatch: pytest.MonkeyPatch,
+    clean_env: None,
+) -> None:
+    """If only env vars are set and they collide, error with a helpful hint.
+
+    No CLI flags - both DHIS2_TOKEN and DHIS2_PASSWORD exported. We
+    can't infer intent, so error out instead of silently picking one.
+    """
+    monkeypatch.setenv("DHIS2_TOKEN", "t")
+    monkeypatch.setenv("DHIS2_PASSWORD", "p")
+    result = runner.invoke(app, ["verify", "--url", "https://nope.example.invalid"])
+    assert result.exit_code == 2
+    out = (result.stdout + result.output).lower()
+    assert "dhis2_token" in out and "dhis2_password" in out
+
+
+def test_explicit_username_forces_password_mode_even_with_dhis2_token_env(
+    monkeypatch: pytest.MonkeyPatch,
+    clean_env: None,
+) -> None:
+    """`--username u` is an explicit "I want basic auth" signal.
+
+    Even with `DHIS2_TOKEN` exported, the resolver must not flip to
+    token mode behind the user's back. We just need a non-mutex
+    error - the actual run will fail later at the network layer.
+    """
+    monkeypatch.setenv("DHIS2_TOKEN", "ambient-token")
+    monkeypatch.setenv("DHIS2_PASSWORD", "ambient-pw")
+    result = runner.invoke(app, ["verify", "--url", "https://nope.example.invalid", "--username", "u"])
+    out = (result.stdout + result.output).lower()
+    # Should NOT see the mutex or the both-env-vars error - --username
+    # selects password mode definitively.
+    assert "not both" not in out
+    assert "are both set in the environment" not in out

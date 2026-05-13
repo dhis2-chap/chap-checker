@@ -235,6 +235,34 @@ def test_target_not_opted_in_skips_dispatch(
     assert saved.states["prod::ping"].status is Status.FAIL
 
 
+def test_state_write_failure_does_not_raise(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A broken --state path must not crash verify.
+
+    Alert delivery already has this contract (alerter exception logged
+    but swallowed); state writes need the same so an unwritable path
+    or full disk doesn't change the exit code that the checks
+    themselves produced. Regression for the post-checks crash that
+    happened when `save_state` raised on a bad path.
+    """
+    fake = _FakeAlerter()
+    monkeypatch.setattr(
+        "chap_checker.cli._build_alerters",
+        lambda _cfg: [_binding(fake, Status.FAIL, Status.ERROR, Status.WARN)],
+    )
+    # Path inside a non-existent, non-creatable directory: parent is a
+    # regular file, so `.parent.mkdir(parents=True)` raises NotADirectoryError.
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a dir", encoding="utf-8")
+    state_path = blocker / "state.json"
+
+    # Should not raise: failure is logged and the call completes.
+    _dispatch_alerts([_failing_report()], _targets(), _alerts_cfg(), state_path)
+    assert len(fake.calls) == 1
+
+
 def test_slack_config_parses_notify_on_strings() -> None:
     cfg = SlackAlertConfig.model_validate(
         {
