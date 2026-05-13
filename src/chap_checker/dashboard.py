@@ -2,8 +2,9 @@
 
 One tile per configured instance, auto-refreshing on an interval. Shows the
 rolled-up status, the cumulative ping success ratio since the dashboard
-started, and the latest non-OK message. Press ``a`` to flip alert dispatch on
-or off without editing the TOML, ``r`` to refresh immediately, ``q`` to quit.
+started, and the latest non-OK message. Whether alerts dispatch is decided at
+launch time via ``--alerts`` / ``--no-alerts``; the UI is read-only beyond
+the refresh / quit keys.
 """
 
 from __future__ import annotations
@@ -17,7 +18,6 @@ from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Grid
-from textual.reactive import reactive
 from textual.widgets import Footer, Header, Static
 
 from chap_checker.checks.base import Status
@@ -139,11 +139,8 @@ class DashboardApp(App[None]):
 
     BINDINGS = [
         Binding("q", "quit", "Quit"),
-        Binding("a", "toggle_alerts", "Toggle alerts"),
         Binding("r", "refresh", "Refresh"),
     ]
-
-    alerts_enabled: reactive[bool] = reactive(False)
 
     def __init__(
         self,
@@ -152,6 +149,7 @@ class DashboardApp(App[None]):
         config_path: Path | None,
         state_path: Path | None,
         interval_s: float = 30.0,
+        alerts_enabled: bool = False,
     ) -> None:
         super().__init__()
         self.targets = targets
@@ -159,6 +157,7 @@ class DashboardApp(App[None]):
         self.config_path = config_path
         self.state_path = state_path
         self.interval_s = interval_s
+        self.alerts_enabled = alerts_enabled
         self.tiles: dict[str, InstanceTile] = {}
         self._refreshing = False
 
@@ -178,20 +177,11 @@ class DashboardApp(App[None]):
 
     def on_mount(self) -> None:
         self.title = "chap-checker"
-        self._refresh_subtitle()
-        self.set_interval(self.interval_s, self.action_refresh)
-        self.call_after_refresh(self.action_refresh)
-
-    def _refresh_subtitle(self) -> None:
         n = len(self.targets)
         alerts = "ON" if self.alerts_enabled else "OFF"
         self.sub_title = f"{n} instance(s)  ·  alerts {alerts}  ·  refresh every {int(self.interval_s)}s"
-
-    def watch_alerts_enabled(self, _old: bool, _new: bool) -> None:
-        self._refresh_subtitle()
-
-    def action_toggle_alerts(self) -> None:
-        self.alerts_enabled = not self.alerts_enabled
+        self.set_interval(self.interval_s, self.action_refresh)
+        self.call_after_refresh(self.action_refresh)
 
     async def action_refresh(self) -> None:
         """Run checks against all targets, update tiles, optionally dispatch alerts."""
@@ -219,6 +209,7 @@ def run(
     config_path: Path | None,
     state_path: Path | None,
     interval_s: float = 30.0,
+    alerts_enabled: bool = False,
 ) -> None:
     """Launch the TUI dashboard."""
     DashboardApp(
@@ -227,6 +218,7 @@ def run(
         config_path=config_path,
         state_path=state_path,
         interval_s=interval_s,
+        alerts_enabled=alerts_enabled,
     ).run()
 
 

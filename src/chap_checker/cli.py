@@ -218,6 +218,14 @@ def dashboard_command(
         envvar="CHAP_CHECKER_CONFIG",
     ),
     interval: float = typer.Option(30.0, "--interval", help="Refresh interval in seconds.", min=2.0),
+    alerts_enabled: bool = typer.Option(
+        False,
+        "--alerts/--no-alerts",
+        help=(
+            "Dispatch Slack/etc. alerts from refresh cycles. Off by default - the TUI is "
+            "usually all you need; flip this on if you want this dashboard to also page."
+        ),
+    ),
     state: Path | None = typer.Option(
         None,
         "--state",
@@ -228,8 +236,8 @@ def dashboard_command(
     """Launch the Textual TUI dashboard.
 
     Adaptive grid of tiles (1-4 columns depending on instance count).
-    Press ``a`` to toggle Slack/alert dispatch on or off without editing
-    the TOML, ``r`` to refresh immediately, ``q`` to quit.
+    Press ``r`` to refresh immediately, ``q`` to quit. Whether alerts
+    fire is decided at launch via ``--alerts`` / ``--no-alerts``.
     """
     config_path = config if config is not None else default_config_path()
     if not config_path.exists():
@@ -252,6 +260,7 @@ def dashboard_command(
         config_path=config_path,
         state_path=state_path,
         interval_s=interval,
+        alerts_enabled=alerts_enabled,
     )
 
 

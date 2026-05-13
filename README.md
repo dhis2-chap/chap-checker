@@ -282,13 +282,18 @@ adapts to the instance count (1 column for 1 instance, up to 4 for 10+),
 and each tile shows the rolled-up status, the cumulative `dhis2_ping`
 success ratio since the dashboard launched, and the first non-OK message.
 
-Keys: `a` toggles Slack/alert dispatch globally (default OFF -- the
-"TUI is enough, don't page anyone" case), `r` refreshes immediately,
-`q` quits. Auto-refresh interval defaults to 30s; override with
-`--interval <seconds>`.
+Keys: `r` refreshes immediately, `q` quits. Auto-refresh interval
+defaults to 30s; override with `--interval <seconds>`.
 
-When alert dispatch is toggled on, the same per-instance `alerts = [...]`
-opt-in from the TOML applies; instances without an opt-in stay silent.
+Whether alerts fire is decided at launch:
+
+```bash
+chap-checker dashboard               # alerts off (the "TUI is enough" default)
+chap-checker dashboard --alerts      # also dispatch Slack/etc. on transitions
+```
+
+When `--alerts` is set, the same per-instance `alerts = [...]` opt-in
+from the TOML applies; instances without an opt-in stay silent.
 
 ## Development
 
