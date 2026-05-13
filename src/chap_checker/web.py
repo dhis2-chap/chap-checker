@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import deque
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -40,6 +41,11 @@ from chap_checker.logging import get_logger
 from chap_checker.runner import RunReport, TargetEntry, run_targets
 
 _log = get_logger("web")
+
+# Number of past ping results kept per tile for the dashboard's history
+# strip. 30 matches the artifact's UptimeBars width — the bars shrink
+# proportionally if fewer points are present.
+_HISTORY_LEN = 30
 
 
 _STATUS_SYMBOL = {
@@ -60,6 +66,13 @@ class CheckRowModel(BaseModel):
     message: str
 
 
+class HistoryPointModel(BaseModel):
+    """One past ping result. Used for the uptime/latency sparkline."""
+
+    ok: bool
+    latency_ms: int | None = None
+
+
 class TileModel(BaseModel):
     """One tile's data sent to the browser."""
 
@@ -75,6 +88,7 @@ class TileModel(BaseModel):
     uptime_pct: float | None = None
     last_refresh: datetime | None = None
     checks: list[CheckRowModel] = []
+    history: list[HistoryPointModel] = []
 
 
 class DashboardState(BaseModel):
@@ -95,6 +109,12 @@ class _TileTracker:
     ping_total: int = 0
     last_refresh: datetime | None = None
     last_report: RunReport | None = None
+    # Rolling per-refresh ping history (most recent on the right). Each
+    # entry is (ok, latency_ms). Kept in-memory only, like the cumulative
+    # counters above - the dashboard is a live view, not a metrics store.
+    history: deque[tuple[bool, int | None]] = field(
+        default_factory=lambda: deque(maxlen=_HISTORY_LEN),
+    )
 
 
 @dataclass
@@ -134,8 +154,10 @@ class DashboardServer:
             ping = next((c for c in r.results if c.name == "dhis2_ping"), None)
             if ping is not None and ping.status is not Status.SKIPPED:
                 t.ping_total += 1
-                if ping.status is Status.OK:
+                ok = ping.status is Status.OK
+                if ok:
                     t.ping_ok += 1
+                t.history.append((ok, int(ping.duration_ms) if ok else None))
         self.last_refresh = now
 
         if self.alerts_enabled and self.cfg.alerts is not None and self.state_path is not None:
@@ -167,6 +189,7 @@ class DashboardServer:
                 total_count=0,
                 ping_ok=t.ping_ok,
                 ping_total=t.ping_total,
+                history=[HistoryPointModel(ok=o, latency_ms=lat) for o, lat in t.history],
             )
         statuses = [r.status for r in report.results]
         worst = _worst(statuses)
@@ -195,6 +218,7 @@ class DashboardServer:
                 )
                 for r in report.results
             ],
+            history=[HistoryPointModel(ok=o, latency_ms=lat) for o, lat in t.history],
         )
 
 
@@ -283,6 +307,7 @@ __all__: list[str] = [
     "CheckRowModel",
     "DashboardServer",
     "DashboardState",
+    "HistoryPointModel",
     "TileModel",
     "make_app",
     "run",

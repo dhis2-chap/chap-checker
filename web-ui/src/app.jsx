@@ -29,6 +29,14 @@ const THEMES = {
     '--green':'#9eff9e','--green-2':'#7fff7f','--green-dim':'#4a8a4a','--green-vdim':'#2a4a2a',
     '--ink-dim':'#a0a0a0','--ink-vdim':'#606060',
   },
+  // Borrowed from musickit's default dark theme — Tokyo Night style:
+  // deep navy ground with a soft cobalt accent. Rebinds the artifact's
+  // `--green*` slots to blues so the rest of the CSS stays untouched.
+  tokyo: {
+    '--bg':'#11131a','--bg-elev':'#161922',
+    '--green':'#7aa2f7','--green-2':'#5d87ee','--green-dim':'#384a78','--green-vdim':'#1c2740',
+    '--ink-dim':'#7a85a8','--ink-vdim':'#3a4567',
+  },
 };
 
 const DENSITY = {
@@ -222,7 +230,16 @@ function App() {
     const base = (live && live.instances) ? live.instances : INSTANCES_BASE;
     return base.map(i => {
       const downNow = t.demoDown && i.id === 'play-41';
-      const history = buildHistory(i, downNow);
+      // CK-WIRING: prefer real per-refresh ping history coming from the
+      // server. The artifact ships buildHistory() as a deterministic
+      // mulberry32 generator with a fake 3% hiccup chance per sample,
+      // which is fine for design previews but renders bogus red bars
+      // for instances that have actually been up. Fall back to the
+      // generator only when the server hasn't yet accumulated history
+      // (first /api/state response).
+      const history = (Array.isArray(i.history) && i.history.length > 0)
+        ? i.history
+        : buildHistory(i, downNow);
       if (downNow) {
         return {
           ...i,
@@ -260,6 +277,7 @@ function App() {
     { id:'theme-phosphor', label:'Theme: phosphor green', run:() => setTweak('theme','phosphor') },
     { id:'theme-amber',    label:'Theme: amber', run:() => setTweak('theme','amber') },
     { id:'theme-high',     label:'Theme: high contrast', run:() => setTweak('theme','high') },
+    { id:'theme-tokyo',    label:'Theme: tokyo night (blue)', run:() => setTweak('theme','tokyo') },
     // CK-WIRING: the artifact ships a demoDown toggle that swaps PLAY-41
     // into a FAIL state for design preview. With live data that's
     // misleading (real failures show real), so it's omitted from the
@@ -401,6 +419,7 @@ function App() {
                        {value:'phosphor', label:'Phosphor green'},
                        {value:'amber',    label:'Amber'},
                        {value:'high',     label:'High contrast'},
+                       {value:'tokyo',    label:'Tokyo night'},
                      ]}
                      onChange={v => setTweak('theme', v)} />
 

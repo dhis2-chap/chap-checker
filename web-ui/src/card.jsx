@@ -410,11 +410,20 @@ function UptimeBars({ inst, density }) {
           let color = okColor;
           if (!s.ok) color = downColor;
           else if (s.latency != null && s.latency > minLat + (maxLat - minLat) * 0.8) color = warnColor;
+          // CK-WIRING: per-bar native tooltip. Order in `h` is oldest →
+          // newest; `(h.length - i)` is "samples back from now". The
+          // server keeps history points without timestamps so we use a
+          // relative position rather than a clock time.
+          const slot = h.length - i;
+          const title = s.ok
+            ? `#${slot} · OK${s.latency != null ? ' · ' + s.latency + 'ms' : ''}`
+            : `#${slot} · FAIL (no response)`;
           return (
-            <div key={i} style={{
+            <div key={i} title={title} style={{
               flex: 1, background: color,
               opacity: s.ok ? 0.9 : 1,
               boxShadow: s.ok ? 'none' : '0 0 8px rgba(255,90,90,0.6)',
+              cursor: 'help',
             }} />
           );
         })}

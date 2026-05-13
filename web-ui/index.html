@@ -86,18 +86,13 @@
   <!-- Designer artifact. Dependency order: tweaks-panel -> card -> palette -> app.
        Files in src/ get replaced wholesale on every Claude Designer
        drop; app.jsx contains one well-commented edit to consume live
-       data via window.CK_useLiveState (see the EDITMODE-BEGIN block). -->
+       data via window.CK_useLiveState (see the EDITMODE-BEGIN block).
+       app.jsx mounts itself at the bottom (ReactDOM.createRoot(...).
+       render(<App />)) - do NOT add another inline mount here, or two
+       overlapping Roots will render two palettes on Ctrl+K. -->
   <script type="text/babel" src="src/tweaks-panel.jsx"></script>
   <script type="text/babel" src="src/card.jsx"></script>
   <script type="text/babel" src="src/palette.jsx"></script>
   <script type="text/babel" src="src/app.jsx"></script>
-
-  <!-- Mount the App component last. Babel-standalone has finished
-       transpiling all the type="text/babel" scripts above by the time
-       this inline script runs. -->
-  <script type="text/babel">
-    const root = ReactDOM.createRoot(document.getElementById("root"));
-    root.render(<App />);
-  </script>
 </body>
 </html>

@@ -61,6 +61,14 @@
       down: status === "down",
     }));
     const latency = typeof tile.latency_ms === "number" ? tile.latency_ms : 0;
+    // Real per-refresh ping history from the server. Each entry is the
+    // outcome of one /api/ping call; the artifact's UptimeBars reads
+    // {ok, latency} and the LatencySpark reads .latency, so we map to
+    // that shape and pass it straight through.
+    const history = (tile.history || []).map((p) => ({
+      ok: !!p.ok,
+      latency: typeof p.latency_ms === "number" ? p.latency_ms : null,
+    }));
     return {
       id: tile.name,
       name: tile.name.toUpperCase(),
@@ -79,7 +87,10 @@
       updated: "—", // app.jsx recomputes this from lastRefreshAt
       uptime: typeof tile.uptime_pct === "number" ? tile.uptime_pct : 100,
       checks,
-      // Sparkline RNG inputs - see hashSeed() above for why these matter.
+      history,
+      // Sparkline RNG inputs - kept so the artifact's buildHistory() is
+      // still safe to call as a fallback when the server hasn't yet
+      // accumulated any history entries (first /api/state response).
       seed: hashSeed(tile.name),
       baseLat: latency || 150,
     };

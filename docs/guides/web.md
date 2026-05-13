@@ -47,7 +47,9 @@ same muscle memory works in both surfaces.
 
 The command palette exposes two runtime tweaks for the look:
 
-- **Themes**: `phosphor green` (default), `amber`, `high contrast`.
+- **Themes**: `phosphor green` (default), `amber`, `high contrast`,
+  `tokyo night` (deep navy with a cobalt accent, borrowed from
+  [`musickit`](https://github.com/Anthropic-Solutions-AI-Engineers/musickit)).
 - **Density**: `default`, `comfortable`, `TV`, `wall (big numbers)`.
 
 Defined as CSS custom-property bundles in
