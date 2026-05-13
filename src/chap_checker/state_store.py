@@ -10,18 +10,22 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from chap_checker.alerts.base import Transition, TransitionKind
 from chap_checker.checks.base import Status
+from chap_checker.logging import get_logger
 from chap_checker.runner import RunReport
 
 DEFAULT_STATE_FILENAME = "chap-checker.state.json"
+
+_log = get_logger("state_store")
 
 
 class CheckState(BaseModel):
@@ -44,21 +48,51 @@ def default_state_path() -> Path:
 
 
 def load_state(path: Path) -> StateFile:
-    """Load state from ``path``, or return an empty :class:`StateFile` if missing."""
+    """Load state from ``path``, or return an empty :class:`StateFile`.
+
+    A corrupt or schema-incompatible state file logs a warning and is treated
+    as empty - alert bookkeeping must not fail a cron run that is otherwise
+    fine. The file is left in place for human inspection; delete it manually
+    once you've checked.
+    """
     if not path.exists():
         return StateFile()
-    with path.open("r", encoding="utf-8") as f:
-        data = json.load(f)
-    return StateFile.model_validate(data)
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        return StateFile.model_validate(data)
+    except (json.JSONDecodeError, ValidationError, OSError) as exc:
+        _log.warning(
+            "state file %s is unreadable (%s); treating prior state as empty. "
+            "Delete or move the file aside if this persists.",
+            path,
+            exc,
+        )
+        return StateFile()
 
 
 def save_state(path: Path, state: StateFile) -> None:
-    """Atomically write ``state`` to ``path`` via tmp-file + ``os.replace``."""
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    with tmp.open("w", encoding="utf-8") as f:
-        json.dump(state.model_dump(mode="json"), f, indent=2, sort_keys=True)
-        f.write("\n")
-    os.replace(tmp, path)
+    """Atomically write ``state`` to ``path``.
+
+    Uses a unique tmp file via :func:`tempfile.mkstemp` in the same directory
+    so two concurrent ``chap-checker`` runs (overlapping cron tick + a manual
+    invocation, say) don't clobber each other's tmp file or race on
+    ``os.replace``.
+    """
+    fd, tmp_str = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=str(path.parent))
+    tmp = Path(tmp_str)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(state.model_dump(mode="json"), f, indent=2, sort_keys=True)
+            f.write("\n")
+        os.replace(tmp, path)
+    except Exception:
+        # Best-effort cleanup; surface the original error.
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
 
 def _state_key(target_name: str, check_name: str) -> str:

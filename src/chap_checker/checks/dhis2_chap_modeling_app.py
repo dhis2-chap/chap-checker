@@ -22,7 +22,9 @@ class Dhis2App(BaseModel):
     key: str | None = None
     name: str | None = None
     version: str | None = None
-    app_hub_id: str | None = None
+    # DHIS2 returns snake_case `app_hub_id` on some versions and camelCase
+    # `appHubId` on others. Accept both via the alias + populate_by_name.
+    app_hub_id: str | None = Field(default=None, alias="appHubId")
     app_type: str | None = Field(default=None, alias="appType")
     launch_url: str | None = Field(default=None, alias="launchUrl")
 

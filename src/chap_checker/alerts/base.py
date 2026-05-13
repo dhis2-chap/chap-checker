@@ -33,16 +33,22 @@ class Transition(BaseModel):
 
 @runtime_checkable
 class Alerter(Protocol):
-    """Protocol all alerters implement."""
+    """Protocol all alerters implement.
+
+    Implementations *may* raise on delivery failure - the dispatcher
+    (:func:`chap_checker.cli._dispatch_alerts`) catches the exception, logs
+    it, and skips the state-file save so the transition is retried on the
+    next run. Alert delivery failures never change the run's exit code
+    regardless of whether the alerter raises or swallows.
+    """
 
     name: ClassVar[str]
 
     async def notify(self, transitions: list[Transition]) -> None:
         """Send the given transitions out-of-band.
 
-        Implementations MUST NOT raise on delivery failure; log to stderr and
-        return. A broken alert pipeline must never change the cron run's exit
-        code semantics.
+        May raise on transport / non-2xx responses; the dispatcher decides
+        whether to surface the failure.
         """
         ...
 
