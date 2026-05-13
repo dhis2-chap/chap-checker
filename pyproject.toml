@@ -1,17 +1,19 @@
 [project]
 name = "chap-checker"
 version = "0.1.0"
-description = "CLI to run a suite of checks against a DHIS2 server with chap-core / chap route."
+description = "Health-check CLI for DHIS2 instances integrated with chap-core; cron-friendly with Slack alerts on status transitions."
 readme = "README.md"
 authors = [{ name = "Morten Hansen", email = "morten@dhis2.org" }]
 license = { text = "AGPL-3.0-or-later" }
 requires-python = ">=3.13"
-keywords = ["dhis2", "chap", "chap-core", "healthcheck", "cli"]
+keywords = ["dhis2", "chap", "chap-core", "healthcheck", "monitoring", "slack", "cli"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
+  "Intended Audience :: System Administrators",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.13",
+  "Topic :: System :: Monitoring",
   "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
@@ -20,6 +22,11 @@ dependencies = [
   "pydantic>=2.9.0",
   "rich>=13.9.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/dhis2-chap/chap-checker"
+Repository = "https://github.com/dhis2-chap/chap-checker"
+Issues = "https://github.com/dhis2-chap/chap-checker/issues"
 
 [project.scripts]
 chap-checker = "chap_checker.cli:main"

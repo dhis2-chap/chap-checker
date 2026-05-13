@@ -1,7 +1,25 @@
 # chap-checker
 
-CLI that runs a suite of checks against a DHIS2 server with `chap-core` and the
-`chap` route installed.
+A small command-line health-check and alerting tool for DHIS2 instances that
+integrate with `chap-core` via a DHIS2 route.
+
+Operating a DHIS2 deployment with `chap-core` means several moving pieces all
+have to stay healthy at once:
+
+- the DHIS2 server itself (reachable, accepting credentials),
+- the `chap` route on DHIS2 that proxies traffic to `chap-core`,
+- the `chap-core` service behind that route,
+- the modeling app on the DHIS2 frontend.
+
+`chap-checker` runs one HTTP probe per piece against each DHIS2 instance it's
+pointed at, rolls the results up into a non-zero exit code on any failure, and
+optionally posts a Slack message when something flips between OK and broken
+(transition-only - no Slack spam during a sustained outage, one recovery
+alert when it comes back).
+
+It's designed to be run by cron / a Kubernetes `CronJob` / any scheduler that
+cares about exit codes and a quiet stdout when everything is fine. You can
+also run it interactively for ad-hoc one-off checks.
 
 ## Built-in checks
 
