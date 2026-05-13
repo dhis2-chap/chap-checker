@@ -32,12 +32,18 @@ Run every registered check against one or more DHIS2 instances.
 
 Source of targets is decided as follows:
 
-1. If `--url` is given (together with `--username`), chap-checker
-   runs in *ad-hoc* mode against that single URL and ignores any
-   TOML config. The password is resolved in this order: explicit
-   `--password`; `--password-env NAME` (recommended); the
-   `DHIS2_PASSWORD` environment variable; an interactive prompt
-   when stdin is a TTY.
+1. If `--url` is given, chap-checker runs in *ad-hoc* mode against
+   that single URL and ignores any TOML config. Auth is one of:
+
+   - **Password (Basic)** - requires `--username` plus a password.
+     Password resolves from `--password`, `--password-env NAME`,
+     the `DHIS2_PASSWORD` env var, or a hidden TTY prompt.
+   - **Token (DHIS2 PAT)** - `--token`, `--token-env NAME`, or
+     `DHIS2_TOKEN` env. Sent as `Authorization: ApiToken &lt;value&gt;`.
+     `--username` is optional in token mode.
+
+   Token and password flags are mutually exclusive; passing both
+   errors out.
 2. Otherwise the TOML file is loaded from `--config` if given, or
    from `./chap-checker.toml` if present. Every ``
    block runs unless `--instance` narrows the run to one.
@@ -60,6 +66,8 @@ $ chap-checker verify [OPTIONS]
 * `-u, --username TEXT`: DHIS2 username (ad-hoc mode).  [env var: DHIS2_USERNAME]
 * `-p, --password TEXT`: DHIS2 password (ad-hoc mode). Prefer --password-env or the interactive prompt - inline passwords end up in shell history and `ps` output.  [env var: DHIS2_PASSWORD]
 * `--password-env TEXT`: Name of the env var holding the DHIS2 password (ad-hoc mode). Recommended over --password.
+* `--token TEXT`: DHIS2 Personal Access Token (ad-hoc mode). Mutually exclusive with --password / --password-env. Prefer --token-env to keep the value out of shell history.  [env var: DHIS2_TOKEN]
+* `--token-env TEXT`: Name of the env var holding the DHIS2 PAT (ad-hoc mode). Recommended over --token.
 * `--timeout FLOAT`: HTTP timeout per request (seconds, ad-hoc mode).  [default: 10.0]
 * `--insecure`: Skip TLS certificate verification (ad-hoc mode).
 * `--check, --checks TEXT`: Restrict to these check names (transitive `requires` are pulled in). Repeat the flag for multiple. Mirrors the per-instance `checks = [...]` config field.

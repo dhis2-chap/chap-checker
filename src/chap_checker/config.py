@@ -23,23 +23,51 @@ _log = get_logger("config")
 
 
 class InstanceConfig(BaseModel):
-    """One DHIS2 instance to check."""
+    """One DHIS2 instance to check.
+
+    Two auth modes are supported:
+
+    - ``username`` + (``password`` or ``password_env``) - HTTP Basic.
+    - (``token`` or ``token_env``) - DHIS2 Personal Access Token,
+      sent as ``Authorization: ApiToken <value>``.
+
+    Exactly one mode must be set per instance. ``username`` may also
+    be supplied alongside a token for readability, but it isn't sent
+    on the wire in token mode.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     url: HttpUrl
-    username: str
+    username: str | None = None
     password: str | None = None
     password_env: str | None = None
+    token: str | None = None
+    token_env: str | None = None
     timeout_s: float = Field(default=10.0, gt=0)
     verify_tls: bool = True
     checks: list[str] | None = Field(default=None, min_length=1)
     alerts: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _exactly_one_password_source(self) -> "InstanceConfig":
-        if (self.password is None) == (self.password_env is None):
-            raise ValueError("set exactly one of 'password' or 'password_env'")
+    def _exactly_one_auth_mode(self) -> "InstanceConfig":
+        has_password = self.password is not None or self.password_env is not None
+        has_token = self.token is not None or self.token_env is not None
+        if has_password and has_token:
+            raise ValueError(
+                "set either a password (password / password_env) or a token (token / token_env), not both.",
+            )
+        if not has_password and not has_token:
+            raise ValueError(
+                "set exactly one of 'password', 'password_env', 'token', or 'token_env'.",
+            )
+        if has_password:
+            if self.password is not None and self.password_env is not None:
+                raise ValueError("set exactly one of 'password' or 'password_env'")
+            if self.username is None:
+                raise ValueError("password / password_env requires 'username'.")
+        elif self.token is not None and self.token_env is not None:
+            raise ValueError("set exactly one of 'token' or 'token_env'")
         return self
 
     @model_validator(mode="after")
@@ -66,8 +94,25 @@ class InstanceConfig(BaseModel):
             raise RuntimeError(f"Environment variable '{self.password_env}' is not set.")
         return value
 
+    def resolve_token(self) -> str:
+        """Return the PAT, reading from env if ``token_env`` is set."""
+        if self.token is not None:
+            return self.token
+        assert self.token_env is not None  # guarded by validator
+        value = os.environ.get(self.token_env)
+        if value is None:
+            raise RuntimeError(f"Environment variable '{self.token_env}' is not set.")
+        return value
+
     def to_target(self) -> Dhis2Target:
         """Build a runtime :class:`Dhis2Target` from this entry."""
+        if self.token is not None or self.token_env is not None:
+            return Dhis2Target(
+                base_url=self.url,
+                token=self.resolve_token(),
+                timeout_s=self.timeout_s,
+                verify_tls=self.verify_tls,
+            )
         return Dhis2Target(
             base_url=self.url,
             username=self.username,
@@ -180,7 +225,7 @@ def load_config(path: Path) -> CheckerConfig:
 
 
 def _has_inline_secret(cfg: CheckerConfig) -> bool:
-    if any(i.password is not None for i in cfg.instances.values()):
+    if any(i.password is not None or i.token is not None for i in cfg.instances.values()):
         return True
     if cfg.alerts is not None and cfg.alerts.slack is not None and cfg.alerts.slack.webhook_url is not None:
         return True
