@@ -41,12 +41,25 @@ def _render_json(report: VerifyReport) -> None:
 
 def _render_tables(reports: list[RunReport]) -> None:
     console = Console()
+    # Pre-scan all reports so each per-target table uses the same column
+    # widths. Without this, Rich sizes each table's columns to its own
+    # contents and the verify output reads as a ladder of mismatched
+    # widths whenever one instance has wider check names than another.
+    check_w = max(
+        (len(r.name) for report in reports for r in report.results),
+        default=len("Check"),
+    )
+    status_w = max(len(s.value) for s in Status)
+    duration_w = max(
+        (len(f"{r.duration_ms:.0f} ms") for report in reports for r in report.results),
+        default=len("Duration"),
+    )
     for report in reports:
         title = f"chap-checker - {report.target_name} - {report.target_url}"
         table = Table(title=title)
-        table.add_column("Check", style="cyan", no_wrap=True)
-        table.add_column("Status", no_wrap=True)
-        table.add_column("Duration", justify="right", style="dim")
+        table.add_column("Check", style="cyan", no_wrap=True, min_width=check_w)
+        table.add_column("Status", no_wrap=True, min_width=status_w)
+        table.add_column("Duration", justify="right", style="dim", min_width=duration_w)
         table.add_column("Message", overflow="fold")
         for r in report.results:
             table.add_row(
