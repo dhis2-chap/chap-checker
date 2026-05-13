@@ -202,10 +202,28 @@ class InstanceTile(Container):
     DEFAULT_CSS = """
     InstanceTile {
         background: #161616;
-        border-left: thick #7DD345;
+        border-left: thick #555;
         padding: 1 2;
         height: 100%;
         layout: vertical;
+    }
+    InstanceTile.tile-status-ok {
+        border-left: thick #7DD345;
+    }
+    InstanceTile.tile-status-warn {
+        border-left: thick #d4a017;
+        background: #1a1810;
+    }
+    InstanceTile.tile-status-fail {
+        border-left: thick #d04040;
+        background: #1d1212;
+    }
+    InstanceTile.tile-status-error {
+        border-left: thick #c050c0;
+        background: #1d1218;
+    }
+    InstanceTile.tile-status-skipped {
+        border-left: thick #555;
     }
     InstanceTile .row {
         height: 1;
@@ -278,7 +296,6 @@ class InstanceTile(Container):
         height: 3;
         dock: bottom;
         padding-top: 1;
-        background: #161616;
         align: center top;
     }
     InstanceTile .stat-cell {
@@ -353,9 +370,12 @@ class InstanceTile(Container):
         v = _extract_dhis2_version(report.results)
         self.query_one("#version", Static).update(f"DHIS2  {v}" if v else "")
 
-        # Status pill
+        # Status pill + whole-tile status class (drives the accent border
+        # and a faint background tint so a FAIL tile is unmistakable).
         statuses = [r.status for r in report.results]
         worst = _worst(statuses)
+        for s in Status:
+            self.set_class(s is worst, f"tile-status-{s.value}")
         pill = self.query_one("#pill", Static)
         pill.update(worst.value.upper())
         pill.set_classes(f"pill {_PILL_CLASS_BY_STATUS[worst]}")
