@@ -115,10 +115,17 @@ def test_default_concurrency_is_five() -> None:
     assert cfg.concurrency == DEFAULT_CONCURRENCY == 5
 
 
-def test_verify_help_lists_concurrency() -> None:
-    result = CliRunner().invoke(app, ["verify", "--help"])
-    assert result.exit_code == 0
-    assert "--concurrency" in result.stdout
+def test_verify_declares_concurrency_flag() -> None:
+    """Inspect the Click command tree directly - more robust than asserting on
+    typer's Rich-rendered help output, which gets clipped in headless CI."""
+    from typer.main import get_command
+
+    click_app = get_command(app)
+    verify = click_app.commands["verify"]  # type: ignore[attr-defined]
+    flags: set[str] = set()
+    for param in verify.params:
+        flags.update(getattr(param, "opts", []))
+    assert "--concurrency" in flags
 
 
 def test_cli_rejects_zero_concurrency() -> None:
