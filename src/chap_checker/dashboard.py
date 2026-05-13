@@ -10,6 +10,7 @@ the refresh / quit keys.
 from __future__ import annotations
 
 import math
+from datetime import datetime
 from pathlib import Path
 from typing import ClassVar
 
@@ -20,7 +21,7 @@ from textual.binding import Binding
 from textual.containers import Container, Grid
 from textual.widgets import Footer, Header, Static
 
-from chap_checker.checks.base import Status
+from chap_checker.checks.base import CheckResult, Status
 from chap_checker.config import CheckerConfig
 from chap_checker.runner import RunReport, TargetEntry, run_targets
 
@@ -33,6 +34,33 @@ _BORDER_BY_STATUS = {
     Status.ERROR: "magenta",
     Status.SKIPPED: "grey42",
 }
+
+_SYMBOL_BY_STATUS = {
+    Status.OK: ("✓", "bright_green"),
+    Status.WARN: ("!", "yellow"),
+    Status.FAIL: ("✗", "red"),
+    Status.ERROR: ("!!", "magenta"),
+    Status.SKIPPED: ("·", "grey42"),
+}
+
+
+def _extract_versions(results: list[CheckResult]) -> list[tuple[str, str]]:
+    """Pull (label, version) pairs out of check details for tile display."""
+    out: list[tuple[str, str]] = []
+    by_name = {r.name: r for r in results}
+    if r := by_name.get("dhis2_system_info"):
+        v = r.details.get("version")
+        if v:
+            out.append(("DHIS2", str(v)))
+    if r := by_name.get("dhis2_chap_system_info"):
+        v = r.details.get("chap_core_version") or r.details.get("version")
+        if v:
+            out.append(("chap-core", str(v)))
+    if r := by_name.get("dhis2_chap_modeling_app"):
+        v = r.details.get("version")
+        if v:
+            out.append(("Modeling", str(v)))
+    return out
 
 
 def columns_for(n_instances: int) -> int:
@@ -72,6 +100,7 @@ class InstanceTile(Static):
         self.ping_ok = 0
         self.ping_total = 0
         self.last_report: RunReport | None = None
+        self.last_refresh: datetime | None = None
         self._render_initial()
 
     def _render_initial(self) -> None:
@@ -83,6 +112,7 @@ class InstanceTile(Static):
 
     def update_from(self, report: RunReport) -> None:
         self.last_report = report
+        self.last_refresh = datetime.now()
 
         ping = next((r for r in report.results if r.name == "dhis2_ping"), None)
         if ping is not None and ping.status is not Status.SKIPPED:
@@ -104,9 +134,10 @@ class InstanceTile(Static):
         if worst is Status.OK:
             body.append(f"OK   {ok_n}/{total_n} checks", style="bold bright_green")
         else:
-            body.append(f"{worst.value.upper():4s} {ok_n}/{total_n} checks", style=f"bold {border}")
+            body.append(f"{worst.value.upper():5s} {ok_n}/{total_n} checks", style=f"bold {border}")
         body.append("\n")
 
+        # Cumulative ping ratio since the dashboard launched
         if self.ping_total > 0:
             ratio = self.ping_ok / self.ping_total
             pct = math.floor(ratio * 100)
@@ -116,12 +147,32 @@ class InstanceTile(Static):
             )
             body.append("\n")
 
-        # First non-OK message for context (cap to one line)
-        non_ok = [r for r in report.results if r.status is not Status.OK]
-        if non_ok:
-            first = non_ok[0]
-            msg = first.message.split("\n", 1)[0][:80]
-            body.append(f"{first.name}: {msg}", style=_BORDER_BY_STATUS.get(first.status, "white"))
+        # Versions extracted from check details (DHIS2 / chap-core / modeling app)
+        versions = _extract_versions(report.results)
+        if versions:
+            body.append("\n")
+            label_w = max(len(label) for label, _ in versions)
+            for label, value in versions:
+                body.append(f"{label:<{label_w}}  ", style="dim")
+                body.append(f"{value}\n", style="white")
+
+        # Per-check breakdown. Non-OK rows show their message inline so the
+        # operator sees both what failed and why without leaving the tile.
+        if report.results:
+            body.append("\n")
+            name_w = max(len(r.name) for r in report.results)
+            for r in report.results:
+                symbol, style = _SYMBOL_BY_STATUS.get(r.status, ("?", "white"))
+                body.append(f" {symbol} ", style=style)
+                body.append(f"{r.name:<{name_w}}", style="dim" if r.status is Status.OK else style)
+                if r.status is not Status.OK and r.message:
+                    snippet = r.message.split("\n", 1)[0]
+                    body.append(f"  {snippet[:60]}", style=style)
+                body.append("\n")
+
+        # Footer: last refresh timestamp (always last line in the tile).
+        body.append("\n")
+        body.append(f"updated {self.last_refresh:%H:%M:%S}", style="dim italic")
 
         self.update(Panel(body, title=self.entry.name, border_style=border))
 
