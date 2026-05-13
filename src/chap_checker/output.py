@@ -41,28 +41,18 @@ def _render_json(report: VerifyReport) -> None:
 
 def _render_tables(reports: list[RunReport]) -> None:
     console = Console()
-    # Pre-scan all reports so each per-target table uses the same column
-    # widths. Without this, Rich sizes each table's columns to its own
-    # contents and the verify output reads as a ladder of mismatched
-    # widths whenever one instance has wider check names than another.
-    check_w = max(
-        (len(r.name) for report in reports for r in report.results),
-        default=len("Check"),
-    )
-    status_w = max(len(s.value) for s in Status)
-    duration_w = max(
-        (len(f"{r.duration_ms:.0f} ms") for report in reports for r in report.results),
-        default=len("Duration"),
-    )
+    # Check / Status / Duration are effectively fixed-size: check names
+    # are short identifiers (longest registered is `dhis2_chap_modeling_app`
+    # at 23 chars), Status is a five-value enum (longest `SKIPPED`), and
+    # Duration tops out around `9999 ms`. Locking them at sensible widths
+    # is simpler than pre-scanning the reports and produces identical
+    # column layout across all per-target tables.
     for report in reports:
         title = f"chap-checker - {report.target_name} - {report.target_url}"
-        # `expand=True` stretches every table to the full terminal width so
-        # rows look like one consistent slab, and per-column `min_width`
-        # keeps Check / Status / Duration aligned across targets.
         table = Table(title=title, expand=True)
-        table.add_column("Check", style="cyan", no_wrap=True, min_width=check_w)
-        table.add_column("Status", no_wrap=True, min_width=status_w)
-        table.add_column("Duration", justify="right", style="dim", min_width=duration_w)
+        table.add_column("Check", style="cyan", no_wrap=True, width=25)
+        table.add_column("Status", no_wrap=True, width=7)
+        table.add_column("Duration", justify="right", style="dim", width=8)
         table.add_column("Message", overflow="fold")
         for r in report.results:
             table.add_row(
