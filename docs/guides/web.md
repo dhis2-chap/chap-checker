@@ -5,10 +5,11 @@ chap-checker web
 # chap-checker web dashboard on http://127.0.0.1:8765
 ```
 
-Same tile layout, palette, and status semantics as the
-[Textual TUI](dashboard.md), rendered in a browser at `100vh` so it fills a
-TV screen with no scrolling. Designed for a kiosk display: pin a browser at
-the URL and walk away.
+A React + Babel-standalone SPA served by FastAPI at `100vh` so it fills a
+TV screen with no scrolling. Same status semantics as the
+[Textual TUI](dashboard.md), with a CRT / phosphor look (designed by
+Claude Designer) and a few theme + density tweaks. Designed for a kiosk
+display: pin a browser at the URL and walk away.
 
 ![chap-checker web dashboard against four DHIS2 play servers](../assets/web-dashboard.png)
 
@@ -27,12 +28,14 @@ The command palette currently exposes:
 
 - **Refresh now**
 - **Toggle fullscreen**
+- **Density:** default / comfortable / TV / wall
+- **Theme:** phosphor green / amber / high contrast
 - **Open GitHub repository**
 - **Open documentation**
 
 Type to filter the list. Click an item or hit `Enter` to run it. New
-commands are a small JS addition in
-[`src/chap_checker/web.py`](https://github.com/dhis2-chap/chap-checker/blob/main/src/chap_checker/web.py).
+commands are a small JSX addition in
+[`web-ui/src/app.jsx`](https://github.com/dhis2-chap/chap-checker/blob/main/web-ui/src/app.jsx).
 
 ![Command palette open in the web dashboard](../assets/web-dashboard-palette.png)
 
@@ -40,19 +43,50 @@ The [TUI dashboard](dashboard.md#command-palette) ships the same
 chap-checker commands via Textual's built-in palette (`Ctrl+P`), so the
 same muscle memory works in both surfaces.
 
+## Themes & density
+
+The command palette exposes two runtime tweaks for the look:
+
+- **Themes**: `phosphor green` (default), `amber`, `high contrast`,
+  `tokyo night` (deep navy with a cobalt accent, borrowed from
+  [`musickit`](https://github.com/Anthropic-Solutions-AI-Engineers/musickit)).
+- **Density**: `default`, `comfortable`, `TV`, `wall (big numbers)`.
+
+Defined as CSS custom-property bundles in
+[`web-ui/src/app.jsx`](https://github.com/dhis2-chap/chap-checker/blob/main/web-ui/src/app.jsx)
+(`THEMES`, `DENSITY`) and applied by `applyTheme()` on every tweak
+change. Selections live in React state for the session; a page reload
+resets to the defaults.
+
 ## Architecture
 
-A small FastAPI app:
+A small FastAPI app + a React/Babel-standalone SPA. No build step.
 
-- Runs the checks on a background `asyncio` task every `--interval` seconds.
-- `GET /` serves a single static HTML page (CSS + JS embedded; no build step).
+```
+web-ui/
+├── index.html      Loads vendor/React + vendor/Babel + src/*.jsx in order
+├── vendor/         React 18.3.1 UMD + Babel 7.29.0 standalone (committed)
+├── _state.js       Wiring layer (polls /api/state, maps to artifact shape)
+└── src/            Designer artifact (replaced wholesale on next zip drop)
+    ├── app.jsx
+    ├── card.jsx
+    ├── palette.jsx
+    └── tweaks-panel.jsx
+```
+
+- FastAPI runs the checks on a background `asyncio` task every
+  `--interval` seconds.
 - `GET /api/state` returns the current snapshot as JSON.
-- The page polls `/api/state` every few seconds and re-renders tiles
-  client-side; a separate 1-second timer ticks the wall clock and the
-  "updated 12s ago" relative timestamps.
+- `app.mount("/", StaticFiles(directory="web-ui", html=True))` serves
+  every other path; `index.html` is auto-returned for `/`.
+- `_state.js` exposes `window.CK_useLiveState(pollSec)` — a React hook
+  that polls `/api/state`, maps the server schema to the artifact's
+  `INSTANCES_BASE` shape, and returns the latest snapshot. `app.jsx`
+  consumes it via a single well-commented block (look for
+  `// CK-WIRING:` in the source).
 
-The browser does *not* drive the actual probes — they happen on the server
-on its own schedule. The browser is just a view.
+The browser does *not* drive the actual probes — they happen on the
+server on its own schedule. The browser is just a view.
 
 ## Flags
 

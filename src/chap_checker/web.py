@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import deque
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -29,7 +30,8 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from chap_checker.checks.base import Status
@@ -39,6 +41,11 @@ from chap_checker.logging import get_logger
 from chap_checker.runner import RunReport, TargetEntry, run_targets
 
 _log = get_logger("web")
+
+# Number of past ping results kept per tile for the dashboard's history
+# strip. 30 matches the artifact's UptimeBars width — the bars shrink
+# proportionally if fewer points are present.
+_HISTORY_LEN = 30
 
 
 _STATUS_SYMBOL = {
@@ -59,6 +66,21 @@ class CheckRowModel(BaseModel):
     message: str
 
 
+class HistoryPointModel(BaseModel):
+    """One past refresh outcome, used for the uptime sparkline.
+
+    ``status`` is the worst check status across the refresh - OK if
+    everything passed, WARN if any non-fatal check flagged something,
+    FAIL/ERROR if any check failed. ``latency_ms`` is the average
+    duration of the non-skipped checks in that refresh, kept around
+    so the bar tooltip can still report a number even though the bar
+    color itself is no longer latency-driven.
+    """
+
+    status: Status
+    latency_ms: int | None = None
+
+
 class TileModel(BaseModel):
     """One tile's data sent to the browser."""
 
@@ -74,6 +96,7 @@ class TileModel(BaseModel):
     uptime_pct: float | None = None
     last_refresh: datetime | None = None
     checks: list[CheckRowModel] = []
+    history: list[HistoryPointModel] = []
 
 
 class DashboardState(BaseModel):
@@ -94,6 +117,14 @@ class _TileTracker:
     ping_total: int = 0
     last_refresh: datetime | None = None
     last_report: RunReport | None = None
+    # Rolling per-refresh history (most recent on the right). Each entry
+    # is (worst_status, avg_latency_ms) for one refresh cycle - the bar
+    # colour follows the overall check outcome, not ping alone. Kept
+    # in-memory only, like the cumulative counters above; the dashboard
+    # is a live view, not a metrics store.
+    history: deque[tuple[Status, int | None]] = field(
+        default_factory=lambda: deque(maxlen=_HISTORY_LEN),
+    )
 
 
 @dataclass
@@ -135,6 +166,16 @@ class DashboardServer:
                 t.ping_total += 1
                 if ping.status is Status.OK:
                     t.ping_ok += 1
+            # Sparkline history reflects the overall worst status of this
+            # refresh, not ping alone. Refreshes where every check is
+            # SKIPPED don't tell the operator anything new so they're
+            # dropped from the history strip.
+            run_statuses: list[Status] = [c.status for c in r.results if c.status is not Status.SKIPPED]
+            if run_statuses:
+                worst = _worst(run_statuses)
+                durations = [c.duration_ms for c in r.results if c.status is not Status.SKIPPED]
+                avg_latency = int(sum(durations) / len(durations)) if durations else None
+                t.history.append((worst, avg_latency))
         self.last_refresh = now
 
         if self.alerts_enabled and self.cfg.alerts is not None and self.state_path is not None:
@@ -166,6 +207,7 @@ class DashboardServer:
                 total_count=0,
                 ping_ok=t.ping_ok,
                 ping_total=t.ping_total,
+                history=[HistoryPointModel(status=s, latency_ms=lat) for s, lat in t.history],
             )
         statuses = [r.status for r in report.results]
         worst = _worst(statuses)
@@ -194,6 +236,7 @@ class DashboardServer:
                 )
                 for r in report.results
             ],
+            history=[HistoryPointModel(status=s, latency_ms=lat) for s, lat in t.history],
         )
 
 
@@ -214,16 +257,36 @@ def make_app(server: DashboardServer) -> FastAPI:
 
     app = FastAPI(title="chap-checker", lifespan=lifespan)
 
-    @app.get("/", response_class=HTMLResponse)
-    async def index() -> HTMLResponse:
-        return HTMLResponse(_INDEX_HTML)
-
     @app.get("/api/state")
     async def api_state() -> JSONResponse:
-        # Manual JSONResponse so we can sort_keys + a stable indent for debugging.
         return JSONResponse(server.snapshot().model_dump(mode="json"))
 
+    # The React SPA + Babel-standalone wiring lives in ``web-ui/`` next to
+    # the repo root. StaticFiles serves index.html on GET / and every
+    # vendor/src/* asset directly. Path resolved relative to this module
+    # so it works from an editable install or a built wheel.
+    web_ui = _web_ui_dir()
+
+    @app.get("/")
+    async def index() -> FileResponse:
+        return FileResponse(web_ui / "index.html")
+
+    app.mount("/", StaticFiles(directory=str(web_ui), html=False), name="web-ui")
+
     return app
+
+
+def _web_ui_dir() -> Path:
+    """Return the ``web-ui/`` directory, raising a friendly error if missing."""
+    # src/chap_checker/web.py -> ../../web-ui from the repo root.
+    here = Path(__file__).resolve()
+    candidate = here.parent.parent.parent / "web-ui"
+    if not (candidate / "index.html").exists():
+        raise FileNotFoundError(
+            f"web-ui/index.html not found at {candidate}. "
+            "The web dashboard expects the React assets to ship alongside the package."
+        )
+    return candidate
 
 
 def run(
@@ -262,553 +325,8 @@ __all__: list[str] = [
     "CheckRowModel",
     "DashboardServer",
     "DashboardState",
+    "HistoryPointModel",
     "TileModel",
     "make_app",
     "run",
 ]
-
-
-# ---------------------------------------------------------------------------
-# Static HTML page. Embedded as a string so there's no template / static-file
-# wiring to ship. Hand-written to match the TUI's palette and tile layout.
-# ---------------------------------------------------------------------------
-
-_INDEX_HTML = r"""<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>chap-checker</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    :root {
-      --bg: #0e0e0e;
-      --tile-bg: #161616;
-      --tile-bg-warn: #1a1810;
-      --tile-bg-fail: #1d1212;
-      --tile-bg-error: #1d1218;
-      --accent: #7DD345;
-      --text: #ddd;
-      --dim: #888;
-      --muted: #555;
-      --warn: #d4a017;
-      --fail: #d04040;
-      --error: #c050c0;
-      --skipped: #555;
-    }
-    * { box-sizing: border-box; }
-    html, body {
-      margin: 0;
-      padding: 0;
-      height: 100vh;
-      overflow: hidden;
-      background: var(--bg);
-      color: var(--text);
-      font-family: 'JetBrains Mono', 'Fira Code', Menlo, Consolas, monospace;
-      font-size: 14px;
-    }
-    body {
-      display: flex;
-      flex-direction: column;
-    }
-    header.topbar {
-      height: 28px;
-      flex: 0 0 28px;
-      padding: 0 12px;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      color: var(--dim);
-      font-size: 13px;
-    }
-    header.topbar .name { color: var(--accent); font-weight: 700; }
-    header.topbar .pipe { color: var(--muted); }
-    header.topbar .clock { margin-left: auto; }
-
-    #grid {
-      flex: 1 1 auto;
-      display: grid;
-      gap: 8px;
-      padding: 8px;
-      min-height: 0;
-    }
-
-    .tile {
-      background: var(--tile-bg);
-      border-left: 4px solid var(--muted);
-      padding: 10px 14px;
-      display: flex;
-      flex-direction: column;
-      min-height: 0;
-      overflow: hidden;
-    }
-    .tile.status-ok { border-left-color: var(--accent); }
-    .tile.status-warn { border-left-color: var(--warn); background: var(--tile-bg-warn); }
-    .tile.status-fail { border-left-color: var(--fail); background: var(--tile-bg-fail); }
-    .tile.status-error { border-left-color: var(--error); background: var(--tile-bg-error); }
-    .tile.status-skipped { border-left-color: var(--skipped); }
-
-    .tile-title {
-      display: flex;
-      align-items: baseline;
-      gap: 12px;
-    }
-    .tile-name {
-      color: var(--accent);
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      flex: 1 1 auto;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .tile-version {
-      color: var(--dim);
-      font-size: 13px;
-      white-space: nowrap;
-    }
-    .tile-url {
-      color: var(--dim);
-      font-size: 12px;
-      margin-bottom: 10px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .pillrow {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      margin-bottom: 6px;
-    }
-    .pill {
-      display: inline-block;
-      padding: 1px 8px;
-      font-weight: 700;
-      letter-spacing: 0.5px;
-    }
-    .pill-ok { background: #2da44e; color: #000; }
-    .pill-warn { background: var(--warn); color: #000; }
-    .pill-fail { background: var(--fail); color: #fff; }
-    .pill-error { background: var(--error); color: #fff; }
-    .pill-skipped { background: var(--skipped); color: #ccc; }
-    .summary { color: var(--text); font-weight: 700; }
-    .ping { color: var(--dim); font-size: 12px; }
-
-    .checks-header {
-      color: var(--muted);
-      font-weight: 700;
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      margin-top: 8px;
-      margin-bottom: 4px;
-    }
-    .checks {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-      overflow: hidden;
-    }
-    .check-row {
-      display: flex;
-      justify-content: space-between;
-      color: #bbb;
-      font-size: 13px;
-      overflow: hidden;
-    }
-    .check-name {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .check-symbol { font-weight: 700; }
-    .check-symbol-ok { color: var(--accent); }
-    .check-symbol-warn { color: var(--warn); }
-    .check-symbol-fail { color: var(--fail); }
-    .check-symbol-error { color: var(--error); }
-    .check-symbol-skipped { color: var(--skipped); }
-
-    .stats {
-      margin-top: auto;
-      padding-top: 10px;
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      text-align: center;
-    }
-    .stat-label { color: var(--muted); font-size: 11px; text-transform: lowercase; }
-    .stat-value { color: var(--text); font-weight: 700; font-size: 14px; }
-
-    footer.statusbar {
-      height: 22px;
-      flex: 0 0 22px;
-      padding: 0 12px;
-      color: var(--dim);
-      font-size: 12px;
-      display: flex;
-      align-items: center;
-      gap: 16px;
-    }
-    footer.statusbar .ok { color: var(--accent); }
-    footer.statusbar .stale { color: var(--warn); }
-    footer.statusbar .keys { margin-left: auto; color: var(--muted); }
-    footer.statusbar .keys b { color: var(--accent); font-weight: 700; }
-
-    /* Command palette overlay */
-    #palette-backdrop {
-      position: fixed;
-      inset: 0;
-      background: rgba(0, 0, 0, 0.55);
-      display: none;
-      align-items: flex-start;
-      justify-content: center;
-      padding-top: 12vh;
-      z-index: 100;
-    }
-    #palette-backdrop.open { display: flex; }
-    #palette {
-      background: #1a1a1a;
-      border: 1px solid #333;
-      width: min(560px, 90vw);
-      padding: 8px;
-      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.7);
-    }
-    #palette-input {
-      width: 100%;
-      background: #0e0e0e;
-      color: var(--text);
-      border: 1px solid #333;
-      padding: 10px 12px;
-      font-family: inherit;
-      font-size: 14px;
-      outline: none;
-      box-sizing: border-box;
-    }
-    #palette-input:focus { border-color: var(--accent); }
-    #palette-list {
-      list-style: none;
-      margin: 8px 0 0;
-      padding: 0;
-      max-height: 50vh;
-      overflow-y: auto;
-    }
-    .palette-item {
-      display: flex;
-      align-items: center;
-      padding: 8px 12px;
-      color: var(--text);
-      cursor: pointer;
-      font-size: 14px;
-    }
-    .palette-item.active { background: #222; border-left: 3px solid var(--accent); padding-left: 9px; }
-    .palette-item .label { flex: 1 1 auto; }
-    .palette-item .hint { color: var(--muted); font-size: 12px; margin-left: 12px; }
-  </style>
-</head>
-<body>
-  <header class="topbar">
-    <span class="name">chap-checker</span>
-    <span class="pipe">|</span>
-    <span id="hdr-count">- instance(s)</span>
-    <span class="pipe">|</span>
-    <span id="hdr-alerts">alerts ...</span>
-    <span class="pipe">|</span>
-    <span id="hdr-interval">refresh every -s</span>
-    <span class="clock" id="clock">--:--:--</span>
-  </header>
-
-  <div id="grid"></div>
-
-  <footer class="statusbar">
-    <span id="last-refresh">awaiting first refresh ...</span>
-    <span class="keys">
-      <b>r</b> refresh  ·  <b>⌘K</b> / <b>^K</b> palette
-    </span>
-  </footer>
-
-  <div id="palette-backdrop" role="dialog" aria-modal="true" aria-label="Command palette">
-    <div id="palette">
-      <input id="palette-input" type="text" placeholder="Type a command..." autocomplete="off">
-      <ul id="palette-list"></ul>
-    </div>
-  </div>
-
-  <script>
-    const STATUS_CLASSES = {
-      ok: "status-ok",
-      warn: "status-warn",
-      fail: "status-fail",
-      error: "status-error",
-      skipped: "status-skipped",
-    };
-    const PILL_CLASSES = {
-      ok: "pill pill-ok",
-      warn: "pill pill-warn",
-      fail: "pill pill-fail",
-      error: "pill pill-error",
-      skipped: "pill pill-skipped",
-    };
-
-    // Pick a column count that mirrors the TUI's adaptive grid.
-    function columnsFor(n) {
-      if (n <= 1) return 1;
-      if (n <= 4) return 2;
-      if (n <= 9) return 3;
-      return 4;
-    }
-
-    function fmtRelative(now, then) {
-      if (!then) return "-";
-      const delta = Math.max(0, Math.floor((now - then) / 1000));
-      if (delta < 60) return delta + "s ago";
-      if (delta < 3600) return Math.floor(delta / 60) + "m ago";
-      return Math.floor(delta / 3600) + "h ago";
-    }
-
-    function tileHtml(t, now) {
-      const cls = STATUS_CLASSES[t.worst_status] || "status-skipped";
-      const pillCls = PILL_CLASSES[t.worst_status] || "pill pill-skipped";
-      let pingLine = "";
-      if (t.ping_total > 0) {
-        const pct = Math.floor(100 * t.ping_ok / t.ping_total);
-        pingLine = `<span class="ping">${t.ping_ok}/${t.ping_total} ping (${pct}%)</span>`;
-      }
-      const checksHtml = (t.checks || [])
-        .map((c) => `
-          <div class="check-row">
-            <span class="check-name">${escapeHtml(c.name)}</span>
-            <span class="check-symbol check-symbol-${c.status}">${escapeHtml(c.symbol)}</span>
-          </div>
-        `)
-        .join("");
-      const latency = t.latency_ms != null ? t.latency_ms + "ms" : "-";
-      const updated = fmtRelative(now, t.last_refresh ? Date.parse(t.last_refresh) : null);
-      const uptime = t.uptime_pct != null ? t.uptime_pct.toFixed(2) + "%" : "-";
-      const versionHtml = t.version ? `<span class="tile-version">DHIS2  ${escapeHtml(t.version)}</span>` : "";
-      return `
-        <div class="tile ${cls}">
-          <div class="tile-title">
-            <span class="tile-name">${escapeHtml(t.name)}</span>
-            ${versionHtml}
-          </div>
-          <div class="tile-url">${escapeHtml(t.url)}</div>
-          <div class="pillrow">
-            <span class="${pillCls}">${t.worst_status.toUpperCase()}</span>
-            <span class="summary">${t.ok_count}/${t.total_count} checks</span>
-            ${pingLine}
-          </div>
-          <div class="checks-header">Checks</div>
-          <div class="checks">${checksHtml}</div>
-          <div class="stats">
-            <div>
-              <div class="stat-label">latency</div>
-              <div class="stat-value">${latency}</div>
-            </div>
-            <div>
-              <div class="stat-label">updated</div>
-              <div class="stat-value">${updated}</div>
-            </div>
-            <div>
-              <div class="stat-label">uptime</div>
-              <div class="stat-value">${uptime}</div>
-            </div>
-          </div>
-        </div>
-      `;
-    }
-
-    function escapeHtml(s) {
-      return String(s).replace(/[&<>"']/g, (c) =>
-        ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"})[c]
-      );
-    }
-
-    let lastState = null;
-
-    function render(state) {
-      lastState = state;
-      const grid = document.getElementById("grid");
-      const cols = columnsFor(state.tiles.length);
-      grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
-      const rows = Math.max(1, Math.ceil(state.tiles.length / cols));
-      grid.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
-      const now = Date.now();
-      grid.innerHTML = state.tiles.map((t) => tileHtml(t, now)).join("");
-
-      document.getElementById("hdr-count").textContent = state.instance_count + " instance(s)";
-      document.getElementById("hdr-alerts").textContent = "alerts " + (state.alerts_enabled ? "ON" : "OFF");
-      document.getElementById("hdr-interval").textContent = "refresh every " + Math.floor(state.interval_s) + "s";
-
-      const lastRefresh = state.last_refresh ? Date.parse(state.last_refresh) : null;
-      const status = document.getElementById("last-refresh");
-      if (!lastRefresh) {
-        status.textContent = "awaiting first refresh ...";
-        status.className = "stale";
-      } else {
-        const ageMs = now - lastRefresh;
-        const stale = ageMs > state.interval_s * 1000 * 2;
-        status.className = stale ? "stale" : "ok";
-        status.textContent = "last refresh " + fmtRelative(now, lastRefresh);
-      }
-    }
-
-    async function poll() {
-      try {
-        const r = await fetch("/api/state", { cache: "no-store" });
-        if (!r.ok) return;
-        const state = await r.json();
-        render(state);
-      } catch (e) {
-        // Network blip - try again next tick.
-      }
-    }
-
-    function tickClock() {
-      const d = new Date();
-      const pad = (n) => String(n).padStart(2, "0");
-      document.getElementById("clock").textContent =
-        pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds());
-      // Also refresh the relative-time labels so "updated 12s ago" advances.
-      if (lastState) render(lastState);
-    }
-
-    setInterval(poll, 5000);     // pull the latest cached snapshot from the server
-    setInterval(tickClock, 1000); // tick the wall clock + relative timestamps
-    poll();
-    tickClock();
-
-    // ------------------------------------------------------------------
-    // Command palette + keyboard shortcuts
-    // ------------------------------------------------------------------
-    const COMMANDS = [
-      {
-        id: "refresh",
-        label: "Refresh now",
-        hint: "r",
-        run: () => { poll(); },
-      },
-      {
-        id: "fullscreen",
-        label: "Toggle fullscreen",
-        hint: "f",
-        run: () => {
-          if (document.fullscreenElement) {
-            document.exitFullscreen?.();
-          } else {
-            document.documentElement.requestFullscreen?.();
-          }
-        },
-      },
-      {
-        id: "open-repo",
-        label: "Open GitHub repository",
-        hint: "",
-        run: () => window.open("https://github.com/dhis2-chap/chap-checker", "_blank", "noopener"),
-      },
-      {
-        id: "open-docs",
-        label: "Open documentation",
-        hint: "",
-        run: () => window.open("https://dhis2-chap.github.io/chap-checker/", "_blank", "noopener"),
-      },
-    ];
-
-    const paletteEl = document.getElementById("palette-backdrop");
-    const inputEl = document.getElementById("palette-input");
-    const listEl = document.getElementById("palette-list");
-    let activeIndex = 0;
-    let filtered = COMMANDS;
-
-    function openPalette() {
-      paletteEl.classList.add("open");
-      inputEl.value = "";
-      filtered = COMMANDS;
-      activeIndex = 0;
-      renderPalette();
-      // Defer focus until after the modal becomes visible.
-      requestAnimationFrame(() => inputEl.focus());
-    }
-    function closePalette() {
-      paletteEl.classList.remove("open");
-    }
-    function renderPalette() {
-      listEl.innerHTML = filtered
-        .map((c, i) => `
-          <li class="palette-item ${i === activeIndex ? "active" : ""}" data-i="${i}">
-            <span class="label">${escapeHtml(c.label)}</span>
-            ${c.hint ? `<span class="hint">${escapeHtml(c.hint)}</span>` : ""}
-          </li>
-        `)
-        .join("");
-    }
-    function applyFilter() {
-      const q = inputEl.value.trim().toLowerCase();
-      filtered = q
-        ? COMMANDS.filter((c) => c.label.toLowerCase().includes(q))
-        : COMMANDS;
-      activeIndex = 0;
-      renderPalette();
-    }
-    function runActive() {
-      const cmd = filtered[activeIndex];
-      if (cmd) {
-        closePalette();
-        cmd.run();
-      }
-    }
-
-    inputEl.addEventListener("input", applyFilter);
-    inputEl.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") { closePalette(); e.preventDefault(); }
-      else if (e.key === "ArrowDown") {
-        activeIndex = Math.min(filtered.length - 1, activeIndex + 1);
-        renderPalette();
-        e.preventDefault();
-      } else if (e.key === "ArrowUp") {
-        activeIndex = Math.max(0, activeIndex - 1);
-        renderPalette();
-        e.preventDefault();
-      } else if (e.key === "Enter") {
-        runActive();
-        e.preventDefault();
-      }
-    });
-    listEl.addEventListener("click", (e) => {
-      const item = e.target.closest(".palette-item");
-      if (!item) return;
-      activeIndex = Number(item.dataset.i);
-      runActive();
-    });
-    paletteEl.addEventListener("click", (e) => {
-      // Click on backdrop (not the inner card) closes.
-      if (e.target === paletteEl) closePalette();
-    });
-
-    // Global hotkeys. Ignored when an input/textarea has focus, except
-    // for Escape inside the palette which is handled above.
-    document.addEventListener("keydown", (e) => {
-      const isPaletteOpen = paletteEl.classList.contains("open");
-      const target = e.target;
-      const inField = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA");
-
-      // Ctrl/Cmd + K toggles the palette regardless of focus.
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        if (isPaletteOpen) closePalette();
-        else openPalette();
-        return;
-      }
-      if (inField || isPaletteOpen) return;
-      if (e.key === "r" || e.key === "R") {
-        e.preventDefault();
-        poll();
-      } else if (e.key === "f" || e.key === "F") {
-        e.preventDefault();
-        COMMANDS.find((c) => c.id === "fullscreen")?.run();
-      }
-    });
-  </script>
-</body>
-</html>
-"""

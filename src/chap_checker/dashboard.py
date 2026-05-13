@@ -9,12 +9,14 @@ launch time via ``--alerts`` / ``--no-alerts``.
 from __future__ import annotations
 
 import math
+from collections import deque
 from collections.abc import Callable
 from datetime import datetime
 from functools import partial
 from pathlib import Path
 from typing import Any
 
+from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.command import DiscoveryHit, Hit, Hits, Provider
@@ -45,6 +47,68 @@ _SYMBOL_BY_STATUS = {
     Status.ERROR: "!!",
     Status.SKIPPED: "·",
 }
+
+# Number of past-refresh outcomes kept per tile for the uptime strip.
+# Matches the web dashboard's `UptimeBars` width so both surfaces tell
+# the same story about "the last N checks".
+_HISTORY_LEN = 30
+
+# Per-status colour used by the uptime strip. OK / WARN / FAIL share
+# colours with the existing pill palette so the strip stays consistent
+# with the rest of the tile.
+_STRIP_COLOR_BY_STATUS = {
+    Status.OK: "#7DD345",
+    Status.WARN: "#d4a017",
+    Status.FAIL: "#d04040",
+    Status.ERROR: "#c050c0",
+    Status.SKIPPED: "#444",
+}
+# Dim slot rendered before history has filled up - mirrors the web
+# dashboard's `{noData: true}` padding behaviour. Lifted slightly
+# above the tile background (#161616) so the placeholder cells stay
+# visible instead of melting into the surrounding panel.
+_STRIP_COLOR_EMPTY = "#3a3a3a"
+
+
+class UptimeStrip(Widget):
+    """One-row coloured-block history strip that fills its widget width.
+
+    Each cell is one terminal column wide; the rightmost cell is the
+    most recent refresh and the strip pads with dim placeholders on
+    the left until enough history accumulates. Reads ``self.size``
+    at render time so the strip spans the full tile width regardless
+    of how many instances are configured.
+    """
+
+    DEFAULT_CSS = """
+    UptimeStrip {
+        height: 1;
+        width: 1fr;
+        padding: 0 1;
+    }
+    """
+
+    def __init__(self, history: deque[Status]) -> None:
+        super().__init__()
+        self._history = history
+
+    def render(self) -> Text:
+        # Padding eats one cell on each side (`padding: 0 1`).
+        width = max(1, self.size.width - 2)
+        slots = list(self._history)
+        text = Text()
+        if width <= len(slots):
+            # Tile narrower than the buffer - show the most recent
+            # `width` refreshes, one cell each.
+            for status in slots[-width:]:
+                text.append("█", style=_STRIP_COLOR_BY_STATUS.get(status, _STRIP_COLOR_EMPTY))
+            return text
+        # Tile wider than (or equal to) the buffer - dim padding on
+        # the left, real history on the right.
+        text.append("█" * (width - len(slots)), style=_STRIP_COLOR_EMPTY)
+        for status in slots:
+            text.append("█", style=_STRIP_COLOR_BY_STATUS.get(status, _STRIP_COLOR_EMPTY))
+        return text
 
 
 def columns_for(n_instances: int) -> int:
@@ -298,9 +362,21 @@ class InstanceTile(Container):
     InstanceTile #checks {
         height: auto;
     }
+    InstanceTile .tile-footer {
+        dock: bottom;
+        height: auto;
+        layout: vertical;
+    }
+    InstanceTile .uptime-header {
+        height: 1;
+        color: #555;
+        padding: 0 1;
+    }
+    InstanceTile UptimeStrip {
+        margin-bottom: 1;
+    }
     InstanceTile .stats-row {
         height: 3;
-        dock: bottom;
         padding-top: 1;
         align: center top;
     }
@@ -328,6 +404,10 @@ class InstanceTile(Container):
         self.ping_total = 0
         self.last_report: RunReport | None = None
         self.last_refresh: datetime | None = None
+        # Rolling per-refresh worst-status history for the uptime strip.
+        # Refreshes where every check was SKIPPED are dropped so the
+        # strip stays meaningful while upstream services flap.
+        self.history: deque[Status] = deque(maxlen=_HISTORY_LEN)
 
     def compose(self) -> ComposeResult:
         with Horizontal(classes="row"):
@@ -340,16 +420,27 @@ class InstanceTile(Container):
             yield Static("", classes="ping", id="ping")
         yield Static("CHECKS", classes="checks-header")
         yield Vertical(id="checks")
-        with Horizontal(classes="stats-row"):
-            with Vertical(classes="stat-cell"):
-                yield Static("latency", classes="stat-label")
-                yield Static("--", classes="stat-value", id="latency")
-            with Vertical(classes="stat-cell"):
-                yield Static("updated", classes="stat-label")
-                yield Static("--", classes="stat-value", id="updated")
-            with Vertical(classes="stat-cell"):
-                yield Static("uptime", classes="stat-label")
-                yield Static("--", classes="stat-value", id="uptime")
+        # Footer block: uptime header + history strip + stats row all
+        # dock to the bottom together. Individually docking each piece
+        # didn't compose well with the existing stats-row dock and the
+        # strip ended up collapsed to zero height.
+        with Vertical(classes="tile-footer"):
+            yield Static(
+                f"UPTIME · LAST {_HISTORY_LEN} CHECKS",
+                classes="uptime-header",
+                id="uptime-header",
+            )
+            yield UptimeStrip(self.history)
+            with Horizontal(classes="stats-row"):
+                with Vertical(classes="stat-cell"):
+                    yield Static("latency", classes="stat-label")
+                    yield Static("--", classes="stat-value", id="latency")
+                with Vertical(classes="stat-cell"):
+                    yield Static("updated", classes="stat-label")
+                    yield Static("--", classes="stat-value", id="updated")
+                with Vertical(classes="stat-cell"):
+                    yield Static("uptime", classes="stat-label")
+                    yield Static("--", classes="stat-value", id="uptime")
 
     def on_mount(self) -> None:
         # Tick the "updated Xs ago" string every second.
@@ -364,6 +455,12 @@ class InstanceTile(Container):
             self.ping_total += 1
             if ping.status is Status.OK:
                 self.ping_ok += 1
+        # Append the refresh's worst non-skipped status to history. The
+        # strip reflects "how the last 30 refreshes went overall", not
+        # just whether ping reached the server.
+        ran_statuses: list[Status] = [r.status for r in report.results if r.status is not Status.SKIPPED]
+        if ran_statuses:
+            self.history.append(_worst(ran_statuses))
 
         # UI updates only when the widget is actually mounted in an app.
         # Unit tests construct tiles outside an app and just inspect data fields.
@@ -417,7 +514,22 @@ class InstanceTile(Container):
         else:
             self.query_one("#uptime", Static).update("--")
 
+        # Uptime header + strip. The strip is a custom widget that
+        # reads its width at render time so it fills the tile rather
+        # than rendering a fixed 30-cell run; just nudge it to repaint.
+        self.query_one("#uptime-header", Static).update(self._render_history_header())
+        self.query_one(UptimeStrip).refresh()
+
         self._tick_updated()
+
+    def _render_history_header(self) -> str:
+        """Render the 'UPTIME · LAST 30 CHECKS    100%' header line."""
+        label = f"UPTIME · LAST {_HISTORY_LEN} CHECKS"
+        if self.history:
+            clean = sum(1 for s in self.history if s is Status.OK)
+            pct = int(round(100 * clean / len(self.history)))
+            return f"{label}  [#888]{pct}%[/]"
+        return label
 
     def _tick_updated(self) -> None:
         if self.last_refresh is None:
@@ -583,6 +695,7 @@ __all__ = [
     "DashboardFooter",
     "DashboardHeader",
     "InstanceTile",
+    "UptimeStrip",
     "Widget",
     "columns_for",
     "run",

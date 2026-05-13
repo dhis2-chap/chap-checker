@@ -85,7 +85,11 @@ def test_snapshot_reflects_tracker_state() -> None:
             ),
         ],
     )
-    server.trackers["prod"] = _TileTracker(ping_ok=3, ping_total=3, last_report=report)
+    tracker = _TileTracker(ping_ok=3, ping_total=3, last_report=report)
+    # Three prior refresh outcomes - one OK, one degraded, one failure
+    # so all three sparkline colour paths get covered.
+    tracker.history.extend([(Status.OK, 120), (Status.WARN, 140), (Status.FAIL, None)])
+    server.trackers["prod"] = tracker
     snap = server.snapshot()
     tile = snap.tiles[0]
     assert tile.worst_status is Status.OK
@@ -96,6 +100,11 @@ def test_snapshot_reflects_tracker_state() -> None:
     assert tile.uptime_pct == 100.0
     assert [c.name for c in tile.checks] == ["ping", "system_info"]
     assert [c.symbol for c in tile.checks] == ["✓", "✓"]
+    assert [(p.status, p.latency_ms) for p in tile.history] == [
+        (Status.OK, 120),
+        (Status.WARN, 140),
+        (Status.FAIL, None),
+    ]
 
 
 def test_state_endpoint_returns_json() -> None:
@@ -135,5 +144,7 @@ def test_index_serves_html() -> None:
         assert r.status_code == 200
         assert "text/html" in r.headers["content-type"]
         assert "chap-checker" in r.text
-        # Sanity-check the JS poller is present.
-        assert "/api/state" in r.text
+        # The poller lives in _state.js; check it's served too.
+        r2 = client.get("/_state.js")
+        assert r2.status_code == 200
+        assert "/api/state" in r2.text

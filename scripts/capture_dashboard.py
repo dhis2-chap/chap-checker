@@ -8,7 +8,8 @@ Usage::
     uv run python scripts/capture_dashboard.py \
         --config chap-checker.toml \
         --output docs/assets/dashboard.svg \
-        --wait 20
+        --wait 20 \
+        --refreshes 5
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ from chap_checker.config import load_config
 from chap_checker.dashboard import DashboardApp
 
 
-async def _capture(config_path: Path, output: Path, wait_s: float) -> None:
+async def _capture(config_path: Path, output: Path, wait_s: float, refreshes: int) -> None:
     cfg = load_config(config_path)
     targets = [entry.to_target_entry(name) for name, entry in cfg.instances.items()]
     app = DashboardApp(
@@ -29,8 +30,8 @@ async def _capture(config_path: Path, output: Path, wait_s: float) -> None:
         cfg=cfg,
         config_path=config_path,
         state_path=None,
-        # Disable auto-refresh during capture - we'll trigger one refresh manually
-        # and then wait for it to land.
+        # Disable auto-refresh - we drive the cycles manually below so the
+        # uptime strip has visible history before we snap the screenshot.
         interval_s=9999.0,
         alerts_enabled=False,
     )
@@ -38,6 +39,11 @@ async def _capture(config_path: Path, output: Path, wait_s: float) -> None:
         # The dashboard's on_mount kicks off one refresh via call_after_refresh.
         # Wait long enough for it to land against real DHIS2 instances.
         await pilot.pause(delay=wait_s)
+        # Drive a few more refreshes so the uptime strip shows several
+        # cells; without this the strip renders as one solitary block.
+        for _ in range(max(0, refreshes - 1)):
+            await app.action_refresh()
+            await pilot.pause(delay=wait_s)
         output.parent.mkdir(parents=True, exist_ok=True)
         app.save_screenshot(str(output))
 
@@ -61,12 +67,18 @@ def main() -> None:
         "--wait",
         type=float,
         default=20.0,
-        help="Seconds to wait for the first refresh to complete (default 20)",
+        help="Seconds to wait for each refresh to complete (default 20)",
+    )
+    parser.add_argument(
+        "--refreshes",
+        type=int,
+        default=5,
+        help="Number of refresh cycles to drive before capturing (default 5)",
     )
     args = parser.parse_args()
     if not args.config.exists():
         raise SystemExit(f"config file not found: {args.config}")
-    asyncio.run(_capture(args.config, args.output, args.wait))
+    asyncio.run(_capture(args.config, args.output, args.wait, args.refreshes))
     print(f"wrote {args.output}")
 
 
