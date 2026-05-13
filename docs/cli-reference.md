@@ -22,6 +22,7 @@ $ chap-checker [OPTIONS] COMMAND [ARGS]...
 
 * `verify`: Run every registered check against one or...
 * `dashboard`: Launch the Textual TUI dashboard.
+* `web`: Launch the web dashboard.
 * `alerts`: Inspect or test configured alerters.
 * `checks`: Inspect available checks.
 
@@ -89,6 +90,34 @@ $ chap-checker dashboard [OPTIONS]
 * `--interval FLOAT RANGE`: Refresh interval in seconds.  [default: 30.0; x&gt;=2.0]
 * `--alerts / --no-alerts`: Dispatch Slack/etc. alerts from refresh cycles. Off by default - the TUI is usually all you need; flip this on if you want this dashboard to also page.  [default: no-alerts]
 * `--state PATH`: State file path (default: ./chap-checker.state.json next to the config).  [env var: CHAP_CHECKER_STATE]
+* `--help`: Show this message and exit.
+
+## `chap-checker web`
+
+Launch the web dashboard.
+
+A single-page browser dashboard with the same tile layout and palette
+as the Textual TUI. A FastAPI background task runs checks every
+`--interval` seconds; the browser polls `/api/state` every few seconds
+and re-renders tiles client-side.
+
+Designed to fill a TV screen with no scrolling - pin a kiosk browser
+at the URL and leave it.
+
+**Usage**:
+
+```console
+$ chap-checker web [OPTIONS]
+```
+
+**Options**:
+
+* `-c, --config PATH`: Path to a TOML config (defaults to ./chap-checker.toml if present).  [env var: CHAP_CHECKER_CONFIG]
+* `--interval FLOAT RANGE`: Server-side check refresh interval (seconds).  [default: 30.0; x&gt;=2.0]
+* `--alerts / --no-alerts`: Dispatch Slack/etc. alerts from refresh cycles. Off by default - the dashboard is usually all you need; flip this on if you want this dashboard to also page.  [default: no-alerts]
+* `--state PATH`: State file path (default: ./chap-checker.state.json next to the config).  [env var: CHAP_CHECKER_STATE]
+* `--host TEXT`: Bind address. Use 0.0.0.0 to expose on the local network (e.g. for a TV).  [default: 127.0.0.1]
+* `--port INTEGER RANGE`: Port to listen on.  [default: 8765; 1&lt;=x&lt;=65535]
 * `--help`: Show this message and exit.
 
 ## `chap-checker alerts`
