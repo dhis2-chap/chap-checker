@@ -1,10 +1,9 @@
 """Textual TUI dashboard for chap-checker.
 
-One tile per configured instance, auto-refreshing on an interval. Shows the
-rolled-up status, the cumulative ping success ratio since the dashboard
-started, and the latest non-OK message. Whether alerts dispatch is decided at
-launch time via ``--alerts`` / ``--no-alerts``; the UI is read-only beyond
-the refresh / quit keys.
+One tile per configured instance. Designed to be left on a TV / monitor so
+the operator can see at a glance which targets are up, which version they're
+running, and which check just failed. Whether alerts dispatch is decided at
+launch time via ``--alerts`` / ``--no-alerts``.
 """
 
 from __future__ import annotations
@@ -12,55 +11,36 @@ from __future__ import annotations
 import math
 from datetime import datetime
 from pathlib import Path
-from typing import ClassVar
 
-from rich.panel import Panel
-from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Container, Grid
-from textual.widgets import Footer, Header, Static
+from textual.containers import Container, Grid, Horizontal, Vertical
+from textual.widget import Widget
+from textual.widgets import Static
 
 from chap_checker.checks.base import CheckResult, Status
 from chap_checker.config import CheckerConfig
 from chap_checker.runner import RunReport, TargetEntry, run_targets
 
+_ACCENT = "#7DD345"
+
 _STATUS_RANK = [Status.ERROR, Status.FAIL, Status.WARN, Status.SKIPPED, Status.OK]
 
-_BORDER_BY_STATUS = {
-    Status.OK: "bright_green",
-    Status.WARN: "yellow",
-    Status.FAIL: "red",
-    Status.ERROR: "magenta",
-    Status.SKIPPED: "grey42",
+_PILL_CLASS_BY_STATUS = {
+    Status.OK: "pill-ok",
+    Status.WARN: "pill-warn",
+    Status.FAIL: "pill-fail",
+    Status.ERROR: "pill-error",
+    Status.SKIPPED: "pill-skipped",
 }
 
 _SYMBOL_BY_STATUS = {
-    Status.OK: ("✓", "bright_green"),
-    Status.WARN: ("!", "yellow"),
-    Status.FAIL: ("✗", "red"),
-    Status.ERROR: ("!!", "magenta"),
-    Status.SKIPPED: ("·", "grey42"),
+    Status.OK: "✓",
+    Status.WARN: "!",
+    Status.FAIL: "✗",
+    Status.ERROR: "!!",
+    Status.SKIPPED: "·",
 }
-
-
-def _extract_versions(results: list[CheckResult]) -> list[tuple[str, str]]:
-    """Pull (label, version) pairs out of check details for tile display."""
-    out: list[tuple[str, str]] = []
-    by_name = {r.name: r for r in results}
-    if r := by_name.get("dhis2_system_info"):
-        v = r.details.get("version")
-        if v:
-            out.append(("DHIS2", str(v)))
-    if r := by_name.get("dhis2_chap_system_info"):
-        v = r.details.get("chap_core_version") or r.details.get("version")
-        if v:
-            out.append(("chap-core", str(v)))
-    if r := by_name.get("dhis2_chap_modeling_app"):
-        v = r.details.get("version")
-        if v:
-            out.append(("Modeling", str(v)))
-    return out
 
 
 def columns_for(n_instances: int) -> int:
@@ -75,115 +55,363 @@ def columns_for(n_instances: int) -> int:
 
 
 def _worst(statuses: list[Status]) -> Status:
-    """Return the worst status in the list (ERROR > FAIL > WARN > SKIPPED > OK)."""
+    """Return the worst status in the list."""
     for s in _STATUS_RANK:
         if s in statuses:
             return s
     return Status.OK
 
 
-class InstanceTile(Static):
+def _extract_dhis2_version(results: list[CheckResult]) -> str | None:
+    """Pull the DHIS2 server version out of the dhis2_system_info check details."""
+    for r in results:
+        if r.name == "dhis2_system_info":
+            v = r.details.get("version")
+            if v:
+                return str(v)
+    return None
+
+
+def _format_relative(now: datetime, then: datetime) -> str:
+    """Render ``then`` as 'Ns ago' / 'Nm ago' / 'Nh ago'."""
+    delta = max(0, int((now - then).total_seconds()))
+    if delta < 60:
+        return f"{delta}s ago"
+    if delta < 3600:
+        return f"{delta // 60}m ago"
+    return f"{delta // 3600}h ago"
+
+
+class DashboardHeader(Horizontal):
+    """Custom top bar: 'chap-checker | N instance(s) | alerts ... | refresh every Ns ... HH:MM:SS'."""
+
+    DEFAULT_CSS = """
+    DashboardHeader {
+        height: 1;
+        padding: 0 2;
+        background: $background;
+    }
+    DashboardHeader .hdr-name {
+        color: #7DD345;
+        text-style: bold;
+        width: auto;
+    }
+    DashboardHeader .hdr-pipe {
+        color: #555;
+        width: 3;
+        content-align: center middle;
+    }
+    DashboardHeader .hdr-text {
+        color: #aaa;
+        width: auto;
+    }
+    DashboardHeader .hdr-clock {
+        color: #aaa;
+        width: 1fr;
+        content-align: right middle;
+    }
+    """
+
+    def __init__(self, n_instances: int, alerts_enabled: bool, interval_s: float) -> None:
+        super().__init__()
+        self._n = n_instances
+        self._alerts = alerts_enabled
+        self._interval = interval_s
+
+    def compose(self) -> ComposeResult:
+        yield Static("chap-checker", classes="hdr-name")
+        yield Static("|", classes="hdr-pipe")
+        yield Static(f"{self._n} instance(s)", classes="hdr-text")
+        yield Static("|", classes="hdr-pipe")
+        yield Static(f"alerts {'ON' if self._alerts else 'OFF'}", classes="hdr-text")
+        yield Static("|", classes="hdr-pipe")
+        yield Static(f"refresh every {int(self._interval)}s", classes="hdr-text")
+        yield Static("--:--:--", classes="hdr-clock", id="hdr-clock")
+
+    def on_mount(self) -> None:
+        self.set_interval(1.0, self._tick_clock)
+        self._tick_clock()
+
+    def _tick_clock(self) -> None:
+        self.query_one("#hdr-clock", Static).update(datetime.now().strftime("%H:%M:%S"))
+
+
+class DashboardFooter(Horizontal):
+    """Custom bottom bar showing the key bindings."""
+
+    DEFAULT_CSS = """
+    DashboardFooter {
+        height: 1;
+        padding: 0 2;
+        background: $background;
+    }
+    DashboardFooter Static {
+        width: auto;
+        color: #aaa;
+    }
+    """
+
+    def compose(self) -> ComposeResult:
+        yield Static(f"[bold {_ACCENT}]\\[q][/] quit   [bold {_ACCENT}]\\[r][/] refresh")
+
+
+class CheckRow(Horizontal):
+    """Single row in a tile's 'CHECKS' section: name on the left, status symbol on the right."""
+
+    DEFAULT_CSS = """
+    CheckRow {
+        height: 1;
+    }
+    CheckRow .check-name {
+        width: 1fr;
+        color: #bbb;
+    }
+    CheckRow .check-status {
+        width: auto;
+        content-align: right middle;
+    }
+    """
+
+    def __init__(self, check_name: str, status: Status) -> None:
+        super().__init__()
+        self.check_name = check_name
+        self.check_status = status
+
+    def compose(self) -> ComposeResult:
+        # Strip the dhis2_ / dhis2_chap_ prefix in display only; full name shown in JSON / verify.
+        short = self.check_name.removeprefix("dhis2_chap_").removeprefix("dhis2_")
+        symbol = _SYMBOL_BY_STATUS.get(self.check_status, "?")
+        color = _ACCENT if self.check_status is Status.OK else _color_for(self.check_status)
+        yield Static(short, classes="check-name")
+        yield Static(f"[{color}]{symbol}[/]", classes="check-status")
+
+
+def _color_for(status: Status) -> str:
+    return {
+        Status.OK: _ACCENT,
+        Status.WARN: "yellow",
+        Status.FAIL: "#d04040",
+        Status.ERROR: "#c050c0",
+        Status.SKIPPED: "#666",
+    }.get(status, "white")
+
+
+class InstanceTile(Container):
     """One tile per chap-checker target."""
 
     DEFAULT_CSS = """
     InstanceTile {
+        background: #161616;
+        border-left: thick #7DD345;
+        padding: 1 2;
         height: 100%;
-        width: 100%;
-        padding: 0;
-        margin: 0;
+        layout: vertical;
+    }
+    InstanceTile .row {
+        height: 1;
+    }
+    InstanceTile .tile-name {
+        color: #7DD345;
+        text-style: bold;
+        width: 1fr;
+    }
+    InstanceTile .tile-version {
+        color: #aaa;
+        width: auto;
+        content-align: right middle;
+    }
+    InstanceTile .tile-url {
+        color: #666;
+        height: 1;
+        padding-bottom: 1;
+    }
+    InstanceTile .pill {
+        width: auto;
+        padding: 0 1;
+        margin-right: 2;
+    }
+    InstanceTile .pill-ok {
+        background: #2da44e;
+        color: black;
+        text-style: bold;
+    }
+    InstanceTile .pill-warn {
+        background: #d4a017;
+        color: black;
+        text-style: bold;
+    }
+    InstanceTile .pill-fail {
+        background: #d04040;
+        color: white;
+        text-style: bold;
+    }
+    InstanceTile .pill-error {
+        background: #c050c0;
+        color: white;
+        text-style: bold;
+    }
+    InstanceTile .pill-skipped {
+        background: #555;
+        color: #ccc;
+    }
+    InstanceTile .summary {
+        width: auto;
+        color: #ddd;
+        text-style: bold;
+        margin-right: 3;
+    }
+    InstanceTile .ping {
+        width: 1fr;
+        color: #888;
+    }
+    InstanceTile .checks-header {
+        color: #555;
+        text-style: bold;
+        height: 1;
+        padding-top: 1;
+        padding-bottom: 0;
+    }
+    InstanceTile #checks {
+        height: auto;
+    }
+    InstanceTile .stats-row {
+        height: 3;
+        padding-top: 1;
+        align: center top;
+    }
+    InstanceTile .stat-cell {
+        width: 1fr;
+        height: 3;
+    }
+    InstanceTile .stat-label {
+        color: #555;
+        content-align: center top;
+        height: 1;
+    }
+    InstanceTile .stat-value {
+        color: #ddd;
+        text-style: bold;
+        content-align: center top;
+        height: 1;
     }
     """
 
     def __init__(self, entry: TargetEntry) -> None:
-        super().__init__("", expand=True)
+        super().__init__()
         self.entry = entry
         self.ping_ok = 0
         self.ping_total = 0
         self.last_report: RunReport | None = None
         self.last_refresh: datetime | None = None
-        self._render_initial()
 
-    def _render_initial(self) -> None:
-        body = Text()
-        body.append(str(self.entry.target.base_url), style="dim")
-        body.append("\n\n")
-        body.append("(awaiting first refresh)", style="dim italic")
-        self.update(Panel(body, title=self.entry.name, border_style="grey42"))
+    def compose(self) -> ComposeResult:
+        with Horizontal(classes="row"):
+            yield Static(self.entry.name.upper(), classes="tile-name")
+            yield Static("", classes="tile-version", id="version")
+        yield Static(f"⊕ {str(self.entry.target.base_url).rstrip('/')}", classes="tile-url")
+        with Horizontal(classes="row"):
+            yield Static("", classes="pill pill-skipped", id="pill")
+            yield Static("", classes="summary", id="summary")
+            yield Static("", classes="ping", id="ping")
+        yield Static("CHECKS", classes="checks-header")
+        yield Vertical(id="checks")
+        with Horizontal(classes="stats-row"):
+            with Vertical(classes="stat-cell"):
+                yield Static("latency", classes="stat-label")
+                yield Static("--", classes="stat-value", id="latency")
+            with Vertical(classes="stat-cell"):
+                yield Static("updated", classes="stat-label")
+                yield Static("--", classes="stat-value", id="updated")
+            with Vertical(classes="stat-cell"):
+                yield Static("uptime", classes="stat-label")
+                yield Static("--", classes="stat-value", id="uptime")
+
+    def on_mount(self) -> None:
+        # Tick the "updated Xs ago" string every second.
+        self.set_interval(1.0, self._tick_updated)
 
     def update_from(self, report: RunReport) -> None:
+        # Data updates (always).
         self.last_report = report
         self.last_refresh = datetime.now()
-
         ping = next((r for r in report.results if r.name == "dhis2_ping"), None)
         if ping is not None and ping.status is not Status.SKIPPED:
             self.ping_total += 1
             if ping.status is Status.OK:
                 self.ping_ok += 1
 
+        # UI updates only when the widget is actually mounted in an app.
+        # Unit tests construct tiles outside an app and just inspect data fields.
+        if not self.is_mounted:
+            return
+        self._render_tile(report)
+
+    def _render_tile(self, report: RunReport) -> None:
+        # Title-row version
+        v = _extract_dhis2_version(report.results)
+        self.query_one("#version", Static).update(f"DHIS2  {v}" if v else "")
+
+        # Status pill
         statuses = [r.status for r in report.results]
+        worst = _worst(statuses)
+        pill = self.query_one("#pill", Static)
+        pill.update(worst.value.upper())
+        pill.set_classes(f"pill {_PILL_CLASS_BY_STATUS[worst]}")
+
+        # Summary + ping
         ok_n = sum(1 for s in statuses if s is Status.OK)
         total_n = len(statuses)
-        worst = _worst(statuses)
-        border = _BORDER_BY_STATUS[worst]
-
-        body = Text()
-        body.append(str(self.entry.target.base_url), style="dim")
-        body.append("\n\n")
-
-        # Big status pill
-        if worst is Status.OK:
-            body.append(f"OK   {ok_n}/{total_n} checks", style="bold bright_green")
-        else:
-            body.append(f"{worst.value.upper():5s} {ok_n}/{total_n} checks", style=f"bold {border}")
-        body.append("\n")
-
-        # Cumulative ping ratio since the dashboard launched
+        self.query_one("#summary", Static).update(f"{ok_n}/{total_n} checks")
         if self.ping_total > 0:
-            ratio = self.ping_ok / self.ping_total
-            pct = math.floor(ratio * 100)
-            body.append(
-                f"ping: {self.ping_ok}/{self.ping_total} ({pct}%)",
-                style="dim" if ratio == 1.0 else "yellow",
-            )
-            body.append("\n")
+            pct = math.floor(100 * self.ping_ok / self.ping_total)
+            self.query_one("#ping", Static).update(f"{self.ping_ok}/{self.ping_total} ping ({pct}%)")
+        else:
+            self.query_one("#ping", Static).update("")
 
-        # Versions extracted from check details (DHIS2 / chap-core / modeling app)
-        versions = _extract_versions(report.results)
-        if versions:
-            body.append("\n")
-            label_w = max(len(label) for label, _ in versions)
-            for label, value in versions:
-                body.append(f"{label:<{label_w}}  ", style="dim")
-                body.append(f"{value}\n", style="white")
+        # Per-check rows: clear and rebuild.
+        checks = self.query_one("#checks", Vertical)
+        checks.remove_children()
+        for r in report.results:
+            checks.mount(CheckRow(r.name, r.status))
 
-        # Per-check breakdown. Non-OK rows show their message inline so the
-        # operator sees both what failed and why without leaving the tile.
-        if report.results:
-            body.append("\n")
-            name_w = max(len(r.name) for r in report.results)
-            for r in report.results:
-                symbol, style = _SYMBOL_BY_STATUS.get(r.status, ("?", "white"))
-                body.append(f" {symbol} ", style=style)
-                body.append(f"{r.name:<{name_w}}", style="dim" if r.status is Status.OK else style)
-                if r.status is not Status.OK and r.message:
-                    snippet = r.message.split("\n", 1)[0]
-                    body.append(f"  {snippet[:60]}", style=style)
-                body.append("\n")
+        # Latency: average across all checks that actually ran.
+        durations = [r.duration_ms for r in report.results if r.status is not Status.SKIPPED]
+        if durations:
+            avg = sum(durations) / len(durations)
+            self.query_one("#latency", Static).update(f"{int(avg)}ms")
+        else:
+            self.query_one("#latency", Static).update("--")
 
-        # Footer: last refresh timestamp (always last line in the tile).
-        body.append("\n")
-        body.append(f"updated {self.last_refresh:%H:%M:%S}", style="dim italic")
+        # Uptime: cumulative ping ratio as a percentage.
+        if self.ping_total > 0:
+            pct_f = 100 * self.ping_ok / self.ping_total
+            self.query_one("#uptime", Static).update(f"{pct_f:.2f}%")
+        else:
+            self.query_one("#uptime", Static).update("--")
 
-        self.update(Panel(body, title=self.entry.name, border_style=border))
+        self._tick_updated()
+
+    def _tick_updated(self) -> None:
+        if self.last_refresh is None:
+            return
+        text = _format_relative(datetime.now(), self.last_refresh)
+        # The widget may not be mounted yet on the first tick before compose() finishes.
+        try:
+            self.query_one("#updated", Static).update(text)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 class DashboardApp(App[None]):
     """Textual dashboard for chap-checker."""
 
-    CSS: ClassVar[str] = """
-    Grid {
-        grid-gutter: 1;
-        padding: 1 1;
+    CSS = """
+    Screen {
+        background: #0e0e0e;
+    }
+    #grid {
+        grid-gutter: 1 1;
+        padding: 1;
         height: 1fr;
     }
     """
@@ -213,10 +441,14 @@ class DashboardApp(App[None]):
         self._refreshing = False
 
     def compose(self) -> ComposeResult:
-        yield Header(show_clock=True)
+        yield DashboardHeader(
+            n_instances=len(self.targets),
+            alerts_enabled=self.alerts_enabled,
+            interval_s=self.interval_s,
+        )
         cols = columns_for(len(self.targets))
         rows = math.ceil(len(self.targets) / cols) if self.targets else 1
-        grid = Grid(id="tiles")
+        grid = Grid(id="grid")
         grid.styles.grid_size_columns = cols
         grid.styles.grid_size_rows = rows
         with grid:
@@ -224,13 +456,9 @@ class DashboardApp(App[None]):
                 tile = InstanceTile(entry)
                 self.tiles[entry.name] = tile
                 yield tile
-        yield Footer()
+        yield DashboardFooter()
 
     def on_mount(self) -> None:
-        self.title = "chap-checker"
-        n = len(self.targets)
-        alerts = "ON" if self.alerts_enabled else "OFF"
-        self.sub_title = f"{n} instance(s)  ·  alerts {alerts}  ·  refresh every {int(self.interval_s)}s"
         self.set_interval(self.interval_s, self.action_refresh)
         self.call_after_refresh(self.action_refresh)
 
@@ -246,7 +474,6 @@ class DashboardApp(App[None]):
                 if tile is not None:
                     tile.update_from(r)
             if self.alerts_enabled and self.cfg.alerts is not None and self.state_path is not None:
-                # Late import to avoid pulling cli (and its typer surface) at module load.
                 from chap_checker.cli import dispatch_alerts_async
 
                 await dispatch_alerts_async(reports, self.targets, self.cfg.alerts, self.state_path)
@@ -273,6 +500,14 @@ def run(
     ).run()
 
 
-# Silence unused-import noise from the Container import we keep for future
-# expansion (e.g. wrapping the grid in a Vertical with a top status bar).
-_ = Container
+# Keep these accessible to tests / future widgets.
+__all__ = [
+    "CheckRow",
+    "DashboardApp",
+    "DashboardFooter",
+    "DashboardHeader",
+    "InstanceTile",
+    "Widget",
+    "columns_for",
+    "run",
+]
