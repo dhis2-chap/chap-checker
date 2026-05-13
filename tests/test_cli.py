@@ -16,6 +16,7 @@ def test_help_lists_global_flags() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
     assert "--debug" in result.stdout
+    assert "-d" in result.stdout
     assert "--json" in result.stdout
     assert "--quiet" in result.stdout
 

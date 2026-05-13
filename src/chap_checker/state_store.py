@@ -73,10 +73,15 @@ def compute_transitions(
 ) -> tuple[list[Transition], StateFile]:
     """Diff ``previous`` against ``reports``; return (transitions, new state).
 
-    A transition is emitted when the status changed *and* either the new or the
-    old status is in ``notify_on``. The two-sided guard means OK<->failure
-    transitions fire, but intra-failure changes (e.g. FAIL->ERROR) don't
-    double-page.
+    A transition is emitted only when one side is ``OK`` and the other side is
+    a non-OK status in ``notify_on``. Intra-failure changes (FAIL<->ERROR<->WARN)
+    are tweaks to a sustained outage, not new alerts.
+
+    ``SKIPPED`` is informational: it is never persisted to state (the last
+    known *real* status is preserved) and it never produces a transition.
+    Preserving the prior status across a transient SKIPPED run is what lets an
+    eventual OK still fire a recovery alert even when an upstream prereq
+    flapped in between.
     """
     notify_set = set(notify_on)
     transitions: list[Transition] = []
@@ -89,18 +94,26 @@ def compute_transitions(
             prev_status = prev.status if prev is not None else Status.OK
             curr_status = result.status
 
+            # SKIPPED is informational. Don't overwrite a real status with it;
+            # if there is no prior state, just don't track this entry yet.
+            if curr_status is Status.SKIPPED:
+                if prev is not None:
+                    new_states[key] = prev
+                continue
+
             if curr_status == prev_status:
                 new_states[key] = prev if prev is not None else CheckState(status=curr_status, since=now)
                 continue
 
             new_states[key] = CheckState(status=curr_status, since=now)
 
-            # SKIPPED is informational: never emit a transition through it.
-            # The real signal is whatever caused the skip, which has its own transition.
-            if curr_status is Status.SKIPPED or prev_status is Status.SKIPPED:
+            # Only OK <-> failure-family transitions are alert-worthy.
+            if curr_status is not Status.OK and prev_status is not Status.OK:
                 continue
 
-            if curr_status not in notify_set and prev_status not in notify_set:
+            # The non-OK side determines whether to alert.
+            non_ok = curr_status if curr_status is not Status.OK else prev_status
+            if non_ok not in notify_set:
                 continue
 
             kind: TransitionKind = "recovery" if curr_status is Status.OK else "failure"

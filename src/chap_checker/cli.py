@@ -61,7 +61,12 @@ app = typer.Typer(
 @app.callback(invoke_without_command=True)
 def root(
     ctx: typer.Context,
-    debug: bool = typer.Option(False, "--debug", help="Enable verbose debug logging on stderr."),
+    debug: bool = typer.Option(
+        False,
+        "--debug",
+        "-d",
+        help="Enable verbose debug logging on stderr.",
+    ),
     json_output: bool = typer.Option(
         False,
         "--json",
@@ -119,7 +124,12 @@ def verify_command(
     ),
     timeout: float = typer.Option(10.0, "--timeout", help="HTTP timeout per request (seconds, ad-hoc mode)."),
     insecure: bool = typer.Option(False, "--insecure", help="Skip TLS certificate verification (ad-hoc mode)."),
-    no_alerts: bool = typer.Option(False, "--no-alerts", help="Skip alert dispatch even if configured."),
+    no_alerts: bool = typer.Option(
+        False,
+        "--no-alerts",
+        "--no-alert",
+        help="Skip alert dispatch even if configured.",
+    ),
     state: Path | None = typer.Option(
         None,
         "--state",
@@ -192,7 +202,7 @@ def alert_test_command(
     if cfg.alerts is None:
         raise typer.BadParameter(f"{config_path} has no [alerts.*] section.")
 
-    alerters = _build_alerters(cfg.alerts, raise_on_error=True)
+    alerters = _build_alerters(cfg.alerts)
     if not alerters:
         raise typer.BadParameter("No alerters configured.")
 
@@ -284,15 +294,8 @@ def _resolve_run_context(
     return targets, cfg, config_path
 
 
-def _build_alerters(cfg: AlertsConfig, *, raise_on_error: bool = False) -> list[AlerterBinding]:
-    """Instantiate one :class:`AlerterBinding` per configured ``[alerts.<name>]`` section.
-
-    Args:
-        cfg: Parsed alerts configuration.
-        raise_on_error: If True, alerters propagate delivery failures (used by
-            ``alert test`` so the test surfaces broken webhooks instead of
-            silently swallowing them).
-    """
+def _build_alerters(cfg: AlertsConfig) -> list[AlerterBinding]:
+    """Instantiate one :class:`AlerterBinding` per configured ``[alerts.<name>]`` section."""
     out: list[AlerterBinding] = []
     if cfg.slack is not None:
         out.append(
@@ -300,7 +303,6 @@ def _build_alerters(cfg: AlertsConfig, *, raise_on_error: bool = False) -> list[
                 alerter=SlackAlerter(
                     webhook_url=cfg.slack.resolve_webhook_url(),
                     timeout_s=cfg.slack.timeout_s,
-                    raise_on_error=raise_on_error,
                 ),
                 notify_on=set(cfg.slack.notify_on),
             )
@@ -313,7 +315,15 @@ def _dispatch_alerts(
     alerts_cfg: AlertsConfig,
     state_path: Path,
 ) -> None:
-    """Compute transitions, persist new state, and notify each alerter."""
+    """Compute transitions, notify alerters, then persist state (only if delivery succeeded).
+
+    Delivery failures (Slack 5xx, transport errors) are caught so they cannot
+    change the run's exit code, but on failure the new state is *not* saved.
+    Next run will recompute the same transitions and retry. With multiple
+    alerters this is conservative (any failure suppresses the save and may
+    re-deliver to alerters that already succeeded); per-alerter dedupe is a
+    later-day problem.
+    """
     bindings = _build_alerters(alerts_cfg)
     if not bindings:
         return
@@ -325,12 +335,13 @@ def _dispatch_alerts(
     now = datetime.now(UTC)
     previous = load_state(state_path)
     transitions, new_state = compute_transitions(previous, reports, notify_on_union, now)
-    save_state(state_path, new_state)
 
     if not transitions:
+        save_state(state_path, new_state)
         return
 
-    async def _send_all() -> None:
+    async def _send_all() -> bool:
+        all_ok = True
         for binding in bindings:
             filtered = [
                 t
@@ -342,9 +353,15 @@ def _dispatch_alerts(
             try:
                 await binding.alerter.notify(filtered)
             except Exception:  # noqa: BLE001 - alerts must not change exit code
+                all_ok = False
                 _log.exception("alerter %s failed", binding.alerter.name)
+        return all_ok
 
-    asyncio.run(_send_all())
+    delivery_ok = asyncio.run(_send_all())
+    if delivery_ok:
+        save_state(state_path, new_state)
+    else:
+        _log.warning("alerter delivery failed; not saving state so transitions will retry on the next run")
 
 
 def _state(ctx: typer.Context) -> GlobalState:

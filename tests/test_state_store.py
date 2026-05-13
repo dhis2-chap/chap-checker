@@ -83,17 +83,16 @@ def test_recovery_emits_transition() -> None:
     assert new_state.states["prod::ping"].status is Status.OK
 
 
-def test_intra_failure_change_does_not_double_page() -> None:
-    """FAIL -> ERROR shouldn't fire if only FAIL is in notify_on - both sides need to span the boundary."""
+def test_intra_failure_change_does_not_emit_transition() -> None:
+    """FAIL -> ERROR is a tweak to a sustained outage; don't re-alert."""
     now = datetime.now(UTC)
     previous = StateFile(states={"prod::ping": CheckState(status=Status.FAIL, since=now)})
     reports = [_report("prod", _result("ping", Status.ERROR))]
-    transitions, _ = compute_transitions(previous, reports, {Status.FAIL}, now)
+    transitions, new_state = compute_transitions(previous, reports, {Status.FAIL, Status.ERROR, Status.WARN}, now)
 
-    # Both prev (FAIL) and curr (ERROR) - prev is in notify_on, so we DO emit;
-    # this is the documented two-sided guard. With notify_on covering both,
-    # the dispatch layer filters per-alerter.
-    assert len(transitions) == 1
+    assert transitions == []
+    # State is still updated so the next OK can produce a recovery alert.
+    assert new_state.states["prod::ping"].status is Status.ERROR
 
 
 def test_warn_in_notify_on_fires_on_anomaly() -> None:
@@ -106,31 +105,47 @@ def test_warn_in_notify_on_fires_on_anomaly() -> None:
     assert transitions[0].current_status is Status.WARN
 
 
-def test_ok_to_skipped_does_not_transition() -> None:
+def test_ok_to_skipped_does_not_transition_and_does_not_persist_skipped() -> None:
     now = datetime.now(UTC)
     previous = StateFile()  # implicit OK
     reports = [_report("prod", _result("system-info", Status.SKIPPED, "Skipped: ping not OK."))]
     transitions, new_state = compute_transitions(previous, reports, {Status.FAIL, Status.ERROR, Status.WARN}, now)
 
     assert transitions == []
-    assert new_state.states["prod::system-info"].status is Status.SKIPPED
+    # SKIPPED is never persisted; there was no prior state, so nothing to track.
+    assert "prod::system-info" not in new_state.states
 
 
-def test_fail_to_skipped_does_not_transition() -> None:
+def test_fail_to_skipped_preserves_failure_for_eventual_recovery() -> None:
+    """The interesting case: chap-route was FAIL; an upstream prereq fails so it's
+    now SKIPPED; the recovery alert must still fire when chap-route comes back OK."""
     now = datetime.now(UTC)
-    earlier = datetime(2026, 1, 1, tzinfo=UTC)
-    previous = StateFile(states={"prod::system-info": CheckState(status=Status.FAIL, since=earlier)})
-    reports = [_report("prod", _result("system-info", Status.SKIPPED, "Skipped: ping not OK."))]
-    transitions, _ = compute_transitions(previous, reports, {Status.FAIL, Status.ERROR, Status.WARN}, now)
+    t0 = datetime(2026, 1, 1, tzinfo=UTC)
+    state_a = StateFile(states={"prod::chap-route": CheckState(status=Status.FAIL, since=t0)})
 
-    assert transitions == []
+    # Run with chap-route SKIPPED (e.g. because ping is down).
+    reports_b = [_report("prod", _result("chap-route", Status.SKIPPED, "Skipped: ping not OK."))]
+    transitions_b, state_b = compute_transitions(state_a, reports_b, {Status.FAIL, Status.ERROR, Status.WARN}, now)
+    assert transitions_b == []
+    # State must remember the FAIL, not overwrite with SKIPPED.
+    assert state_b.states["prod::chap-route"].status is Status.FAIL
+
+    # Now chap-route comes back OK.
+    reports_c = [_report("prod", _result("chap-route", Status.OK, "back"))]
+    transitions_c, state_c = compute_transitions(state_b, reports_c, {Status.FAIL, Status.ERROR, Status.WARN}, now)
+    assert len(transitions_c) == 1
+    assert transitions_c[0].kind == "recovery"
+    assert state_c.states["prod::chap-route"].status is Status.OK
 
 
-def test_skipped_to_ok_does_not_transition() -> None:
+def test_skipped_to_ok_does_not_transition_when_no_prior_failure() -> None:
+    """If the check never had a real prior status, SKIPPED -> OK is silent."""
     now = datetime.now(UTC)
-    earlier = datetime(2026, 1, 1, tzinfo=UTC)
-    previous = StateFile(states={"prod::system-info": CheckState(status=Status.SKIPPED, since=earlier)})
-    reports = [_report("prod", _result("system-info", Status.OK, "back"))]
-    transitions, _ = compute_transitions(previous, reports, {Status.FAIL, Status.ERROR, Status.WARN}, now)
+    previous = StateFile()  # no prior state
+    reports = [_report("prod", _result("chap-route", Status.OK, "back"))]
+    transitions, new_state = compute_transitions(previous, reports, {Status.FAIL, Status.ERROR, Status.WARN}, now)
 
+    # First-ever sighting is OK; no transition.
     assert transitions == []
+    # State is preserved (curr_status == prev_status implicit OK).
+    assert "prod::chap-route" in new_state.states

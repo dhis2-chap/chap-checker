@@ -84,7 +84,16 @@ class ChapRouteCheck:
                 duration_ms=duration_ms,
             )
 
-        listing = Dhis2RouteList.model_validate(response.json())
+        try:
+            body = response.json()
+        except ValueError:
+            return CheckResult(
+                name=self.name,
+                status=Status.FAIL,
+                message="DHIS2 returned malformed JSON when listing routes.",
+                duration_ms=duration_ms,
+            )
+        listing = Dhis2RouteList.model_validate(body)
         match = next((r for r in listing.routes if r.code == CHAP_ROUTE_CODE), None)
         if match is None:
             return CheckResult(

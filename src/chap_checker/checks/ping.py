@@ -44,7 +44,17 @@ class PingCheck:
                 duration_ms=duration_ms,
             )
 
-        body = response.json() if response.headers.get("content-type", "").startswith("application/json") else {}
+        body: dict[str, object] = {}
+        if response.headers.get("content-type", "").startswith("application/json"):
+            try:
+                body = response.json() or {}
+            except ValueError:
+                return CheckResult(
+                    name=self.name,
+                    status=Status.FAIL,
+                    message="Server returned malformed JSON for /api/me.",
+                    duration_ms=duration_ms,
+                )
         return CheckResult(
             name=self.name,
             status=Status.OK,

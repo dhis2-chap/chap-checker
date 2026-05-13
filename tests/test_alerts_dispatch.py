@@ -121,10 +121,13 @@ def test_dispatch_emits_recovery(
     assert fake.calls == []
 
 
-def test_alerter_exception_is_swallowed(
+def test_alerter_exception_is_swallowed_but_state_is_not_saved(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    """A Slack outage must not crash the run, and must not commit the new state -
+    next run will recompute the same transition and retry delivery."""
+
     class _BoomAlerter:
         name = "boom"
 
@@ -137,11 +140,37 @@ def test_alerter_exception_is_swallowed(
     )
 
     state_path = tmp_path / "state.json"
-    # Should not raise.
+    # Pre-existing state: everything OK.
+    save_state(
+        state_path,
+        StateFile(states={"prod::ping": CheckState(status=Status.OK, since=datetime.now(UTC))}),
+    )
+
+    # Dispatch must not raise (alert delivery never changes exit code).
     _dispatch_alerts([_failing_report()], _alerts_cfg(), state_path)
-    # State still persisted despite alerter failure.
+
+    # State must remain OK so the next run retries the failure transition.
     saved = load_state(state_path)
-    assert saved.states["prod::ping"].status is Status.FAIL
+    assert saved.states["prod::ping"].status is Status.OK
+
+
+def test_state_saved_when_no_transitions(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """An all-OK run should still persist state so newly-seen checks are tracked."""
+    fake = _FakeAlerter()
+    monkeypatch.setattr(
+        "chap_checker.cli._build_alerters",
+        lambda _cfg: [_binding(fake, Status.FAIL)],
+    )
+
+    state_path = tmp_path / "state.json"
+    _dispatch_alerts([_recovering_report()], _alerts_cfg(), state_path)
+
+    assert fake.calls == []  # no transitions, nothing dispatched
+    saved = load_state(state_path)
+    assert saved.states["prod::ping"].status is Status.OK
 
 
 def test_slack_config_resolves_env(monkeypatch: pytest.MonkeyPatch) -> None:

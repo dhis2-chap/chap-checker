@@ -55,7 +55,7 @@ def test_slack_posts_blocks_to_webhook() -> None:
     assert str(request.url) == "https://hooks.slack.com/services/T/B/X"
     body = json.loads(request.content)
     assert body["blocks"][0]["type"] == "header"
-    assert "1 new failure(s), 1 recovery" in body["text"]
+    assert "1 new failure, 1 recovery" in body["text"]
 
     # One colored attachment per transition: failure -> red, recovery -> green.
     assert len(body["attachments"]) == 2
@@ -78,55 +78,48 @@ def test_slack_empty_transitions_skips_post() -> None:
     assert captured == []
 
 
-def test_slack_swallows_5xx() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(500, text="boom")
-
-    alerter = SlackAlerter(
-        webhook_url="https://hooks.slack.com/x",
-        transport=httpx.MockTransport(handler),
-    )
-    # Should not raise.
-    asyncio.run(alerter.notify([_failure()]))
-
-
-def test_slack_swallows_transport_error() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("nope")
-
-    alerter = SlackAlerter(
-        webhook_url="https://hooks.slack.com/x",
-        transport=httpx.MockTransport(handler),
-    )
-    # Should not raise.
-    asyncio.run(alerter.notify([_failure()]))
-
-
-def test_slack_raise_on_error_propagates_5xx() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(500, text="boom")
-
-    alerter = SlackAlerter(
-        webhook_url="https://hooks.slack.com/x",
-        transport=httpx.MockTransport(handler),
-        raise_on_error=True,
-    )
+def test_slack_raises_on_5xx() -> None:
+    """The alerter raises on non-2xx; the dispatcher decides what to do with it."""
     import pytest
 
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, text="boom")
+
+    alerter = SlackAlerter(
+        webhook_url="https://hooks.slack.com/x",
+        transport=httpx.MockTransport(handler),
+    )
     with pytest.raises(RuntimeError, match="500"):
         asyncio.run(alerter.notify([_failure()]))
 
 
-def test_slack_raise_on_error_propagates_transport_error() -> None:
+def test_slack_raises_on_transport_error() -> None:
+    import pytest
+
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("nope")
 
     alerter = SlackAlerter(
         webhook_url="https://hooks.slack.com/x",
         transport=httpx.MockTransport(handler),
-        raise_on_error=True,
     )
-    import pytest
-
     with pytest.raises(httpx.ConnectError):
         asyncio.run(alerter.notify([_failure()]))
+
+
+def test_slack_pluralizes_recoveries() -> None:
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200)
+
+    alerter = SlackAlerter(
+        webhook_url="https://hooks.slack.com/x",
+        transport=httpx.MockTransport(handler),
+    )
+    asyncio.run(alerter.notify([_recovery(), _recovery()]))
+
+    body = json.loads(captured[0].content)
+    assert "2 recoveries" in body["text"]
+    assert "0 new failures" in body["text"]

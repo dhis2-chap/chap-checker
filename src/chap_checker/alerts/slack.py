@@ -69,31 +69,26 @@ class SlackAlerter:
         webhook_url: str,
         timeout_s: float = 10.0,
         transport: httpx.AsyncBaseTransport | None = None,
-        raise_on_error: bool = False,
     ) -> None:
         self._webhook_url = webhook_url
         self._timeout_s = timeout_s
         self._transport = transport
-        self._raise_on_error = raise_on_error
 
     async def notify(self, transitions: list[Transition]) -> None:
+        """POST the transitions to Slack.
+
+        Raises on transport errors or non-2xx responses. The caller is
+        responsible for deciding what to do with the failure (the cron-side
+        dispatcher swallows it but skips the state save so the transition
+        retries next run).
+        """
         if not transitions:
             return
         payload = _build_payload(transitions)
-        try:
-            async with httpx.AsyncClient(timeout=self._timeout_s, transport=self._transport) as client:
-                response = await client.post(self._webhook_url, json=payload.model_dump(mode="json"))
-        except Exception:
-            if self._raise_on_error:
-                raise
-            _log.exception("slack notify failed")
-            return
-
+        async with httpx.AsyncClient(timeout=self._timeout_s, transport=self._transport) as client:
+            response = await client.post(self._webhook_url, json=payload.model_dump(mode="json"))
         if response.status_code >= 400:
-            msg = f"slack webhook returned {response.status_code}: {response.text[:200]}"
-            if self._raise_on_error:
-                raise RuntimeError(msg)
-            _log.warning(msg)
+            raise RuntimeError(f"slack webhook returned {response.status_code}: {response.text[:200]}")
 
 
 def _color_for(transition: Transition) -> str:
@@ -105,7 +100,9 @@ def _color_for(transition: Transition) -> str:
 def _build_payload(transitions: list[Transition]) -> SlackPayload:
     failures = [t for t in transitions if t.kind == "failure"]
     recoveries = [t for t in transitions if t.kind == "recovery"]
-    summary = f"chap-checker: {len(failures)} new failure(s), {len(recoveries)} recovery"
+    failure_word = "failure" if len(failures) == 1 else "failures"
+    recovery_word = "recovery" if len(recoveries) == 1 else "recoveries"
+    summary = f"chap-checker: {len(failures)} new {failure_word}, {len(recoveries)} {recovery_word}"
 
     header_blocks: list[SlackBlock] = [
         SlackBlock(type="header", text=SlackBlockText(type="plain_text", text=summary)),

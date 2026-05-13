@@ -56,7 +56,15 @@ class ModelingAppCheck:
                 duration_ms=duration_ms,
             )
 
-        body = response.json()
+        try:
+            body = response.json()
+        except ValueError:
+            return CheckResult(
+                name=self.name,
+                status=Status.FAIL,
+                message="DHIS2 returned malformed JSON when listing apps.",
+                duration_ms=duration_ms,
+            )
         entries = body if isinstance(body, list) else body.get("apps", [])
         apps = [Dhis2App.model_validate(entry) for entry in entries]
         match = next((a for a in apps if a.app_hub_id == MODELING_APP_HUB_ID), None)
