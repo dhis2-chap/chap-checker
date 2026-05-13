@@ -448,10 +448,62 @@ _INDEX_HTML = r"""<!doctype html>
       font-size: 12px;
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 16px;
     }
     footer.statusbar .ok { color: var(--accent); }
     footer.statusbar .stale { color: var(--warn); }
+    footer.statusbar .keys { margin-left: auto; color: var(--muted); }
+    footer.statusbar .keys b { color: var(--accent); font-weight: 700; }
+
+    /* Command palette overlay */
+    #palette-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.55);
+      display: none;
+      align-items: flex-start;
+      justify-content: center;
+      padding-top: 12vh;
+      z-index: 100;
+    }
+    #palette-backdrop.open { display: flex; }
+    #palette {
+      background: #1a1a1a;
+      border: 1px solid #333;
+      width: min(560px, 90vw);
+      padding: 8px;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.7);
+    }
+    #palette-input {
+      width: 100%;
+      background: #0e0e0e;
+      color: var(--text);
+      border: 1px solid #333;
+      padding: 10px 12px;
+      font-family: inherit;
+      font-size: 14px;
+      outline: none;
+      box-sizing: border-box;
+    }
+    #palette-input:focus { border-color: var(--accent); }
+    #palette-list {
+      list-style: none;
+      margin: 8px 0 0;
+      padding: 0;
+      max-height: 50vh;
+      overflow-y: auto;
+    }
+    .palette-item {
+      display: flex;
+      align-items: center;
+      padding: 8px 12px;
+      color: var(--text);
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .palette-item.active { background: #222; border-left: 3px solid var(--accent); padding-left: 9px; }
+    .palette-item .label { flex: 1 1 auto; }
+    .palette-item .hint { color: var(--muted); font-size: 12px; margin-left: 12px; }
   </style>
 </head>
 <body>
@@ -470,7 +522,17 @@ _INDEX_HTML = r"""<!doctype html>
 
   <footer class="statusbar">
     <span id="last-refresh">awaiting first refresh ...</span>
+    <span class="keys">
+      <b>r</b> refresh  ·  <b>⌘K</b> / <b>^K</b> palette
+    </span>
   </footer>
+
+  <div id="palette-backdrop" role="dialog" aria-modal="true" aria-label="Command palette">
+    <div id="palette">
+      <input id="palette-input" type="text" placeholder="Type a command..." autocomplete="off">
+      <ul id="palette-list"></ul>
+    </div>
+  </div>
 
   <script>
     const STATUS_CLASSES = {
@@ -615,6 +677,137 @@ _INDEX_HTML = r"""<!doctype html>
     setInterval(tickClock, 1000); // tick the wall clock + relative timestamps
     poll();
     tickClock();
+
+    // ------------------------------------------------------------------
+    // Command palette + keyboard shortcuts
+    // ------------------------------------------------------------------
+    const COMMANDS = [
+      {
+        id: "refresh",
+        label: "Refresh now",
+        hint: "r",
+        run: () => { poll(); },
+      },
+      {
+        id: "fullscreen",
+        label: "Toggle fullscreen",
+        hint: "f",
+        run: () => {
+          if (document.fullscreenElement) {
+            document.exitFullscreen?.();
+          } else {
+            document.documentElement.requestFullscreen?.();
+          }
+        },
+      },
+      {
+        id: "open-repo",
+        label: "Open GitHub repository",
+        hint: "",
+        run: () => window.open("https://github.com/dhis2-chap/chap-checker", "_blank", "noopener"),
+      },
+      {
+        id: "open-docs",
+        label: "Open documentation",
+        hint: "",
+        run: () => window.open("https://dhis2-chap.github.io/chap-checker/", "_blank", "noopener"),
+      },
+    ];
+
+    const paletteEl = document.getElementById("palette-backdrop");
+    const inputEl = document.getElementById("palette-input");
+    const listEl = document.getElementById("palette-list");
+    let activeIndex = 0;
+    let filtered = COMMANDS;
+
+    function openPalette() {
+      paletteEl.classList.add("open");
+      inputEl.value = "";
+      filtered = COMMANDS;
+      activeIndex = 0;
+      renderPalette();
+      // Defer focus until after the modal becomes visible.
+      requestAnimationFrame(() => inputEl.focus());
+    }
+    function closePalette() {
+      paletteEl.classList.remove("open");
+    }
+    function renderPalette() {
+      listEl.innerHTML = filtered
+        .map((c, i) => `
+          <li class="palette-item ${i === activeIndex ? "active" : ""}" data-i="${i}">
+            <span class="label">${escapeHtml(c.label)}</span>
+            ${c.hint ? `<span class="hint">${escapeHtml(c.hint)}</span>` : ""}
+          </li>
+        `)
+        .join("");
+    }
+    function applyFilter() {
+      const q = inputEl.value.trim().toLowerCase();
+      filtered = q
+        ? COMMANDS.filter((c) => c.label.toLowerCase().includes(q))
+        : COMMANDS;
+      activeIndex = 0;
+      renderPalette();
+    }
+    function runActive() {
+      const cmd = filtered[activeIndex];
+      if (cmd) {
+        closePalette();
+        cmd.run();
+      }
+    }
+
+    inputEl.addEventListener("input", applyFilter);
+    inputEl.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") { closePalette(); e.preventDefault(); }
+      else if (e.key === "ArrowDown") {
+        activeIndex = Math.min(filtered.length - 1, activeIndex + 1);
+        renderPalette();
+        e.preventDefault();
+      } else if (e.key === "ArrowUp") {
+        activeIndex = Math.max(0, activeIndex - 1);
+        renderPalette();
+        e.preventDefault();
+      } else if (e.key === "Enter") {
+        runActive();
+        e.preventDefault();
+      }
+    });
+    listEl.addEventListener("click", (e) => {
+      const item = e.target.closest(".palette-item");
+      if (!item) return;
+      activeIndex = Number(item.dataset.i);
+      runActive();
+    });
+    paletteEl.addEventListener("click", (e) => {
+      // Click on backdrop (not the inner card) closes.
+      if (e.target === paletteEl) closePalette();
+    });
+
+    // Global hotkeys. Ignored when an input/textarea has focus, except
+    // for Escape inside the palette which is handled above.
+    document.addEventListener("keydown", (e) => {
+      const isPaletteOpen = paletteEl.classList.contains("open");
+      const target = e.target;
+      const inField = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA");
+
+      // Ctrl/Cmd + K toggles the palette regardless of focus.
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        if (isPaletteOpen) closePalette();
+        else openPalette();
+        return;
+      }
+      if (inField || isPaletteOpen) return;
+      if (e.key === "r" || e.key === "R") {
+        e.preventDefault();
+        poll();
+      } else if (e.key === "f" || e.key === "F") {
+        e.preventDefault();
+        COMMANDS.find((c) => c.id === "fullscreen")?.run();
+      }
+    });
   </script>
 </body>
 </html>

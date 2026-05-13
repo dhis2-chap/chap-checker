@@ -10,6 +10,28 @@ Same tile layout, palette, and status semantics as the
 TV screen with no scrolling. Designed for a kiosk display: pin a browser at
 the URL and walk away.
 
+## Keys
+
+| Key             | Action                                       |
+| --------------- | -------------------------------------------- |
+| `r`             | Refresh the snapshot from the server now.    |
+| `f`             | Toggle browser fullscreen.                   |
+| `Ctrl+K` / `⌘K` | Open the command palette.                    |
+| `Esc`           | Close the palette.                           |
+| `↑` / `↓`       | Move the active item in the palette.         |
+| `Enter`         | Run the active palette command.              |
+
+The command palette currently exposes:
+
+- **Refresh now**
+- **Toggle fullscreen**
+- **Open GitHub repository**
+- **Open documentation**
+
+Type to filter the list. Click an item or hit `Enter` to run it. New
+commands are a small JS addition in
+[`src/chap_checker/web.py`](https://github.com/dhis2-chap/chap-checker/blob/main/src/chap_checker/web.py).
+
 ## Architecture
 
 A small FastAPI app:
