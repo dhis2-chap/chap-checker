@@ -14,3 +14,6 @@ chap-checker.toml
 
 # Persisted alerter state
 chap-checker.state.json
+
+# mkdocs build output
+site/
