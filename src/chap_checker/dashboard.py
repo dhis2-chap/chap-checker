@@ -531,7 +531,6 @@ class InstanceTile(Container):
             return f"{label}  [#888]{pct}%[/]"
         return label
 
-
     def _tick_updated(self) -> None:
         if self.last_refresh is None:
             return
