@@ -178,8 +178,10 @@ class CheckRow(Horizontal):
         self.check_status = status
 
     def compose(self) -> ComposeResult:
-        # Strip the dhis2_ / dhis2_chap_ prefix in display only; full name shown in JSON / verify.
-        short = self.check_name.removeprefix("dhis2_chap_").removeprefix("dhis2_")
+        # Strip the leading `dhis2_` namespace; keep `chap_` so chap-specific
+        # checks remain distinguishable from their DHIS2 counterparts in the
+        # condensed display (e.g. dhis2_ping -> ping, dhis2_chap_ping -> chap_ping).
+        short = self.check_name.removeprefix("dhis2_")
         symbol = _SYMBOL_BY_STATUS.get(self.check_status, "?")
         color = _ACCENT if self.check_status is Status.OK else _color_for(self.check_status)
         yield Static(short, classes="check-name")
