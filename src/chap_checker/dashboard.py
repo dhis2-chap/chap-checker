@@ -16,6 +16,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
+from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.command import DiscoveryHit, Hit, Hits, Provider
@@ -67,6 +68,47 @@ _STRIP_COLOR_BY_STATUS = {
 # above the tile background (#161616) so the placeholder cells stay
 # visible instead of melting into the surrounding panel.
 _STRIP_COLOR_EMPTY = "#3a3a3a"
+
+
+class UptimeStrip(Widget):
+    """One-row coloured-block history strip that fills its widget width.
+
+    Each cell is one terminal column wide; the rightmost cell is the
+    most recent refresh and the strip pads with dim placeholders on
+    the left until enough history accumulates. Reads ``self.size``
+    at render time so the strip spans the full tile width regardless
+    of how many instances are configured.
+    """
+
+    DEFAULT_CSS = """
+    UptimeStrip {
+        height: 1;
+        width: 1fr;
+        padding: 0 1;
+    }
+    """
+
+    def __init__(self, history: deque[Status]) -> None:
+        super().__init__()
+        self._history = history
+
+    def render(self) -> Text:
+        # Padding eats one cell on each side (`padding: 0 1`).
+        width = max(1, self.size.width - 2)
+        slots = list(self._history)
+        text = Text()
+        if width <= len(slots):
+            # Tile narrower than the buffer - show the most recent
+            # `width` refreshes, one cell each.
+            for status in slots[-width:]:
+                text.append("█", style=_STRIP_COLOR_BY_STATUS.get(status, _STRIP_COLOR_EMPTY))
+            return text
+        # Tile wider than (or equal to) the buffer - dim padding on
+        # the left, real history on the right.
+        text.append("█" * (width - len(slots)), style=_STRIP_COLOR_EMPTY)
+        for status in slots:
+            text.append("█", style=_STRIP_COLOR_BY_STATUS.get(status, _STRIP_COLOR_EMPTY))
+        return text
 
 
 def columns_for(n_instances: int) -> int:
@@ -330,9 +372,7 @@ class InstanceTile(Container):
         color: #555;
         padding: 0 1;
     }
-    InstanceTile .uptime-strip {
-        height: 1;
-        padding: 0 1;
+    InstanceTile UptimeStrip {
         margin-bottom: 1;
     }
     InstanceTile .stats-row {
@@ -390,11 +430,7 @@ class InstanceTile(Container):
                 classes="uptime-header",
                 id="uptime-header",
             )
-            yield Static(
-                f"[{_STRIP_COLOR_EMPTY}]" + ("█" * _HISTORY_LEN) + "[/]",
-                classes="uptime-strip",
-                id="uptime-strip",
-            )
+            yield UptimeStrip(self.history)
             with Horizontal(classes="stats-row"):
                 with Vertical(classes="stat-cell"):
                     yield Static("latency", classes="stat-label")
@@ -478,10 +514,11 @@ class InstanceTile(Container):
         else:
             self.query_one("#uptime", Static).update("--")
 
-        # Uptime strip: 30 coloured blocks reflecting the last refreshes,
-        # padded with dim slots on the left until the buffer fills.
+        # Uptime header + strip. The strip is a custom widget that
+        # reads its width at render time so it fills the tile rather
+        # than rendering a fixed 30-cell run; just nudge it to repaint.
         self.query_one("#uptime-header", Static).update(self._render_history_header())
-        self.query_one("#uptime-strip", Static).update(self._render_history_strip())
+        self.query_one(UptimeStrip).refresh()
 
         self._tick_updated()
 
@@ -494,20 +531,6 @@ class InstanceTile(Container):
             return f"{label}  [#888]{pct}%[/]"
         return label
 
-    def _render_history_strip(self) -> str:
-        """Render the coloured block strip below the header.
-
-        Each cell is a full-height block coloured by the refresh's
-        worst non-skipped status (green / amber / red / magenta).
-        Slots that haven't been filled yet show in a dim grey so the
-        row reserves its full width from the first paint.
-        """
-        pad = _HISTORY_LEN - len(self.history)
-        parts: list[str] = [f"[{_STRIP_COLOR_EMPTY}]█[/]"] * pad
-        for status in self.history:
-            color = _STRIP_COLOR_BY_STATUS.get(status, _STRIP_COLOR_EMPTY)
-            parts.append(f"[{color}]█[/]")
-        return "".join(parts)
 
     def _tick_updated(self) -> None:
         if self.last_refresh is None:
@@ -673,6 +696,7 @@ __all__ = [
     "DashboardFooter",
     "DashboardHeader",
     "InstanceTile",
+    "UptimeStrip",
     "Widget",
     "columns_for",
     "run",
