@@ -19,6 +19,7 @@ from chap_checker.checks import all_checks
 from chap_checker.checks.base import Status, resolve_checks
 from chap_checker.client import Dhis2Target
 from chap_checker.config import (
+    DEFAULT_CONCURRENCY,
     DEFAULT_CONFIG_FILENAME,
     AlertsConfig,
     CheckerConfig,
@@ -149,6 +150,16 @@ def verify_command(
         help=f"Path to the persisted state file (default: ./{DEFAULT_STATE_FILENAME} next to the config).",
         envvar="CHAP_CHECKER_STATE",
     ),
+    concurrency: int | None = typer.Option(
+        None,
+        "--concurrency",
+        help=(
+            f"Number of targets to check in parallel. Overrides the config value if given. "
+            f"Default {DEFAULT_CONCURRENCY}."
+        ),
+        min=1,
+        max=100,
+    ),
 ) -> None:
     """Run all registered checks against one or more DHIS2 instances.
 
@@ -171,8 +182,12 @@ def verify_command(
         insecure=insecure,
         check_names=check,
     )
+    # CLI flag wins; else use the config value; else the built-in default.
+    resolved_concurrency = (
+        concurrency if concurrency is not None else (cfg.concurrency if cfg is not None else DEFAULT_CONCURRENCY)
+    )
     started_at = datetime.now(UTC)
-    reports = run_targets_sync(targets)
+    reports = run_targets_sync(targets, concurrency=resolved_concurrency)
     finished_at = datetime.now(UTC)
 
     if not no_alerts and cfg is not None and cfg.alerts is not None and config_path is not None:
