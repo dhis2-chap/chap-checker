@@ -300,7 +300,7 @@ def _checks_list_impl(ctx: typer.Context) -> None:
 
 
 checks_app.command("list", help="List registered checks.")(_checks_list_impl)
-checks_app.command("ls", help="Alias for 'list'.")(_checks_list_impl)
+checks_app.command("ls", hidden=True)(_checks_list_impl)
 
 app.add_typer(checks_app, name="checks")
 
