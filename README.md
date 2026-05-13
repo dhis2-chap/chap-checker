@@ -230,8 +230,9 @@ chap-checker alerts test --name slack          # send through one
 chap-checker --json alerts test                # parseable AlertTestReport JSON
 ```
 
-Exit code reflects per-alerter delivery success. Combined with cron, a daily
-smoke test catches webhook URL rot.
+Exit code reflects per-alerter delivery success. Each invocation actually
+posts a message to the channel, so run it manually after a webhook URL
+change rather than on a cron.
 
 ### Cron recipes
 
@@ -249,12 +250,9 @@ Append structured runs to a log for ingestion:
     2>> /var/log/chap-checker/err.log
 ```
 
-Daily alert-pipeline smoke test:
-
-```cron
-0 9 * * * chap-checker --json alerts test \
-    >> /var/log/chap-checker/alert-pipeline.jsonl
-```
+`alerts test` is intentionally not on the cron list - it posts a real
+message to the channel, so put it behind a manual run after webhook
+changes or when you suspect the pipeline is broken.
 
 ## Development
 
