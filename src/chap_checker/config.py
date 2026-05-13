@@ -123,6 +123,9 @@ class AlertsConfig(BaseModel):
     slack: SlackAlertConfig | None = None
 
 
+DEFAULT_CONCURRENCY = 5
+
+
 class CheckerConfig(BaseModel):
     """Top-level ``chap-checker.toml`` document."""
 
@@ -130,6 +133,7 @@ class CheckerConfig(BaseModel):
 
     instances: dict[str, InstanceConfig] = Field(default_factory=dict)
     alerts: AlertsConfig | None = None
+    concurrency: int = Field(default=DEFAULT_CONCURRENCY, gt=0, le=100)
 
     def get(self, name: str) -> InstanceConfig:
         """Return one instance by name or raise :class:`KeyError`."""

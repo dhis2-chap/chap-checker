@@ -117,27 +117,35 @@ async def run_checks(target: Dhis2Target, checks: list[Check] | None = None) -> 
     return results
 
 
-async def run_targets(targets: list[TargetEntry]) -> list[RunReport]:
-    """Run each :class:`TargetEntry`'s checks sequentially.
+async def run_targets(targets: list[TargetEntry], concurrency: int = 5) -> list[RunReport]:
+    """Run each :class:`TargetEntry`'s checks, up to ``concurrency`` in parallel.
 
     If ``entry.check_names`` is set, it picks the checks (and their transitive
-    ``requires``); otherwise every registered check runs.
+    ``requires``); otherwise every registered check runs. Each target uses
+    its own :class:`Dhis2Client` so there is no shared HTTP state between
+    parallel runs. Reports come back in the input order (``asyncio.gather``
+    preserves it), so per-target tables render in the same order the
+    instances appear in the config.
     """
-    reports: list[RunReport] = []
-    for entry in targets:
-        _log.debug("running target %s", entry.name)
-        checks = resolve_checks(entry.check_names)
-        results = await run_checks(entry.target, checks)
-        reports.append(
-            RunReport(
+    if concurrency < 1:
+        raise ValueError(f"concurrency must be >= 1, got {concurrency}")
+
+    sem = asyncio.Semaphore(concurrency)
+
+    async def _bounded(entry: TargetEntry) -> RunReport:
+        async with sem:
+            _log.debug("running target %s", entry.name)
+            checks = resolve_checks(entry.check_names)
+            results = await run_checks(entry.target, checks)
+            return RunReport(
                 target_name=entry.name,
                 target_url=str(entry.target.base_url),
                 results=results,
             )
-        )
-    return reports
+
+    return list(await asyncio.gather(*(_bounded(e) for e in targets)))
 
 
-def run_targets_sync(targets: list[TargetEntry]) -> list[RunReport]:
+def run_targets_sync(targets: list[TargetEntry], concurrency: int = 5) -> list[RunReport]:
     """Synchronous wrapper around :func:`run_targets`."""
-    return asyncio.run(run_targets(targets))
+    return asyncio.run(run_targets(targets, concurrency=concurrency))
