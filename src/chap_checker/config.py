@@ -34,6 +34,7 @@ class InstanceConfig(BaseModel):
     timeout_s: float = Field(default=10.0, gt=0)
     verify_tls: bool = True
     checks: list[str] | None = Field(default=None, min_length=1)
+    alerts: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _exactly_one_password_source(self) -> "InstanceConfig":
@@ -76,10 +77,15 @@ class InstanceConfig(BaseModel):
         )
 
     def to_target_entry(self, name: str) -> "TargetEntry":
-        """Build a runtime :class:`TargetEntry` (with optional check filter)."""
+        """Build a runtime :class:`TargetEntry` (with optional check filter and opt-in alerters)."""
         from chap_checker.runner import TargetEntry
 
-        return TargetEntry(name=name, target=self.to_target(), check_names=self.checks)
+        return TargetEntry(
+            name=name,
+            target=self.to_target(),
+            check_names=self.checks,
+            alerts=list(self.alerts),
+        )
 
 
 class SlackAlertConfig(BaseModel):
@@ -131,6 +137,28 @@ class CheckerConfig(BaseModel):
             available = ", ".join(sorted(self.instances)) or "<none>"
             raise KeyError(f"Unknown instance '{name}'. Available: {available}")
         return self.instances[name]
+
+    def _configured_alerter_names(self) -> set[str]:
+        """Names of every ``[alerts.<name>]`` section actually present."""
+        if self.alerts is None:
+            return set()
+        configured: set[str] = set()
+        if self.alerts.slack is not None:
+            configured.add("slack")
+        return configured
+
+    @model_validator(mode="after")
+    def _instance_alerts_must_match_configured(self) -> "CheckerConfig":
+        configured = self._configured_alerter_names()
+        for name, inst in self.instances.items():
+            unknown = [a for a in inst.alerts if a not in configured]
+            if unknown:
+                raise ValueError(
+                    f"instance '{name}' references unconfigured alerter(s): "
+                    f"{', '.join(unknown)}. "
+                    f"Configured alerters: {', '.join(sorted(configured)) or '<none>'}"
+                )
+        return self
 
 
 def default_config_path() -> Path:

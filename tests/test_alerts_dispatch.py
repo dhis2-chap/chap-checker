@@ -7,8 +7,9 @@ import pytest
 from chap_checker.alerts.base import Alerter, AlerterBinding, Transition
 from chap_checker.checks.base import CheckResult, Status
 from chap_checker.cli import _build_alerters, _dispatch_alerts
+from chap_checker.client import Dhis2Target
 from chap_checker.config import AlertsConfig, SlackAlertConfig
-from chap_checker.runner import RunReport
+from chap_checker.runner import RunReport, TargetEntry
 from chap_checker.state_store import CheckState, StateFile, load_state, save_state
 
 
@@ -47,6 +48,26 @@ def _alerts_cfg() -> AlertsConfig:
     )
 
 
+def _targets(alerts: list[str] | None = None) -> list[TargetEntry]:
+    """Build a one-target list matching the reports' target_name.
+
+    Default opts the prod target into the "fake" alerter, since the dispatch
+    tests substitute a _FakeAlerter via monkeypatch and the dispatcher
+    filters by alerter name.
+    """
+    return [
+        TargetEntry(
+            name="prod",
+            target=Dhis2Target(
+                base_url="https://prod.example",  # type: ignore[arg-type]
+                username="u",
+                password="p",
+            ),
+            alerts=alerts if alerts is not None else ["fake"],
+        )
+    ]
+
+
 def _binding(alerter: Alerter, *statuses: Status) -> AlerterBinding:
     return AlerterBinding(alerter=alerter, notify_on=set(statuses))
 
@@ -69,7 +90,7 @@ def test_dispatch_fires_on_first_failure(
     )
 
     state_path = tmp_path / "state.json"
-    _dispatch_alerts([_failing_report()], _alerts_cfg(), state_path)
+    _dispatch_alerts([_failing_report()], _targets(), _alerts_cfg(), state_path)
 
     assert len(fake.calls) == 1
     assert fake.calls[0][0].kind == "failure"
@@ -92,7 +113,7 @@ def test_dispatch_silent_on_sustained_failure(
         StateFile(states={"prod::ping": CheckState(status=Status.FAIL, since=datetime.now(UTC))}),
     )
 
-    _dispatch_alerts([_failing_report()], _alerts_cfg(), state_path)
+    _dispatch_alerts([_failing_report()], _targets(), _alerts_cfg(), state_path)
     assert fake.calls == []
 
 
@@ -112,13 +133,13 @@ def test_dispatch_emits_recovery(
         StateFile(states={"prod::ping": CheckState(status=Status.FAIL, since=datetime.now(UTC))}),
     )
 
-    _dispatch_alerts([_recovering_report()], _alerts_cfg(), state_path)
+    _dispatch_alerts([_recovering_report()], _targets(), _alerts_cfg(), state_path)
     assert len(fake.calls) == 1
     assert fake.calls[0][0].kind == "recovery"
 
     # After recovery is recorded, next OK run is silent.
     fake.calls.clear()
-    _dispatch_alerts([_recovering_report()], _alerts_cfg(), state_path)
+    _dispatch_alerts([_recovering_report()], _targets(), _alerts_cfg(), state_path)
     assert fake.calls == []
 
 
@@ -148,7 +169,8 @@ def test_alerter_exception_is_swallowed_but_state_is_not_saved(
     )
 
     # Dispatch must not raise (alert delivery never changes exit code).
-    _dispatch_alerts([_failing_report()], _alerts_cfg(), state_path)
+    # Target opts into "boom" so the dispatcher tries to call _BoomAlerter and catches.
+    _dispatch_alerts([_failing_report()], _targets(alerts=["boom"]), _alerts_cfg(), state_path)
 
     # State must remain OK so the next run retries the failure transition.
     saved = load_state(state_path)
@@ -167,7 +189,7 @@ def test_state_saved_when_no_transitions(
     )
 
     state_path = tmp_path / "state.json"
-    _dispatch_alerts([_recovering_report()], _alerts_cfg(), state_path)
+    _dispatch_alerts([_recovering_report()], _targets(), _alerts_cfg(), state_path)
 
     assert fake.calls == []  # no transitions, nothing dispatched
     saved = load_state(state_path)
@@ -191,6 +213,26 @@ def test_slack_config_rejects_both_sources() -> None:
 def test_slack_config_rejects_neither_source() -> None:
     with pytest.raises(ValueError, match="exactly one"):
         SlackAlertConfig()
+
+
+def test_target_not_opted_in_skips_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A target with alerts=[] never reaches the alerter, even on a transition."""
+    fake = _FakeAlerter()
+    monkeypatch.setattr(
+        "chap_checker.cli._build_alerters",
+        lambda _cfg: [_binding(fake, Status.FAIL, Status.ERROR, Status.WARN)],
+    )
+
+    state_path = tmp_path / "state.json"
+    _dispatch_alerts([_failing_report()], _targets(alerts=[]), _alerts_cfg(), state_path)
+
+    assert fake.calls == []
+    # State should still be saved so future opt-in doesn't see this transition as new.
+    saved = load_state(state_path)
+    assert saved.states["prod::ping"].status is Status.FAIL
 
 
 def test_slack_config_parses_notify_on_strings() -> None:

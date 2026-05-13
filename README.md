@@ -154,9 +154,37 @@ up failures naturally.
 
 ## Alerting
 
-Add an `[alerts.slack]` section to `./chap-checker.toml` (see
-`chap-checker.toml.example`) and `chap-checker` will POST a Slack message
-when any check's status flips between `OK` and a non-OK status.
+Configuring alerts is two steps:
+
+1. Add an `[alerts.<name>]` section to `./chap-checker.toml` to configure
+   a transport (currently only `[alerts.slack]` is supported).
+2. Opt each instance in via `alerts = ["slack", ...]` - instances that
+   don't list an alerter never dispatch to it, regardless of their
+   check results.
+
+```toml
+[alerts.slack]
+webhook_url_env = "SLACK_WEBHOOK_URL"
+
+[instances.prod]               # this one pages on transitions
+url = "https://dhis2.example.com"
+username = "ops"
+password_env = "PROD_PASS"
+alerts = ["slack"]
+
+[instances.staging]            # this one stays quiet
+url = "https://staging.dhis2.example.com"
+username = "ops"
+password_env = "STAGING_PASS"
+# no `alerts =` line, default is []
+```
+
+List configured alerters at runtime:
+
+```bash
+chap-checker alerts list             # Rich table
+chap-checker --json alerts list      # JSON for tooling
+```
 
 Alerting is **stateful** and transition-only:
 
@@ -197,8 +225,9 @@ channel. Slack's full guide: https://api.slack.com/messaging/webhooks
 Verify the webhook without breaking a real instance:
 
 ```bash
-chap-checker alert test                # human-readable
-chap-checker --json alert test         # parseable AlertTestReport JSON
+chap-checker alerts test                       # send through every configured alerter
+chap-checker alerts test --name slack          # send through one
+chap-checker --json alerts test                # parseable AlertTestReport JSON
 ```
 
 Exit code reflects per-alerter delivery success. Combined with cron, a daily
@@ -223,7 +252,7 @@ Append structured runs to a log for ingestion:
 Daily alert-pipeline smoke test:
 
 ```cron
-0 9 * * * chap-checker --json alert test \
+0 9 * * * chap-checker --json alerts test \
     >> /var/log/chap-checker/alert-pipeline.jsonl
 ```
 

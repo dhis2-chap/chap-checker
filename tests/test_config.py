@@ -193,6 +193,53 @@ checks = ["dhis2_ping"]
     assert cfg.get("x").checks == ["dhis2_ping"]
 
 
+def test_instance_alerts_referencing_unconfigured_alerter_rejected(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        """
+[instances.x]
+url = "https://x.test"
+username = "u"
+password = "p"
+alerts = ["discord"]
+""",
+    )
+    with pytest.raises(ValueError, match="unconfigured alerter"):
+        load_config(path)
+
+
+def test_instance_alerts_when_alerter_section_present_accepted(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        """
+[alerts.slack]
+webhook_url = "https://hooks.slack.com/x"
+
+[instances.x]
+url = "https://x.test"
+username = "u"
+password = "p"
+alerts = ["slack"]
+""",
+    )
+    cfg = load_config(path)
+    assert cfg.get("x").alerts == ["slack"]
+
+
+def test_instance_alerts_defaults_to_empty(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        """
+[instances.x]
+url = "https://x.test"
+username = "u"
+password = "p"
+""",
+    )
+    cfg = load_config(path)
+    assert cfg.get("x").alerts == []
+
+
 def test_empty_check_list_rejected(tmp_path: Path) -> None:
     path = _write(
         tmp_path,

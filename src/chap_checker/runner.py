@@ -21,11 +21,16 @@ class TargetEntry(BaseModel):
     target. ``None`` means "every registered check". A non-empty list is
     resolved via :func:`chap_checker.checks.base.resolve_checks`, which
     also pulls in any transitive ``requires``.
+
+    ``alerts`` is the list of alerter names this target opts in to.
+    Empty (the default) means transitions on this target are tracked in
+    state but never dispatched to any alerter.
     """
 
     name: str
     target: Dhis2Target
     check_names: list[str] | None = None
+    alerts: list[str] = Field(default_factory=list)
 
 
 class TargetSummary(BaseModel):
