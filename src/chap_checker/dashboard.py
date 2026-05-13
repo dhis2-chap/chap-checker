@@ -221,9 +221,9 @@ class InstanceTile(Container):
         content-align: right middle;
     }
     InstanceTile .tile-url {
-        color: #666;
+        color: #888;
         height: 1;
-        padding-bottom: 1;
+        margin-bottom: 1;
     }
     InstanceTile .pill {
         width: auto;
@@ -276,7 +276,9 @@ class InstanceTile(Container):
     }
     InstanceTile .stats-row {
         height: 3;
+        dock: bottom;
         padding-top: 1;
+        background: #161616;
         align: center top;
     }
     InstanceTile .stat-cell {
