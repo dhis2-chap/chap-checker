@@ -1,31 +1,34 @@
 # Example chap-checker config. Copy to ./chap-checker.toml and edit.
 # `chap-checker verify` (no args) checks every instance below.
 # `chap-checker verify --instance <name>` checks just one.
+# `chap-checker checks list` shows every available check name.
 #
 # WARNING: this file contains credentials. Keep it out of git and set
 # restrictive permissions (chmod 600 chap-checker.toml).
 
+# Full chap stack: every registered check runs against this instance.
 [instances.example]
 url = "https://dhis2.example.com"
 username = "REPLACE_ME"
 password = "REPLACE_ME"
 
-[instances.another-example]
+# DHIS2-only instance: skip every dhis2_chap_* probe by listing only the
+# dhis2_* checks. Prereqs are pulled in automatically, so listing
+# `dhis2_system_info` would also bring `dhis2_ping`.
+[instances.dhis2-only-example]
 url = "https://dhis2.example.org"
 username = "REPLACE_ME"
 # Prefer pulling secrets from the environment in shared / CI setups:
 password_env = "ANOTHER_EXAMPLE_PASSWORD"
+checks = ["dhis2_ping", "dhis2_system_info"]
 
-# Optional overrides (shown with their defaults):
+# Optional per-instance overrides (shown with their defaults):
 # timeout_s = 10.0
 # verify_tls = true
-# Run only a subset of checks (prereqs are pulled in automatically).
-# Run `chap-checker checks list` to see the available names.
-# checks = ["dhis2_ping"]
 
-# Optional: alert to Slack when a check's status changes (stateful;
-# transitions only). State is persisted to ./chap-checker.state.json
-# (or --state <path>) next to this config.
+# Optional: alert to Slack when a check's status flips between OK and a non-OK
+# status. State is persisted to ./chap-checker.state.json (override with
+# --state <path>) next to this config.
 [alerts.slack]
 # Use either an inline URL or pull from the environment. Treat the webhook
 # URL as a credential.

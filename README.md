@@ -6,9 +6,9 @@ integrate with `chap-core` via a DHIS2 route.
 Operating a DHIS2 deployment with `chap-core` means several moving pieces all
 have to stay healthy at once:
 
-- the DHIS2 server itself (reachable, accepting credentials),
+- the DHIS2 server itself (reachable, accepts credentials, reports a version),
 - the `chap` route on DHIS2 that proxies traffic to `chap-core`,
-- the `chap-core` service behind that route,
+- the `chap-core` service behind that route (alive, reports a version),
 - the modeling app on the DHIS2 frontend.
 
 `chap-checker` runs one HTTP probe per piece against each DHIS2 instance it's
@@ -28,14 +28,14 @@ recorded as `SKIPPED` and don't contact the server (no cascade alerts).
 Two namespaces: `dhis2_*` for probes against DHIS2 itself, `dhis2_chap_*` for
 probes against the chap-core service behind the DHIS2 `chap` route.
 
-| Check                       | Endpoint                                  | Requires                  |
-| --------------------------- | ----------------------------------------- | ------------------------- |
-| `dhis2_ping`                | `/api/me`                                 | -                         |
-| `dhis2_system_info`         | `/api/system/info`                        | `dhis2_ping`              |
-| `dhis2_chap_route`          | `/api/routes?filter=code:eq:chap`         | `dhis2_ping`              |
-| `dhis2_chap_ping`           | `/api/routes/chap/run/health`             | `dhis2_chap_route`        |
-| `dhis2_chap_system_info`    | `/api/routes/chap/run/system/info` (parsed)      | `dhis2_chap_ping`   |
-| `dhis2_chap_modeling_app`   | `/api/apps` (matched by `app_hub_id`)     | `dhis2_ping`              |
+| Check                      | Endpoint                                            | Requires             |
+| -------------------------- | --------------------------------------------------- | -------------------- |
+| `dhis2_ping`               | `/api/me`                                           | -                    |
+| `dhis2_system_info`        | `/api/system/info`                                  | `dhis2_ping`         |
+| `dhis2_chap_route`         | `/api/routes?filter=code:eq:chap`                   | `dhis2_ping`         |
+| `dhis2_chap_ping`          | `/api/routes/chap/run/health`                       | `dhis2_chap_route`   |
+| `dhis2_chap_system_info`   | `/api/routes/chap/run/system/info` (parsed)         | `dhis2_chap_ping`    |
+| `dhis2_chap_modeling_app`  | `/api/apps` (matched by `app_hub_id`)               | `dhis2_ping`         |
 
 List them at runtime:
 
@@ -51,12 +51,23 @@ instance, set `checks` in the TOML - the transitive `requires` of each named
 check are pulled in automatically:
 
 ```toml
+# DHIS2-only instance (no chap stack):
 [instances.pure-dhis2]
 url = "https://dhis2.example.com"
 username = "admin"
 password_env = "DHIS2_PASS"
-checks = ["dhis2_ping"]   # only verify auth, skip chap-related probes
+checks = ["dhis2_ping", "dhis2_system_info"]
+
+# chap stack but no modeling-app check:
+[instances.api-only]
+url = "https://dhis2.example.com"
+username = "admin"
+password_env = "DHIS2_PASS"
+checks = ["dhis2_chap_system_info"]   # pulls in ping, system_info, route, chap_ping
 ```
+
+Unknown names are rejected at config load. There is no "exclude" syntax today;
+list the checks you want.
 
 ### Adding a new check
 
