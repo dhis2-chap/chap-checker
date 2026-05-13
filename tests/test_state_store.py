@@ -92,6 +92,16 @@ def test_load_schema_mismatch_returns_empty(tmp_path: Path) -> None:
     assert state.states == {}
 
 
+def test_save_state_creates_missing_parent_dirs(tmp_path: Path) -> None:
+    """A misconfigured --state path with a non-existent parent should still work."""
+    nested = tmp_path / "deep" / "nested" / "dir"
+    assert not nested.exists()
+    target = nested / "chap-checker.state.json"
+    save_state(target, StateFile())
+    assert target.exists()
+    assert load_state(target).states == {}
+
+
 def test_first_failure_emits_transition() -> None:
     now = datetime.now(UTC)
     previous = StateFile()

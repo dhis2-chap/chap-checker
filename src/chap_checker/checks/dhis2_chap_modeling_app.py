@@ -68,7 +68,24 @@ class Dhis2ChapModelingAppCheck:
                 message="DHIS2 returned malformed JSON when listing apps.",
                 duration_ms=duration_ms,
             )
-        entries = body if isinstance(body, list) else body.get("apps", [])
+        if isinstance(body, list):
+            entries = body
+        elif isinstance(body, dict):
+            entries = body.get("apps", [])
+        else:
+            return CheckResult(
+                name=self.name,
+                status=Status.FAIL,
+                message="Unexpected /api/apps response shape (expected a list or object).",
+                duration_ms=duration_ms,
+            )
+        if not all(isinstance(e, dict) for e in entries):
+            return CheckResult(
+                name=self.name,
+                status=Status.FAIL,
+                message="Unexpected /api/apps entry shape (entries must be objects).",
+                duration_ms=duration_ms,
+            )
         apps = [Dhis2App.model_validate(entry) for entry in entries]
         match = next((a for a in apps if a.app_hub_id == MODELING_APP_HUB_ID), None)
         if match is None:

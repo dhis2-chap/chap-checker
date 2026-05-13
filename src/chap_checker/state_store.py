@@ -74,11 +74,16 @@ def load_state(path: Path) -> StateFile:
 def save_state(path: Path, state: StateFile) -> None:
     """Atomically write ``state`` to ``path``.
 
+    Creates the parent directory if it doesn't exist (the file is typically
+    written from cron, where a misconfigured ``--state /some/new/dir/...``
+    path shouldn't crash dispatch).
+
     Uses a unique tmp file via :func:`tempfile.mkstemp` in the same directory
     so two concurrent ``chap-checker`` runs (overlapping cron tick + a manual
     invocation, say) don't clobber each other's tmp file or race on
     ``os.replace``.
     """
+    path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_str = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=str(path.parent))
     tmp = Path(tmp_str)
     try:

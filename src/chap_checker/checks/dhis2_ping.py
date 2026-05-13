@@ -46,21 +46,50 @@ class Dhis2PingCheck:
                 duration_ms=duration_ms,
             )
 
-        body: dict[str, object] = {}
-        if response.headers.get("content-type", "").startswith("application/json"):
-            try:
-                body = response.json() or {}
-            except ValueError:
-                return CheckResult(
-                    name=self.name,
-                    status=Status.FAIL,
-                    message="Server returned malformed JSON for /api/me.",
-                    duration_ms=duration_ms,
-                )
+        # A 2xx HTML page (typical SSO / reverse-proxy login interception)
+        # is NOT proof of DHIS2 auth - reject it.
+        if not response.headers.get("content-type", "").startswith("application/json"):
+            return CheckResult(
+                name=self.name,
+                status=Status.FAIL,
+                message=(
+                    "/api/me responded with a non-JSON body - likely an SSO or proxy login page "
+                    "intercepted the request. The DHIS2 server itself was not reached."
+                ),
+                duration_ms=duration_ms,
+            )
+        try:
+            body = response.json()
+        except ValueError:
+            return CheckResult(
+                name=self.name,
+                status=Status.FAIL,
+                message="Server returned malformed JSON for /api/me.",
+                duration_ms=duration_ms,
+            )
+        if not isinstance(body, dict):
+            return CheckResult(
+                name=self.name,
+                status=Status.FAIL,
+                message="Unexpected /api/me response shape (expected a JSON object).",
+                duration_ms=duration_ms,
+            )
+        # Real DHIS2 always populates at least one of `username` or `id`.
+        # Anything else is some proxy or stub responding with valid JSON but
+        # without the credentials having been honored.
+        username = body.get("username")
+        user_id = body.get("id")
+        if not username and not user_id:
+            return CheckResult(
+                name=self.name,
+                status=Status.FAIL,
+                message=("/api/me returned JSON with neither 'username' nor 'id' - the response is not from DHIS2."),
+                duration_ms=duration_ms,
+            )
         return CheckResult(
             name=self.name,
             status=Status.OK,
-            message=f"Authenticated as {body.get('username', '?')}.",
-            details={"username": body.get("username"), "user_id": body.get("id")},
+            message=f"Authenticated as {username or user_id}.",
+            details={"username": username, "user_id": user_id},
             duration_ms=duration_ms,
         )

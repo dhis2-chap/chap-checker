@@ -63,6 +63,13 @@ class Dhis2SystemInfoCheck:
                 message="DHIS2 responded but body was not JSON.",
                 duration_ms=duration_ms,
             )
+        if not isinstance(body, dict):
+            return CheckResult(
+                name=self.name,
+                status=Status.FAIL,
+                message="Unexpected /api/system/info response shape (expected a JSON object).",
+                duration_ms=duration_ms,
+            )
 
         info = Dhis2SystemInfo.model_validate({**body, "raw": body})
         if not info.version:
