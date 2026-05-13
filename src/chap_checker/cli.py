@@ -16,7 +16,7 @@ from chap_checker import __version__
 from chap_checker.alerts.base import AlerterBinding, Transition
 from chap_checker.alerts.slack import SlackAlerter
 from chap_checker.checks import all_checks
-from chap_checker.checks.base import Status
+from chap_checker.checks.base import Status, resolve_checks
 from chap_checker.client import Dhis2Target
 from chap_checker.config import (
     DEFAULT_CONFIG_FILENAME,
@@ -128,6 +128,15 @@ def verify_command(
     ),
     timeout: float = typer.Option(10.0, "--timeout", help="HTTP timeout per request (seconds, ad-hoc mode)."),
     insecure: bool = typer.Option(False, "--insecure", help="Skip TLS certificate verification (ad-hoc mode)."),
+    check: list[str] | None = typer.Option(
+        None,
+        "--check",
+        "--checks",
+        help=(
+            "Restrict to these check names (transitive `requires` are pulled in). "
+            "Repeat the flag for multiple. Mirrors the per-instance `checks = [...]` config field."
+        ),
+    ),
     no_alerts: bool = typer.Option(
         False,
         "--no-alerts",
@@ -160,6 +169,7 @@ def verify_command(
         password=password,
         timeout=timeout,
         insecure=insecure,
+        check_names=check,
     )
     started_at = datetime.now(UTC)
     reports = run_targets_sync(targets)
@@ -394,8 +404,21 @@ def _resolve_run_context(
     password: str | None,
     timeout: float,
     insecure: bool,
+    check_names: list[str] | None,
 ) -> tuple[list[TargetEntry], CheckerConfig | None, Path | None]:
-    """Build the list of targets to check plus the loaded config (if any)."""
+    """Build the list of targets to check plus the loaded config (if any).
+
+    ``check_names`` (from ``--check`` / ``--checks``) restricts which checks
+    run. In ad-hoc mode it's applied directly. In config mode it overrides
+    each instance's per-instance ``checks`` field for this run; unknown names
+    fail with a clear CLI error rather than a runtime KeyError.
+    """
+    if check_names:
+        try:
+            resolve_checks(check_names)
+        except KeyError as exc:
+            raise typer.BadParameter(str(exc)) from exc
+
     if url is not None:
         if instance is not None:
             raise typer.BadParameter("--instance cannot be combined with --url; --url is ad-hoc mode.")
@@ -408,7 +431,7 @@ def _resolve_run_context(
             timeout_s=timeout,
             verify_tls=not insecure,
         )
-        return [TargetEntry(name="ad-hoc", target=target)], None, None
+        return [TargetEntry(name="ad-hoc", target=target, check_names=check_names)], None, None
 
     config_path = config if config is not None else default_config_path()
     if not config_path.exists():
@@ -425,9 +448,14 @@ def _resolve_run_context(
             entry = cfg.get(instance)
         except KeyError as exc:
             raise typer.BadParameter(str(exc)) from exc
-        return [entry.to_target_entry(instance)], cfg, config_path
+        target_entry = entry.to_target_entry(instance)
+        if check_names:
+            target_entry = target_entry.model_copy(update={"check_names": check_names})
+        return [target_entry], cfg, config_path
 
     targets = [entry.to_target_entry(name) for name, entry in cfg.instances.items()]
+    if check_names:
+        targets = [t.model_copy(update={"check_names": check_names}) for t in targets]
     return targets, cfg, config_path
 
 
