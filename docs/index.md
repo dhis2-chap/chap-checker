@@ -35,13 +35,22 @@ pipx install chap-checker
 
 ## Quick start
 
-Ad-hoc against a single instance:
+Ad-hoc against a single instance (password resolved safely):
 
 ```bash
+# Recommended: read the password from a named environment variable.
+export PROD_PASSWORD=...
 chap-checker verify \
     --url https://dhis2.example.com \
     --username admin \
-    --password REPLACE_ME
+    --password-env PROD_PASSWORD
+
+# Alternative: omit --password / --password-env entirely and you'll be
+# prompted on the terminal (hidden input). The DHIS2_PASSWORD env var
+# also works as a default.
+
+# Passing --password inline still works but is discouraged - the value
+# ends up in shell history and `ps` output.
 ```
 
 Multiple instances in `./chap-checker.toml`:

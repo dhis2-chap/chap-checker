@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -128,8 +130,17 @@ def verify_command(
         None,
         "--password",
         "-p",
-        help="DHIS2 password (ad-hoc mode).",
+        help=(
+            "DHIS2 password (ad-hoc mode). Prefer --password-env or the "
+            "interactive prompt - inline passwords end up in shell history "
+            "and `ps` output."
+        ),
         envvar="DHIS2_PASSWORD",
+    ),
+    password_env: str | None = typer.Option(
+        None,
+        "--password-env",
+        help=("Name of the env var holding the DHIS2 password (ad-hoc mode). Recommended over --password."),
     ),
     timeout: float = typer.Option(10.0, "--timeout", help="HTTP timeout per request (seconds, ad-hoc mode)."),
     insecure: bool = typer.Option(False, "--insecure", help="Skip TLS certificate verification (ad-hoc mode)."),
@@ -169,9 +180,12 @@ def verify_command(
 
     Source of targets is decided as follows:
 
-    1. If `--url` is given (together with `--username` and `--password`),
-       chap-checker runs in *ad-hoc* mode against that single URL and
-       ignores any TOML config.
+    1. If `--url` is given (together with `--username`), chap-checker
+       runs in *ad-hoc* mode against that single URL and ignores any
+       TOML config. The password is resolved in this order: explicit
+       `--password`; `--password-env NAME` (recommended); the
+       `DHIS2_PASSWORD` environment variable; an interactive prompt
+       when stdin is a TTY.
     2. Otherwise the TOML file is loaded from `--config` if given, or
        from `./chap-checker.toml` if present. Every `[instances.*]`
        block runs unless `--instance` narrows the run to one.
@@ -187,6 +201,7 @@ def verify_command(
         url=url,
         username=username,
         password=password,
+        password_env=password_env,
         timeout=timeout,
         insecure=insecure,
         check_names=check,
@@ -559,6 +574,39 @@ checks_app.command("ls", hidden=True)(_checks_list_impl)
 app.add_typer(checks_app, name="checks")
 
 
+def _resolve_adhoc_password(*, password: str | None, password_env: str | None) -> str:
+    """Pick the ad-hoc-mode password from the safest source available.
+
+    Priority:
+
+    1. ``--password VAL`` if non-empty (discouraged - shell history + ``ps``).
+       Typer also fills this from the ``DHIS2_PASSWORD`` env var.
+    2. ``--password-env NAME`` -> ``os.environ[NAME]`` (recommended).
+    3. Interactive prompt when stdin is a TTY.
+
+    Otherwise raises a helpful ``BadParameter`` so cron / CI errors point
+    at the missing flag rather than dropping into an unattainable prompt.
+    """
+    if password is not None and password_env is not None:
+        raise typer.BadParameter("Pass either --password or --password-env, not both.")
+    if password_env is not None:
+        value = os.environ.get(password_env)
+        if not value:
+            raise typer.BadParameter(
+                f"--password-env {password_env}: env var is not set or empty.",
+            )
+        return value
+    if password:
+        return password
+    if sys.stdin.isatty():
+        prompted: str = typer.prompt("DHIS2 password", hide_input=True)
+        return prompted
+    raise typer.BadParameter(
+        "--url requires a password. Pass --password-env NAME, set DHIS2_PASSWORD, "
+        "or run interactively for a hidden prompt.",
+    )
+
+
 def _resolve_run_context(
     *,
     config: Path | None,
@@ -566,6 +614,7 @@ def _resolve_run_context(
     url: str | None,
     username: str | None,
     password: str | None,
+    password_env: str | None,
     timeout: float,
     insecure: bool,
     check_names: list[str] | None,
@@ -586,12 +635,13 @@ def _resolve_run_context(
     if url is not None:
         if instance is not None:
             raise typer.BadParameter("--instance cannot be combined with --url; --url is ad-hoc mode.")
-        if username is None or password is None:
-            raise typer.BadParameter("--url requires --username and --password.")
+        if username is None:
+            raise typer.BadParameter("--url requires --username.")
+        resolved_password = _resolve_adhoc_password(password=password, password_env=password_env)
         target = Dhis2Target(
             base_url=url,  # type: ignore[arg-type]  # Pydantic coerces str -> HttpUrl
             username=username,
-            password=password,
+            password=resolved_password,
             timeout_s=timeout,
             verify_tls=not insecure,
         )
