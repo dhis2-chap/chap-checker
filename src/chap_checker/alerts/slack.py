@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import ClassVar, Literal
 
 import httpx
 from pydantic import BaseModel
 
-from chap_checker.alerts.base import Transition
+from chap_checker.alerts.base import Transition, register_alerter
 from chap_checker.checks.base import Status
 from chap_checker.logging import get_logger
 
@@ -55,14 +55,16 @@ class SlackPayload(BaseModel):
     attachments: list[SlackAttachment]
 
 
+@register_alerter("slack")
 class SlackAlerter:
     """POST a Block Kit message to a Slack Incoming Webhook URL.
 
-    Failures are logged but never raised - alert delivery must not affect the
-    cron run's exit code.
+    Always raises on transport / 5xx so the cron-side dispatcher can decide
+    whether to commit state (it doesn't) and whether to surface the failure
+    in exit code (it doesn't - just logs).
     """
 
-    name = "slack"
+    name: ClassVar[str] = "slack"
 
     def __init__(
         self,

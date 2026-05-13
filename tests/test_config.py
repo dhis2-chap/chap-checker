@@ -163,6 +163,51 @@ password = "p"
     assert not any("inline credentials" in r.message for r in caplog.records)
 
 
+def test_unknown_check_name_rejected(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        """
+[instances.x]
+url = "https://x.test"
+username = "u"
+password = "p"
+checks = ["does_not_exist"]
+""",
+    )
+    with pytest.raises(ValueError, match="unknown check name"):
+        load_config(path)
+
+
+def test_known_check_names_accepted(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        """
+[instances.x]
+url = "https://x.test"
+username = "u"
+password = "p"
+checks = ["dhis2_chap_ping"]
+""",
+    )
+    cfg = load_config(path)
+    assert cfg.get("x").checks == ["dhis2_chap_ping"]
+
+
+def test_empty_check_list_rejected(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path,
+        """
+[instances.x]
+url = "https://x.test"
+username = "u"
+password = "p"
+checks = []
+""",
+    )
+    with pytest.raises(ValueError, match="at least 1"):
+        load_config(path)
+
+
 @pytest.mark.skipif(os.name != "posix", reason="POSIX permission bits only")
 def test_no_warning_on_world_readable_with_env_password_only(
     tmp_path: Path,

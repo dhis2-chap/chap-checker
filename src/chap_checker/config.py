@@ -6,12 +6,16 @@ import os
 import stat
 import tomllib
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
 from chap_checker.checks.base import Status
 from chap_checker.client import Dhis2Target
 from chap_checker.logging import get_logger
+
+if TYPE_CHECKING:
+    from chap_checker.runner import TargetEntry
 
 DEFAULT_CONFIG_FILENAME = "chap-checker.toml"
 
@@ -29,11 +33,26 @@ class InstanceConfig(BaseModel):
     password_env: str | None = None
     timeout_s: float = Field(default=10.0, gt=0)
     verify_tls: bool = True
+    checks: list[str] | None = Field(default=None, min_length=1)
 
     @model_validator(mode="after")
     def _exactly_one_password_source(self) -> "InstanceConfig":
         if (self.password is None) == (self.password_env is None):
             raise ValueError("set exactly one of 'password' or 'password_env'")
+        return self
+
+    @model_validator(mode="after")
+    def _checks_must_exist(self) -> "InstanceConfig":
+        if self.checks is None:
+            return self
+        # Late import: triggers chap_checker.checks.__init__ which registers
+        # every built-in check, populating the registry we validate against.
+        from chap_checker.checks.base import all_checks
+
+        known = {c.name for c in all_checks()}
+        unknown = [c for c in self.checks if c not in known]
+        if unknown:
+            raise ValueError(f"unknown check name(s): {', '.join(unknown)}. Known: {', '.join(sorted(known))}")
         return self
 
     def resolve_password(self) -> str:
@@ -55,6 +74,12 @@ class InstanceConfig(BaseModel):
             timeout_s=self.timeout_s,
             verify_tls=self.verify_tls,
         )
+
+    def to_target_entry(self, name: str) -> "TargetEntry":
+        """Build a runtime :class:`TargetEntry` (with optional check filter)."""
+        from chap_checker.runner import TargetEntry
+
+        return TargetEntry(name=name, target=self.to_target(), check_names=self.checks)
 
 
 class SlackAlertConfig(BaseModel):

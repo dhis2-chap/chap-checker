@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -12,7 +13,7 @@ from chap_checker.state_store import CheckState, StateFile, load_state, save_sta
 
 
 class _FakeAlerter:
-    name = "fake"
+    name: ClassVar[str] = "fake"
 
     def __init__(self) -> None:
         self.calls: list[list[Transition]] = []
@@ -129,7 +130,7 @@ def test_alerter_exception_is_swallowed_but_state_is_not_saved(
     next run will recompute the same transition and retry delivery."""
 
     class _BoomAlerter:
-        name = "boom"
+        name: ClassVar[str] = "boom"
 
         async def notify(self, transitions: list[Transition]) -> None:
             raise RuntimeError("kaboom")

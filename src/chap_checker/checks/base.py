@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, ClassVar, Protocol, TypeVar, cast, runtime_checkable
 
 from pydantic import BaseModel, Field
 
@@ -50,10 +50,10 @@ class Check(Protocol):
     when a foundational check fails.
     """
 
-    name: str
-    description: str
-    order: int
-    requires: list[str]
+    name: ClassVar[str]
+    description: ClassVar[str]
+    order: ClassVar[int]
+    requires: ClassVar[list[str]]
 
     async def run(self, client: Dhis2Client) -> CheckResult:
         """Execute the check against ``client`` and return a result."""
@@ -69,6 +69,59 @@ def register(check: Check) -> Check:
     return check
 
 
+_TCheck = TypeVar("_TCheck", bound=type[Check])
+
+
+def register_check(cls: _TCheck) -> _TCheck:
+    """Class decorator: instantiate ``cls`` and add the instance to the registry.
+
+    Each check class is expected to take no constructor arguments. Use this
+    in preference to a manual ``register(MyCheck())`` call at module bottom -
+    it keeps registration co-located with the class declaration.
+
+    Example:
+        @register_check
+        class Dhis2ChapPingCheck:
+            name = "dhis2_chap_ping"
+            ...
+    """
+    register(cast(Check, cls()))
+    return cls
+
+
 def all_checks() -> list[Check]:
     """Return all registered checks sorted by ``(order, name)``."""
     return sorted(_REGISTRY, key=lambda c: (c.order, c.name))
+
+
+def resolve_checks(names: list[str] | None) -> list[Check]:
+    """Resolve check ``names`` into :class:`Check` instances.
+
+    Returns every registered check when ``names`` is ``None``. Otherwise
+    returns the named checks plus the transitive closure of their
+    ``requires``, so a partial selection always has its prerequisites
+    available. Output is in the canonical ``(order, name)`` order.
+
+    Raises ``KeyError`` if any name doesn't match a registered check.
+    """
+    if names is None:
+        return all_checks()
+
+    by_name = {c.name: c for c in all_checks()}
+    selected: set[str] = set()
+
+    def _add(name: str) -> None:
+        if name in selected:
+            return
+        if name not in by_name:
+            known = ", ".join(sorted(by_name))
+            raise KeyError(f"unknown check '{name}'. Known: {known}")
+        check = by_name[name]
+        for req in check.requires:
+            _add(req)
+        selected.add(name)
+
+    for n in names:
+        _add(n)
+
+    return [c for c in all_checks() if c.name in selected]

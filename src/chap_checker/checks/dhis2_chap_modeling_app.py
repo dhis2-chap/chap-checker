@@ -1,13 +1,13 @@
-"""Check that the DHIS2 'modeling-app' is installed and report its version."""
+"""Check that the chap-core 'Modeling' app is installed on DHIS2."""
 
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any, ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from chap_checker.checks.base import CheckResult, Status, register
+from chap_checker.checks.base import CheckResult, Status, register_check
 from chap_checker.client import Dhis2Client
 
 MODELING_APP_HUB_ID = "a29851f9-82a7-4ecd-8b2c-58e0f220bc75"
@@ -27,13 +27,14 @@ class Dhis2App(BaseModel):
     launch_url: str | None = Field(default=None, alias="launchUrl")
 
 
-class ModelingAppCheck:
-    """Look for an installed app whose App Hub UUID matches the modeling app."""
+@register_check
+class Dhis2ChapModelingAppCheck:
+    """Look for an installed DHIS2 app whose App Hub UUID matches the modeling app."""
 
-    name = "modeling-app"
-    description = "DHIS2 app with app_hub_id of the modeling app is installed and reports a version."
-    order = 50
-    requires: list[str] = ["ping"]
+    name: ClassVar[str] = "dhis2_chap_modeling_app"
+    description: ClassVar[str] = "DHIS2 app with app_hub_id of the modeling app is installed and reports a version."
+    order: ClassVar[int] = 50
+    requires: ClassVar[list[str]] = ["dhis2_chap_ping"]
 
     async def run(self, client: Dhis2Client) -> CheckResult:
         start = time.perf_counter()
@@ -96,6 +97,3 @@ class ModelingAppCheck:
 
 def _dump(app: Dhis2App) -> dict[str, Any]:
     return app.model_dump(exclude_none=True, by_alias=True)
-
-
-register(ModelingAppCheck())

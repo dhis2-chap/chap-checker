@@ -19,6 +19,9 @@ password_env = "ANOTHER_EXAMPLE_PASSWORD"
 # Optional overrides (shown with their defaults):
 # timeout_s = 10.0
 # verify_tls = true
+# Run only a subset of checks (prereqs are pulled in automatically).
+# Run `chap-checker checks list` to see the available names.
+# checks = ["dhis2_chap_ping"]
 
 # Optional: alert to Slack when a check's status changes (stateful;
 # transitions only). State is persisted to ./chap-checker.state.json
