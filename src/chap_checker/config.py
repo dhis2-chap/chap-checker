@@ -1,0 +1,79 @@
+"""Load chap-checker.toml into typed instance configs."""
+
+from __future__ import annotations
+
+import os
+import tomllib
+from pathlib import Path
+
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
+
+from chap_checker.client import Dhis2Target
+
+DEFAULT_CONFIG_FILENAME = "chap-checker.toml"
+
+
+class InstanceConfig(BaseModel):
+    """One DHIS2 instance to check."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    url: HttpUrl
+    username: str
+    password: str | None = None
+    password_env: str | None = None
+    timeout_s: float = 10.0
+    verify_tls: bool = True
+
+    @model_validator(mode="after")
+    def _exactly_one_password_source(self) -> "InstanceConfig":
+        if (self.password is None) == (self.password_env is None):
+            raise ValueError("set exactly one of 'password' or 'password_env'")
+        return self
+
+    def resolve_password(self) -> str:
+        """Return the password, reading from env if ``password_env`` is set."""
+        if self.password is not None:
+            return self.password
+        assert self.password_env is not None  # guarded by validator
+        value = os.environ.get(self.password_env)
+        if value is None:
+            raise RuntimeError(f"Environment variable '{self.password_env}' is not set.")
+        return value
+
+    def to_target(self) -> Dhis2Target:
+        """Build a runtime :class:`Dhis2Target` from this entry."""
+        return Dhis2Target(
+            base_url=self.url,
+            username=self.username,
+            password=self.resolve_password(),
+            timeout_s=self.timeout_s,
+            verify_tls=self.verify_tls,
+        )
+
+
+class CheckerConfig(BaseModel):
+    """Top-level ``chap-checker.toml`` document."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    instances: dict[str, InstanceConfig] = Field(default_factory=dict)
+
+    def get(self, name: str) -> InstanceConfig:
+        """Return one instance by name or raise :class:`KeyError`."""
+        if name not in self.instances:
+            available = ", ".join(sorted(self.instances)) or "<none>"
+            raise KeyError(f"Unknown instance '{name}'. Available: {available}")
+        return self.instances[name]
+
+
+def default_config_path() -> Path:
+    """Path the CLI looks at when no ``--config`` is given: ``./chap-checker.toml``."""
+    return Path.cwd() / DEFAULT_CONFIG_FILENAME
+
+
+def load_config(path: Path) -> CheckerConfig:
+    """Parse a TOML config file into a :class:`CheckerConfig`."""
+    with path.open("rb") as f:
+        data = tomllib.load(f)
+    return CheckerConfig.model_validate(data)

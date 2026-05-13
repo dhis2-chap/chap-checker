@@ -1,0 +1,18 @@
+# Example chap-checker config. Copy to ./chap-checker.toml and edit.
+# `chap-checker verify` (no args) checks every instance below.
+# `chap-checker verify --instance <name>` checks just one.
+#
+# WARNING: this file contains credentials. Keep it out of git and set
+# restrictive permissions (chmod 600 chap-checker.toml).
+
+[instances.example]
+url = "https://dhis2.example.com"
+username = "REPLACE_ME"
+password = "REPLACE_ME"
+
+[instances.another-example]
+url = "https://dhis2.example.org"
+username = "REPLACE_ME"
+# Prefer pulling secrets from the environment in shared / CI setups:
+password_env = "ANOTHER_EXAMPLE_PASSWORD"
+timeout_s = 15.0
