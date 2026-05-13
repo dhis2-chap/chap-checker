@@ -22,8 +22,15 @@ Runs every registered check against one or more DHIS2 instances.
 chap-checker verify                              # every [instances.*] in ./chap-checker.toml
 chap-checker verify --instance prod              # just one
 chap-checker verify --config /etc/chap-checker.toml
-chap-checker verify --url URL -u U -p P          # ad-hoc, no config needed
+chap-checker verify --url URL -u U --password-env PROD_PASSWORD  # ad-hoc
+chap-checker verify --url URL -u U               # ad-hoc, prompts for password
 ```
+
+For ad-hoc mode the password is resolved from (in order): an
+explicit `--password`, `--password-env NAME`, the `DHIS2_PASSWORD`
+environment variable, or a hidden prompt on a TTY. Cron / CI should
+use `--password-env` so the secret never lands in shell history or
+process listings.
 
 | Flag                          | Purpose                                                                                                                                  |
 | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
@@ -31,7 +38,8 @@ chap-checker verify --url URL -u U -p P          # ad-hoc, no config needed
 | `--instance <name>` / `-i`    | Run only this instance from the config.                                                                                                  |
 | `--url`                       | Ad-hoc DHIS2 base URL (bypasses config). Env: `DHIS2_URL`.                                                                                |
 | `--username` / `-u`           | Ad-hoc username. Env: `DHIS2_USERNAME`.                                                                                                  |
-| `--password` / `-p`           | Ad-hoc password. Env: `DHIS2_PASSWORD`.                                                                                                  |
+| `--password-env <NAME>`       | Read the ad-hoc password from the named env var. Recommended for cron / CI.                                                              |
+| `--password` / `-p`           | Ad-hoc password. Discouraged - lands in shell history and `ps`. Env: `DHIS2_PASSWORD`.                                                   |
 | `--timeout <seconds>`         | HTTP timeout per request (ad-hoc mode). Default 10.                                                                                      |
 | `--insecure`                  | Skip TLS certificate verification (ad-hoc mode).                                                                                         |
 | `--check <name>` / `--checks` | Restrict to these checks for this run; transitive `requires` are pulled in. Repeat the flag for multiple. Overrides per-instance `checks`. |
