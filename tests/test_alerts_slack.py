@@ -54,9 +54,13 @@ def test_slack_posts_blocks_to_webhook() -> None:
     request = captured[0]
     assert str(request.url) == "https://hooks.slack.com/services/T/B/X"
     body = json.loads(request.content)
-    assert "blocks" in body
     assert body["blocks"][0]["type"] == "header"
     assert "1 new failure(s), 1 recovery" in body["text"]
+
+    # One colored attachment per transition: failure -> red, recovery -> green.
+    assert len(body["attachments"]) == 2
+    assert body["attachments"][0]["color"] == "#E01E5A"
+    assert body["attachments"][1]["color"] == "#2EB67D"
 
 
 def test_slack_empty_transitions_skips_post() -> None:

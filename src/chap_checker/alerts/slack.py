@@ -8,9 +8,18 @@ import httpx
 from pydantic import BaseModel
 
 from chap_checker.alerts.base import Transition
+from chap_checker.checks.base import Status
 from chap_checker.logging import get_logger
 
 _log = get_logger("alerts.slack")
+
+# Slack's status colors (from their brand guide; render well on dark and light).
+_COLOR_BY_STATUS: dict[Status, str] = {
+    Status.OK: "#2EB67D",  # green
+    Status.WARN: "#ECB22E",  # yellow
+    Status.FAIL: "#E01E5A",  # red
+    Status.ERROR: "#E01E5A",  # red (same family as FAIL)
+}
 
 
 class SlackBlockText(BaseModel):
@@ -27,11 +36,23 @@ class SlackBlock(BaseModel):
     text: SlackBlockText
 
 
+class SlackAttachment(BaseModel):
+    """Legacy Slack attachment that gives Block Kit a colored left border.
+
+    Block Kit blocks on their own can't render the vertical color stripe;
+    wrapping the same blocks in an attachment with ``color`` gets it back.
+    """
+
+    color: str
+    blocks: list[SlackBlock]
+
+
 class SlackPayload(BaseModel):
     """Body posted to a Slack Incoming Webhook."""
 
     text: str
     blocks: list[SlackBlock]
+    attachments: list[SlackAttachment]
 
 
 class SlackAlerter:
@@ -70,27 +91,31 @@ class SlackAlerter:
             _log.exception("slack notify failed")
 
 
+def _color_for(transition: Transition) -> str:
+    if transition.kind == "recovery":
+        return _COLOR_BY_STATUS[Status.OK]
+    return _COLOR_BY_STATUS.get(transition.current_status, _COLOR_BY_STATUS[Status.FAIL])
+
+
 def _build_payload(transitions: list[Transition]) -> SlackPayload:
     failures = [t for t in transitions if t.kind == "failure"]
     recoveries = [t for t in transitions if t.kind == "recovery"]
     summary = f"chap-checker: {len(failures)} new failure(s), {len(recoveries)} recovery"
 
-    blocks: list[SlackBlock] = [
+    header_blocks: list[SlackBlock] = [
         SlackBlock(type="header", text=SlackBlockText(type="plain_text", text=summary)),
     ]
-    for group, label in ((failures, "FAILURE"), (recoveries, "RECOVERY")):
-        for t in group:
-            blocks.append(
-                SlackBlock(
-                    type="section",
-                    text=SlackBlockText(
-                        type="mrkdwn",
-                        text=(
-                            f"*{label}*  `{t.target_name}`  {t.target_url}\n"
-                            f"  `{t.check_name}`  {t.current_status.value.upper()}  {t.message}"
-                        ),
-                    ),
-                )
-            )
 
-    return SlackPayload(text=summary, blocks=blocks)
+    attachments: list[SlackAttachment] = []
+    for t in transitions:
+        label = "FAILURE" if t.kind == "failure" else "RECOVERY"
+        status_label = t.current_status.value.upper()
+        body = f"*{label} — `{t.target_name}`*\n{t.target_url}\n`{t.check_name}`  *{status_label}*  {t.message}"
+        attachments.append(
+            SlackAttachment(
+                color=_color_for(t),
+                blocks=[SlackBlock(type="section", text=SlackBlockText(type="mrkdwn", text=body))],
+            )
+        )
+
+    return SlackPayload(text=summary, blocks=header_blocks, attachments=attachments)
