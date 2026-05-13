@@ -9,6 +9,7 @@ launch time via ``--alerts`` / ``--no-alerts``.
 from __future__ import annotations
 
 import math
+from collections import deque
 from collections.abc import Callable
 from datetime import datetime
 from functools import partial
@@ -45,6 +46,25 @@ _SYMBOL_BY_STATUS = {
     Status.ERROR: "!!",
     Status.SKIPPED: "·",
 }
+
+# Number of past-refresh outcomes kept per tile for the uptime strip.
+# Matches the web dashboard's `UptimeBars` width so both surfaces tell
+# the same story about "the last N checks".
+_HISTORY_LEN = 30
+
+# Per-status colour used by the uptime strip. OK / WARN / FAIL share
+# colours with the existing pill palette so the strip stays consistent
+# with the rest of the tile.
+_STRIP_COLOR_BY_STATUS = {
+    Status.OK: "#7DD345",
+    Status.WARN: "#d4a017",
+    Status.FAIL: "#d04040",
+    Status.ERROR: "#c050c0",
+    Status.SKIPPED: "#444",
+}
+# Dim slot rendered before history has filled up - mirrors the web
+# dashboard's `{noData: true}` padding behaviour.
+_STRIP_COLOR_EMPTY = "#222"
 
 
 def columns_for(n_instances: int) -> int:
@@ -298,6 +318,19 @@ class InstanceTile(Container):
     InstanceTile #checks {
         height: auto;
     }
+    InstanceTile .uptime-header {
+        height: 1;
+        dock: bottom;
+        color: #555;
+        padding: 0 1;
+        margin-bottom: 0;
+    }
+    InstanceTile .uptime-strip {
+        height: 1;
+        dock: bottom;
+        padding: 0 1;
+        margin-bottom: 1;
+    }
     InstanceTile .stats-row {
         height: 3;
         dock: bottom;
@@ -328,6 +361,10 @@ class InstanceTile(Container):
         self.ping_total = 0
         self.last_report: RunReport | None = None
         self.last_refresh: datetime | None = None
+        # Rolling per-refresh worst-status history for the uptime strip.
+        # Refreshes where every check was SKIPPED are dropped so the
+        # strip stays meaningful (same rule as the web dashboard).
+        self.history: deque[Status] = deque(maxlen=_HISTORY_LEN)
 
     def compose(self) -> ComposeResult:
         with Horizontal(classes="row"):
@@ -340,6 +377,8 @@ class InstanceTile(Container):
             yield Static("", classes="ping", id="ping")
         yield Static("CHECKS", classes="checks-header")
         yield Vertical(id="checks")
+        yield Static("", classes="uptime-header", id="uptime-header")
+        yield Static("", classes="uptime-strip", id="uptime-strip")
         with Horizontal(classes="stats-row"):
             with Vertical(classes="stat-cell"):
                 yield Static("latency", classes="stat-label")
@@ -364,6 +403,12 @@ class InstanceTile(Container):
             self.ping_total += 1
             if ping.status is Status.OK:
                 self.ping_ok += 1
+        # Append the refresh's worst non-skipped status to history. The
+        # strip reflects "how the last 30 refreshes went overall", not
+        # just whether ping reached the server.
+        ran_statuses: list[Status] = [r.status for r in report.results if r.status is not Status.SKIPPED]
+        if ran_statuses:
+            self.history.append(_worst(ran_statuses))
 
         # UI updates only when the widget is actually mounted in an app.
         # Unit tests construct tiles outside an app and just inspect data fields.
@@ -417,7 +462,30 @@ class InstanceTile(Container):
         else:
             self.query_one("#uptime", Static).update("--")
 
+        # Uptime strip: 30 colored blocks reflecting the last refreshes,
+        # padded with dim slots on the left until the buffer fills.
+        self.query_one("#uptime-header", Static).update(self._render_history_header())
+        self.query_one("#uptime-strip", Static).update(self._render_history_strip())
+
         self._tick_updated()
+
+    def _render_history_header(self) -> str:
+        """Render the 'UPTIME · LAST 30 CHECKS    100%' header line."""
+        label = f"UPTIME · LAST {_HISTORY_LEN} CHECKS"
+        if self.history:
+            success = sum(1 for s in self.history if s is Status.OK)
+            pct = int(round(100 * success / len(self.history)))
+            return f"{label}  [#888]{pct}%[/]"
+        return label
+
+    def _render_history_strip(self) -> str:
+        """Render the colored block strip below the header."""
+        pad = _HISTORY_LEN - len(self.history)
+        parts: list[str] = [f"[{_STRIP_COLOR_EMPTY}]█[/]"] * pad
+        for status in self.history:
+            color = _STRIP_COLOR_BY_STATUS.get(status, _STRIP_COLOR_EMPTY)
+            parts.append(f"[{color}]█[/]")
+        return "".join(parts)
 
     def _tick_updated(self) -> None:
         if self.last_refresh is None:

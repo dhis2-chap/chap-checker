@@ -149,3 +149,45 @@ def test_tile_records_last_refresh_timestamp() -> None:
         )
     )
     assert tile.last_refresh is not None
+
+
+def test_tile_history_appends_worst_status_per_refresh() -> None:
+    tile = InstanceTile(_entry())
+    # Two clean refreshes, then a WARN, then a FAIL, then a refresh
+    # where everything is skipped (which must NOT be recorded).
+    for status in (Status.OK, Status.OK, Status.WARN, Status.FAIL):
+        tile.update_from(
+            RunReport(
+                target_name="test",
+                target_url="https://test.example",
+                results=[
+                    CheckResult(name="dhis2_ping", status=status, message="", duration_ms=1.0),
+                    CheckResult(name="dhis2_system_info", status=Status.OK, message="", duration_ms=1.0),
+                ],
+            ),
+        )
+    tile.update_from(
+        RunReport(
+            target_name="test",
+            target_url="https://test.example",
+            results=[
+                CheckResult(name="dhis2_ping", status=Status.SKIPPED, message="", duration_ms=0.0),
+                CheckResult(name="dhis2_system_info", status=Status.SKIPPED, message="", duration_ms=0.0),
+            ],
+        ),
+    )
+    assert list(tile.history) == [Status.OK, Status.OK, Status.WARN, Status.FAIL]
+
+
+def test_tile_history_caps_at_max_len() -> None:
+    tile = InstanceTile(_entry())
+    for _ in range(45):
+        tile.update_from(
+            RunReport(
+                target_name="test",
+                target_url="https://test.example",
+                results=[CheckResult(name="dhis2_ping", status=Status.OK, message="", duration_ms=1.0)],
+            ),
+        )
+    assert len(tile.history) == 30
+    assert all(s is Status.OK for s in tile.history)
