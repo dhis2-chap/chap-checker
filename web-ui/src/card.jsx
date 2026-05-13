@@ -394,9 +394,20 @@ function UptimeBars({ inst, density }) {
     ...real,
   ];
 
+  // CK-WIRING: the artifact anchors maxLat to 200 and minLat to 80
+  // unconditionally. That was tuned for the mock dataset's 100-200ms
+  // range; real DHIS2 instances ping at 200-300ms, so every sample
+  // ends up "in the top 20% of the 80-300 range" and the bar goes
+  // amber instead of green. Drop the synthetic anchors and only flag
+  // amber when we have at least 2 samples and >50ms of spread - i.e.
+  // when there's a genuine outlier to call out.
   const latencies = real.map(x => x.latency).filter(x => x != null);
-  const maxLat = Math.max(200, ...latencies);
-  const minLat = Math.min(80, ...latencies);
+  const haveSpread = latencies.length >= 2;
+  const maxLat = haveSpread ? Math.max(...latencies) : 0;
+  const minLat = haveSpread ? Math.min(...latencies) : 0;
+  const warnThreshold = haveSpread && (maxLat - minLat) > 50
+    ? minLat + (maxLat - minLat) * 0.8
+    : Infinity;
   const successCount = real.filter(s => s.ok).length;
   const pct = real.length ? ((successCount / real.length) * 100) : 100;
 
@@ -429,7 +440,7 @@ function UptimeBars({ inst, density }) {
           }
           let color = okColor;
           if (!s.ok) color = downColor;
-          else if (s.latency != null && s.latency > minLat + (maxLat - minLat) * 0.8) color = warnColor;
+          else if (s.latency != null && s.latency > warnThreshold) color = warnColor;
           // CK-WIRING: per-bar native tooltip. Order in `h` is oldest →
           // newest; `(h.length - i)` is "samples back from now". The
           // server keeps history points without timestamps so we use
