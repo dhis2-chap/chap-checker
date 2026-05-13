@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>chap-checker</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" />
+  <style>
+    :root {
+      /* phosphor (default; live-swapped by app.jsx when the theme tweak changes) */
+      --bg:        #050805;
+      --bg-elev:   #0a0f0a;
+      --green:     #6ee06e;
+      --green-2:   #4fbf4f;
+      --green-dim: #2f5f2f;
+      --green-vdim:#1c331c;
+      --ink-dim:   #6a7a6a;
+      --ink-vdim:  #3a4a3a;
+      --red:       #ff5a5a;
+      --red-dim:   #5a1c1c;
+      --amber:     #ffb84d;
+      --amber-dim: #5a3c12;
+      --pad:       28px;
+      --gap:       0px;
+      --fs-base:   13px;
+      --fs-title:  14px;
+      --fs-stat:   16px;
+      --fs-badge:  12px;
+      --fs-head:   13px;
+      --fs-foot:   12px;
+      --status-strip: 0px;
+    }
+    html, body { margin:0; padding:0; height:100%; background: var(--bg); color: var(--green); }
+    body {
+      font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: var(--fs-base);
+      font-feature-settings: 'ss01','cv11';
+      -webkit-font-smoothing: antialiased;
+      overflow: hidden;
+    }
+    #root { height:100vh; display:flex; flex-direction:column; }
+    ::selection { background: var(--green-dim); color: #fff; }
+
+    .cmd-list { scrollbar-width: thin; scrollbar-color: var(--green-dim) transparent; }
+    .cmd-list::-webkit-scrollbar { width: 8px; height: 8px; }
+    .cmd-list::-webkit-scrollbar-track { background: transparent; }
+    .cmd-list::-webkit-scrollbar-thumb {
+      background: var(--green-dim); border-radius: 0;
+      border: 2px solid transparent; background-clip: content-box;
+    }
+    .cmd-list::-webkit-scrollbar-thumb:hover { background: var(--green-2); background-clip: content-box; border: 2px solid transparent; }
+    .cmd-list::-webkit-scrollbar-corner { background: transparent; }
+
+    .crt::after {
+      content:''; position:fixed; inset:0; pointer-events:none; z-index:9999;
+      background: repeating-linear-gradient(to bottom, rgba(255,255,255,0.012) 0 1px, transparent 1px 3px);
+      mix-blend-mode: overlay;
+    }
+  </style>
+
+  <!--
+    Runtime model: React UMD + Babel-standalone in the page, then the
+    designer's JSX files in dependency order. Each file registers its
+    components in the module scope; app.jsx's <App /> is mounted at the
+    end. No build step - matches the Claude Designer preview environment
+    so the next design-zip drop replaces src/* wholesale.
+
+    Vendored locally so the FastAPI server works offline and we don't
+    expand the trust boundary to unpkg.com. Pinned versions:
+    React 18.3.1, Babel standalone 7.29.0.
+  -->
+  <script src="vendor/react.production.min.js"></script>
+  <script src="vendor/react-dom.production.min.js"></script>
+  <script src="vendor/babel.min.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- Wiring layer (plain JS, no JSX). Loads first so window.CK_useLiveState
+       exists by the time app.jsx renders. The leading underscore on the
+       filename marks "not from the design zip - survives drop-in updates". -->
+  <script src="_state.js"></script>
+
+  <!-- Designer artifact. Dependency order: tweaks-panel -> card -> palette -> app.
+       Files in src/ get replaced wholesale on every Claude Designer
+       drop; app.jsx contains one well-commented edit to consume live
+       data via window.CK_useLiveState (see the EDITMODE-BEGIN block). -->
+  <script type="text/babel" src="src/tweaks-panel.jsx"></script>
+  <script type="text/babel" src="src/card.jsx"></script>
+  <script type="text/babel" src="src/palette.jsx"></script>
+  <script type="text/babel" src="src/app.jsx"></script>
+
+  <!-- Mount the App component last. Babel-standalone has finished
+       transpiling all the type="text/babel" scripts above by the time
+       this inline script runs. -->
+  <script type="text/babel">
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<App />);
+  </script>
+</body>
+</html>
