@@ -33,8 +33,8 @@ class Dhis2ChapModelingAppCheck:
 
     name: ClassVar[str] = "dhis2_chap_modeling_app"
     description: ClassVar[str] = "DHIS2 app with app_hub_id of the modeling app is installed and reports a version."
-    order: ClassVar[int] = 50
-    requires: ClassVar[list[str]] = ["dhis2_chap_ping"]
+    order: ClassVar[int] = 60
+    requires: ClassVar[list[str]] = ["dhis2_ping"]
 
     async def run(self, client: Dhis2Client) -> CheckResult:
         start = time.perf_counter()

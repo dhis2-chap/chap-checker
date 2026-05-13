@@ -186,11 +186,11 @@ def test_known_check_names_accepted(tmp_path: Path) -> None:
 url = "https://x.test"
 username = "u"
 password = "p"
-checks = ["dhis2_chap_ping"]
+checks = ["dhis2_ping"]
 """,
     )
     cfg = load_config(path)
-    assert cfg.get("x").checks == ["dhis2_chap_ping"]
+    assert cfg.get("x").checks == ["dhis2_ping"]
 
 
 def test_empty_check_list_rejected(tmp_path: Path) -> None:

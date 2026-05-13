@@ -41,7 +41,7 @@ class Dhis2ChapRouteCheck:
     name: ClassVar[str] = "dhis2_chap_route"
     description: ClassVar[str] = "DHIS2 route '/api/routes/chap' exists and is enabled."
     order: ClassVar[int] = 30
-    requires: ClassVar[list[str]] = ["dhis2_chap_ping"]
+    requires: ClassVar[list[str]] = ["dhis2_ping"]
 
     async def run(self, client: Dhis2Client) -> CheckResult:
         start = time.perf_counter()

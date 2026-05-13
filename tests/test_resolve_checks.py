@@ -8,16 +8,16 @@ def test_none_returns_every_registered_check() -> None:
 
 
 def test_named_subset_returns_only_those() -> None:
-    selected = resolve_checks(["dhis2_chap_ping"])
-    assert [c.name for c in selected] == ["dhis2_chap_ping"]
+    selected = resolve_checks(["dhis2_ping"])
+    assert [c.name for c in selected] == ["dhis2_ping"]
 
 
 def test_transitive_requires_are_pulled_in() -> None:
-    """Asking for chap-core also runs ping and chap-route (its prereq chain)."""
-    selected = resolve_checks(["dhis2_chap_core"])
+    """Asking for the chap system-info check pulls in ping/route/chap_ping."""
+    selected = resolve_checks(["dhis2_chap_system_info"])
     names = [c.name for c in selected]
-    # Order is canonical (order, name): ping (10) -> chap-route (30) -> chap-core (40).
-    assert names == ["dhis2_chap_ping", "dhis2_chap_route", "dhis2_chap_core"]
+    # Canonical (order, name) order: 10, 30, 40, 50.
+    assert names == ["dhis2_ping", "dhis2_chap_route", "dhis2_chap_ping", "dhis2_chap_system_info"]
 
 
 def test_unknown_name_raises() -> None:

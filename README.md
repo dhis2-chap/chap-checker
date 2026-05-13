@@ -24,16 +24,18 @@ also run it interactively for ad-hoc one-off checks.
 ## Built-in checks
 
 Run in dependency order; if a prerequisite is not `OK`, dependent checks are
-recorded as `SKIPPED` and don't contact the server (no cascade alerts). All
-built-in checks share the `dhis2_chap_` namespace.
+recorded as `SKIPPED` and don't contact the server (no cascade alerts).
+Two namespaces: `dhis2_*` for probes against DHIS2 itself, `dhis2_chap_*` for
+probes against the chap-core service behind the DHIS2 `chap` route.
 
-| Check                       | Endpoint                                  | Requires                |
-| --------------------------- | ----------------------------------------- | ----------------------- |
-| `dhis2_chap_ping`           | `/api/me`                                 | -                       |
-| `dhis2_chap_system_info`    | `/api/system/info`                        | `dhis2_chap_ping`       |
-| `dhis2_chap_route`          | `/api/routes?filter=code:eq:chap`         | `dhis2_chap_ping`       |
-| `dhis2_chap_core`           | `/api/routes/chap/run/system/info`        | `dhis2_chap_route`      |
-| `dhis2_chap_modeling_app`   | `/api/apps` (matched by `app_hub_id`)     | `dhis2_chap_ping`       |
+| Check                       | Endpoint                                  | Requires                  |
+| --------------------------- | ----------------------------------------- | ------------------------- |
+| `dhis2_ping`                | `/api/me`                                 | -                         |
+| `dhis2_system_info`         | `/api/system/info`                        | `dhis2_ping`              |
+| `dhis2_chap_route`          | `/api/routes?filter=code:eq:chap`         | `dhis2_ping`              |
+| `dhis2_chap_ping`           | `/api/routes/chap/run/health`             | `dhis2_chap_route`        |
+| `dhis2_chap_system_info`    | `/api/routes/chap/run/system/info` (parsed)      | `dhis2_chap_ping`   |
+| `dhis2_chap_modeling_app`   | `/api/apps` (matched by `app_hub_id`)     | `dhis2_ping`              |
 
 List them at runtime:
 
@@ -53,7 +55,7 @@ check are pulled in automatically:
 url = "https://dhis2.example.com"
 username = "admin"
 password_env = "DHIS2_PASS"
-checks = ["dhis2_chap_ping"]   # only verify auth, skip chap-related probes
+checks = ["dhis2_ping"]   # only verify auth, skip chap-related probes
 ```
 
 ### Adding a new check
@@ -68,7 +70,7 @@ from typing import ClassVar
 class Dhis2ChapMyCustomCheck:
     name: ClassVar[str] = "dhis2_chap_my_custom"
     description: ClassVar[str] = "what it verifies"
-    order: ClassVar[int] = 60
+    order: ClassVar[int] = 70
     requires: ClassVar[list[str]] = ["dhis2_chap_ping"]
 
     async def run(self, client):

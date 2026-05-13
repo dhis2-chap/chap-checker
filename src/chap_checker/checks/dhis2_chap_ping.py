@@ -1,4 +1,4 @@
-"""Basic reachability + authentication check against the DHIS2 server."""
+"""Verify that chap-core is reachable through the DHIS2 ``chap`` route."""
 
 from __future__ import annotations
 
@@ -8,21 +8,23 @@ from typing import ClassVar
 from chap_checker.checks.base import CheckResult, Status, register_check
 from chap_checker.client import Dhis2Client
 
+PING_PATH = "routes/chap/run/health"
+
 
 @register_check
 class Dhis2ChapPingCheck:
-    """Verify that the DHIS2 server responds to ``/api/me`` with the given credentials."""
+    """Confirm chap-core responds to a request through the chap route."""
 
     name: ClassVar[str] = "dhis2_chap_ping"
-    description: ClassVar[str] = "DHIS2 server reachable and credentials accepted."
-    order: ClassVar[int] = 10
-    requires: ClassVar[list[str]] = []
+    description: ClassVar[str] = "chap-core /health reachable through the chap route."
+    order: ClassVar[int] = 40
+    requires: ClassVar[list[str]] = ["dhis2_chap_route"]
 
     async def run(self, client: Dhis2Client) -> CheckResult:
         start = time.perf_counter()
         try:
-            response = await client.get("me")
-        except Exception as exc:  # noqa: BLE001 - surface any transport error as a result
+            response = await client.get(PING_PATH)
+        except Exception as exc:  # noqa: BLE001
             return CheckResult(
                 name=self.name,
                 status=Status.ERROR,
@@ -31,36 +33,24 @@ class Dhis2ChapPingCheck:
             )
 
         duration_ms = (time.perf_counter() - start) * 1000
-        if response.status_code == 401:
+        if response.status_code == 502:
             return CheckResult(
                 name=self.name,
                 status=Status.FAIL,
-                message="Authentication rejected (401).",
+                message="DHIS2 route returned 502 - chap-core did not respond.",
                 duration_ms=duration_ms,
             )
         if response.status_code >= 400:
             return CheckResult(
                 name=self.name,
                 status=Status.FAIL,
-                message=f"Unexpected status {response.status_code}.",
+                message=f"Unexpected status {response.status_code} from /api/{PING_PATH}.",
                 duration_ms=duration_ms,
             )
 
-        body: dict[str, object] = {}
-        if response.headers.get("content-type", "").startswith("application/json"):
-            try:
-                body = response.json() or {}
-            except ValueError:
-                return CheckResult(
-                    name=self.name,
-                    status=Status.FAIL,
-                    message="Server returned malformed JSON for /api/me.",
-                    duration_ms=duration_ms,
-                )
         return CheckResult(
             name=self.name,
             status=Status.OK,
-            message=f"Authenticated as {body.get('username', '?')}.",
-            details={"username": body.get("username"), "user_id": body.get("id")},
+            message=f"chap-core responded (status {response.status_code}).",
             duration_ms=duration_ms,
         )
