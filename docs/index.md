@@ -28,10 +28,25 @@ also run it interactively for ad-hoc one-off checks, or open the
 ## Install
 
 ```bash
+# One-shot run without installing (no PATH pollution):
+uvx chap-checker --version
+uvx chap-checker verify --url https://dhis2.example.com --token-env DHIS2_TOKEN
+
+# Persistent install into uv's isolated tool environment:
+uv tool install chap-checker
+chap-checker --version
+
+# Upgrade to the latest release later:
+uv tool upgrade chap-checker
+
+# Or, if you're embedding into another uv project:
 uv add chap-checker
-# or
-pipx install chap-checker
 ```
+
+Released versions are published to
+[PyPI](https://pypi.org/project/chap-checker/) and the docs site
+tracks the latest tag. See [Releasing](guides/releasing.md) for the
+operator-side release playbook.
 
 ## Quick start
 

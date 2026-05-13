@@ -1,7 +1,10 @@
 # chap-checker
 
+[![CI](https://github.com/dhis2-chap/chap-checker/actions/workflows/ci.yml/badge.svg)](https://github.com/dhis2-chap/chap-checker/actions/workflows/ci.yml)
+[![PyPI version](https://img.shields.io/pypi/v/chap-checker)](https://pypi.org/project/chap-checker/)
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+[![Documentation](https://img.shields.io/badge/docs-mkdocs-blue.svg)](https://dhis2-chap.github.io/chap-checker/)
 
 A small command-line health-check and alerting tool for DHIS2 instances that
 integrate with `chap-core` via a DHIS2 route. Cron-friendly, with optional
@@ -9,6 +12,24 @@ Slack alerts on status transitions and a Textual TUI dashboard for the
 at-a-glance "leave it on a TV" view.
 
 **Documentation:** <https://dhis2-chap.github.io/chap-checker>
+
+## Install
+
+```bash
+# One-shot run without installing (no PATH pollution):
+uvx chap-checker --version
+uvx chap-checker verify --url https://dhis2.example.com --token-env DHIS2_TOKEN
+
+# Persistent install into uv's isolated tool environment:
+uv tool install chap-checker
+chap-checker --version
+
+# Upgrade to the latest release later:
+uv tool upgrade chap-checker
+
+# Or, if you're embedding into another uv project:
+uv add chap-checker
+```
 
 ## Quick start
 
