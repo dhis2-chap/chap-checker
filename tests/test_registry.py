@@ -3,7 +3,14 @@ from chap_checker.checks import all_checks
 
 def test_registry_has_builtin_checks() -> None:
     names = {c.name for c in all_checks()}
-    assert {"ping", "system-info", "chap-route", "chap-core", "modeling-app"} <= names
+    assert {
+        "dhis2_ping",
+        "dhis2_system_info",
+        "dhis2_chap_route",
+        "dhis2_chap_ping",
+        "dhis2_chap_system_info",
+        "dhis2_chap_modeling_app",
+    } <= names
 
 
 def test_check_protocol_fields() -> None:
@@ -24,5 +31,12 @@ def test_builtin_requires_reference_known_checks() -> None:
 
 def test_builtin_checks_run_in_dependency_order() -> None:
     names = [c.name for c in all_checks()]
-    expected = ["ping", "system-info", "chap-route", "chap-core", "modeling-app"]
+    expected = [
+        "dhis2_ping",
+        "dhis2_system_info",
+        "dhis2_chap_route",
+        "dhis2_chap_ping",
+        "dhis2_chap_system_info",
+        "dhis2_chap_modeling_app",
+    ]
     assert names == expected

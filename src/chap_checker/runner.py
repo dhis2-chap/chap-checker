@@ -7,7 +7,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, computed_field
 
-from chap_checker.checks.base import Check, CheckResult, Status, all_checks
+from chap_checker.checks.base import Check, CheckResult, Status, all_checks, resolve_checks
 from chap_checker.client import Dhis2Client, Dhis2Target
 from chap_checker.logging import get_logger
 
@@ -15,10 +15,17 @@ _log = get_logger("runner")
 
 
 class TargetEntry(BaseModel):
-    """A named target ready to be checked."""
+    """A named target ready to be checked.
+
+    ``check_names`` lets the caller restrict which checks run against this
+    target. ``None`` means "every registered check". A non-empty list is
+    resolved via :func:`chap_checker.checks.base.resolve_checks`, which
+    also pulls in any transitive ``requires``.
+    """
 
     name: str
     target: Dhis2Target
+    check_names: list[str] | None = None
 
 
 class TargetSummary(BaseModel):
@@ -106,11 +113,16 @@ async def run_checks(target: Dhis2Target, checks: list[Check] | None = None) -> 
 
 
 async def run_targets(targets: list[TargetEntry]) -> list[RunReport]:
-    """Run all registered checks against each :class:`TargetEntry` sequentially."""
+    """Run each :class:`TargetEntry`'s checks sequentially.
+
+    If ``entry.check_names`` is set, it picks the checks (and their transitive
+    ``requires``); otherwise every registered check runs.
+    """
     reports: list[RunReport] = []
     for entry in targets:
         _log.debug("running target %s", entry.name)
-        results = await run_checks(entry.target)
+        checks = resolve_checks(entry.check_names)
+        results = await run_checks(entry.target, checks)
         reports.append(
             RunReport(
                 target_name=entry.name,

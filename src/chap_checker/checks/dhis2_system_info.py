@@ -1,13 +1,13 @@
-"""System-info check that records the DHIS2 version."""
+"""DHIS2 ``/api/system/info`` check; records server version."""
 
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any, ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from chap_checker.checks.base import CheckResult, Status, register
+from chap_checker.checks.base import CheckResult, Status, register_check
 from chap_checker.client import Dhis2Client
 
 
@@ -24,13 +24,14 @@ class Dhis2SystemInfo(BaseModel):
     raw: dict[str, Any] = Field(default_factory=dict)
 
 
-class SystemInfoCheck:
+@register_check
+class Dhis2SystemInfoCheck:
     """Fetch ``/api/system/info`` and report DHIS2 version + revision."""
 
-    name = "system-info"
-    description = "DHIS2 /api/system/info reachable and reports a version."
-    order = 20
-    requires: list[str] = ["ping"]
+    name: ClassVar[str] = "dhis2_system_info"
+    description: ClassVar[str] = "DHIS2 /api/system/info reachable and reports a version."
+    order: ClassVar[int] = 20
+    requires: ClassVar[list[str]] = ["dhis2_ping"]
 
     async def run(self, client: Dhis2Client) -> CheckResult:
         start = time.perf_counter()
@@ -79,6 +80,3 @@ class SystemInfoCheck:
             details=info.model_dump(exclude_none=True, by_alias=True, exclude={"raw"}),
             duration_ms=duration_ms,
         )
-
-
-register(SystemInfoCheck())

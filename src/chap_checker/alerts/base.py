@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
-from typing import Literal, Protocol, runtime_checkable
+from typing import ClassVar, Literal, Protocol, TypeVar, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict
 
@@ -32,16 +33,22 @@ class Transition(BaseModel):
 
 @runtime_checkable
 class Alerter(Protocol):
-    """Protocol all alerters implement."""
+    """Protocol all alerters implement.
 
-    name: str
+    Implementations *may* raise on delivery failure - the dispatcher
+    (:func:`chap_checker.cli._dispatch_alerts`) catches the exception, logs
+    it, and skips the state-file save so the transition is retried on the
+    next run. Alert delivery failures never change the run's exit code
+    regardless of whether the alerter raises or swallows.
+    """
+
+    name: ClassVar[str]
 
     async def notify(self, transitions: list[Transition]) -> None:
         """Send the given transitions out-of-band.
 
-        Implementations MUST NOT raise on delivery failure; log to stderr and
-        return. A broken alert pipeline must never change the cron run's exit
-        code semantics.
+        May raise on transport / non-2xx responses; the dispatcher decides
+        whether to surface the failure.
         """
         ...
 
@@ -53,3 +60,40 @@ class AlerterBinding(BaseModel):
 
     alerter: Alerter
     notify_on: set[Status]
+
+
+_ALERTER_CLASSES: dict[str, type[Alerter]] = {}
+
+_TAlerter = TypeVar("_TAlerter", bound=type[Alerter])
+
+
+def register_alerter(name: str) -> Callable[[_TAlerter], _TAlerter]:
+    """Class decorator: register an alerter class under ``name``.
+
+    This is currently a discovery aid - the CLI's per-alerter config wiring
+    (:func:`chap_checker.cli._build_alerters`) still instantiates known
+    alerters by hand, but the registry makes new alerters introspectable
+    and is the seam for a future plugin-style config layer.
+
+    Example:
+        @register_alerter("slack")
+        class SlackAlerter:
+            name = "slack"
+            ...
+    """
+
+    def deco(cls: _TAlerter) -> _TAlerter:
+        _ALERTER_CLASSES[name] = cls
+        return cls
+
+    return deco
+
+
+def alerter_class(name: str) -> type[Alerter] | None:
+    """Return the registered alerter class for ``name``, or ``None``."""
+    return _ALERTER_CLASSES.get(name)
+
+
+def all_alerter_classes() -> dict[str, type[Alerter]]:
+    """Return a copy of the alerter-class registry keyed by name."""
+    return dict(_ALERTER_CLASSES)

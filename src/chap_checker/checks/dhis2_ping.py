@@ -1,20 +1,22 @@
-"""Basic reachability + authentication check."""
+"""Basic reachability + authentication check against the DHIS2 server."""
 
 from __future__ import annotations
 
 import time
+from typing import ClassVar
 
-from chap_checker.checks.base import CheckResult, Status, register
+from chap_checker.checks.base import CheckResult, Status, register_check
 from chap_checker.client import Dhis2Client
 
 
-class PingCheck:
+@register_check
+class Dhis2PingCheck:
     """Verify that the DHIS2 server responds to ``/api/me`` with the given credentials."""
 
-    name = "ping"
-    description = "Server reachable and credentials accepted."
-    order = 10
-    requires: list[str] = []
+    name: ClassVar[str] = "dhis2_ping"
+    description: ClassVar[str] = "DHIS2 server reachable and credentials accepted."
+    order: ClassVar[int] = 10
+    requires: ClassVar[list[str]] = []
 
     async def run(self, client: Dhis2Client) -> CheckResult:
         start = time.perf_counter()
@@ -62,6 +64,3 @@ class PingCheck:
             details={"username": body.get("username"), "user_id": body.get("id")},
             duration_ms=duration_ms,
         )
-
-
-register(PingCheck())

@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
 from pydantic import BaseModel, Field
+from rich.console import Console
+from rich.table import Table
 
 from chap_checker import __version__
 from chap_checker.alerts.base import AlerterBinding, Transition
 from chap_checker.alerts.slack import SlackAlerter
+from chap_checker.checks import all_checks
 from chap_checker.checks.base import Status
 from chap_checker.client import Dhis2Target
 from chap_checker.config import (
@@ -256,6 +260,51 @@ def alert_test_command(
 app.add_typer(alert_app, name="alert")
 
 
+checks_app = typer.Typer(
+    name="checks",
+    help="Inspect available checks.",
+    no_args_is_help=True,
+)
+
+
+def _checks_list_impl(ctx: typer.Context) -> None:
+    """List every registered check with order, prerequisites, and description."""
+    state_obj = _state(ctx)
+    checks = all_checks()
+
+    if state_obj.quiet:
+        return
+
+    if state_obj.json_output:
+        payload = [
+            {
+                "name": c.name,
+                "description": c.description,
+                "order": c.order,
+                "requires": c.requires,
+            }
+            for c in checks
+        ]
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+        return
+
+    console = Console()
+    table = Table(title="Registered checks")
+    table.add_column("Name", style="cyan", no_wrap=True)
+    table.add_column("Order", justify="right", style="dim")
+    table.add_column("Requires", style="dim")
+    table.add_column("Description", overflow="fold")
+    for c in checks:
+        table.add_row(c.name, str(c.order), ", ".join(c.requires) or "-", c.description)
+    console.print(table)
+
+
+checks_app.command("list", help="List registered checks.")(_checks_list_impl)
+checks_app.command("ls", hidden=True)(_checks_list_impl)
+
+app.add_typer(checks_app, name="checks")
+
+
 def _resolve_run_context(
     *,
     config: Path | None,
@@ -296,9 +345,9 @@ def _resolve_run_context(
             entry = cfg.get(instance)
         except KeyError as exc:
             raise typer.BadParameter(str(exc)) from exc
-        return [TargetEntry(name=instance, target=entry.to_target())], cfg, config_path
+        return [entry.to_target_entry(instance)], cfg, config_path
 
-    targets = [TargetEntry(name=name, target=entry.to_target()) for name, entry in cfg.instances.items()]
+    targets = [entry.to_target_entry(name) for name, entry in cfg.instances.items()]
     return targets, cfg, config_path
 
 

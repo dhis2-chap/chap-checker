@@ -1,5 +1,8 @@
+import json
 from datetime import UTC, datetime
 from pathlib import Path
+
+import pytest
 
 from chap_checker.checks.base import CheckResult, Status
 from chap_checker.runner import RunReport
@@ -41,7 +44,52 @@ def test_save_is_atomic_no_leftover_tmp(tmp_path: Path) -> None:
     path = tmp_path / "chap-checker.state.json"
     save_state(path, StateFile())
     assert path.exists()
-    assert not (tmp_path / "chap-checker.state.json.tmp").exists()
+    # No *.tmp leftovers - the unique tempfile name is renamed atomically.
+    leftovers = list(tmp_path.glob("chap-checker.state.json.*.tmp"))
+    assert leftovers == []
+
+
+def test_concurrent_saves_use_unique_tmp_files(tmp_path: Path) -> None:
+    """Two save_state calls must not collide on a shared tmp path. We can't
+    truly race in a single test, but we can confirm mkstemp gives a unique
+    suffix by inspecting that two consecutive writes still leave only the
+    target file behind."""
+    path = tmp_path / "chap-checker.state.json"
+    save_state(path, StateFile())
+    save_state(path, StateFile())
+    assert path.exists()
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_load_corrupt_json_returns_empty_and_warns(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    path = tmp_path / "chap-checker.state.json"
+    path.write_text("{not valid json", encoding="utf-8")
+
+    # Logging propagation may have been disabled by an earlier configure_logging;
+    # capture directly on the chap_checker logger for this assertion.
+    import logging as _logging
+
+    logger = _logging.getLogger("chap_checker")
+    prev_propagate = logger.propagate
+    logger.propagate = True
+    try:
+        with caplog.at_level(_logging.WARNING, logger="chap_checker.state_store"):
+            state = load_state(path)
+    finally:
+        logger.propagate = prev_propagate
+
+    assert state.states == {}
+    assert any("unreadable" in r.message for r in caplog.records)
+
+
+def test_load_schema_mismatch_returns_empty(tmp_path: Path) -> None:
+    path = tmp_path / "chap-checker.state.json"
+    path.write_text(json.dumps({"version": 999, "states": "not a dict"}), encoding="utf-8")
+    state = load_state(path)
+    assert state.states == {}
 
 
 def test_first_failure_emits_transition() -> None:
