@@ -23,12 +23,32 @@ be left on a TV / second monitor so the operator sees at a glance what's up.
 
 ## Keys
 
-| Key | Action |
-| --- | ------ |
-| `r` | Refresh immediately (otherwise auto every `--interval` seconds). |
-| `q` | Quit. |
+| Key      | Action                                                          |
+| -------- | --------------------------------------------------------------- |
+| `r`      | Refresh immediately (otherwise auto every `--interval` seconds).|
+| `Ctrl+P` | Open the [command palette](#command-palette).                   |
+| `q`      | Quit.                                                           |
 
 There is no in-UI alert toggle — see below.
+
+## Command palette
+
+Textual ships a built-in command palette (`Ctrl+P`) and chap-checker
+registers a small Provider that adds dashboard-specific entries, so the
+same items are available in both the TUI and the [web dashboard](web.md):
+
+- **Refresh now** — re-run every check immediately.
+- **Open GitHub repository** — opens `github.com/dhis2-chap/chap-checker`
+  in your default browser.
+- **Open documentation** — opens this docs site.
+
+Type to filter the list. The palette also exposes Textual's built-in
+system commands (toggle dark mode, take a screenshot, change theme),
+which are useful for tweaking the look on a TV.
+
+Add more entries by extending
+[`ChapCheckerCommands`](https://github.com/dhis2-chap/chap-checker/blob/main/src/chap_checker/dashboard.py)
+in `src/chap_checker/dashboard.py`.
 
 ## Alerts decision is at launch
 
