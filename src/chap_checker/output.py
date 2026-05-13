@@ -49,11 +49,16 @@ def _render_tables(reports: list[RunReport]) -> None:
     # column layout across all per-target tables.
     for report in reports:
         title = f"chap-checker - {report.target_name} - {report.target_url}"
+        # `expand=True` makes the table fill the terminal; without
+        # `ratio=1` on Message, Rich distributes the extra width across
+        # every column proportionally and the fixed `width=` values get
+        # ignored on wider terminals. Pinning the ratio to Message means
+        # any surplus width feeds the dynamic column instead.
         table = Table(title=title, expand=True)
         table.add_column("Check", style="cyan", no_wrap=True, width=25)
         table.add_column("Status", no_wrap=True, width=7)
         table.add_column("Duration", justify="right", style="dim", width=8)
-        table.add_column("Message", overflow="fold")
+        table.add_column("Message", overflow="fold", ratio=1)
         for r in report.results:
             table.add_row(
                 r.name,
