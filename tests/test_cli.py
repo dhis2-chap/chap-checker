@@ -21,9 +21,10 @@ def test_help_lists_global_flags() -> None:
     assert "--quiet" in result.stdout
 
 
-def test_alert_test_subcommand_registered() -> None:
-    result = runner.invoke(app, ["alert", "--help"])
+def test_alerts_subcommand_registered() -> None:
+    result = runner.invoke(app, ["alerts", "--help"])
     assert result.exit_code == 0
+    assert "list" in result.stdout
     assert "test" in result.stdout
 
 

@@ -6,15 +6,19 @@
 # WARNING: this file contains credentials. Keep it out of git and set
 # restrictive permissions (chmod 600 chap-checker.toml).
 
-# Full chap stack: every registered check runs against this instance.
+# Production instance: opts in to Slack alerts on every transition.
 [instances.example]
 url = "https://dhis2.example.com"
 username = "REPLACE_ME"
 password = "REPLACE_ME"
+alerts = ["slack"]
 
-# DHIS2-only instance: skip every dhis2_chap_* probe by listing only the
-# dhis2_* checks. Prereqs are pulled in automatically, so listing
-# `dhis2_system_info` would also bring `dhis2_ping`.
+# DHIS2-only instance, no alerts:
+#  - `checks` restricts to dhis2_* probes (skip every dhis2_chap_* one).
+#    Prereqs are pulled in automatically.
+#  - `alerts` is omitted, so transitions are tracked in state but never
+#    dispatched. Flip to `alerts = ["slack"]` later and the next real
+#    transition will fire normally - no spurious "first failure" alerts.
 [instances.dhis2-only-example]
 url = "https://dhis2.example.org"
 username = "REPLACE_ME"

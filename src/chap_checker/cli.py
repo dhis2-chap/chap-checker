@@ -167,7 +167,7 @@ def verify_command(
 
     if not no_alerts and cfg is not None and cfg.alerts is not None and config_path is not None:
         state_path = state if state is not None else config_path.parent / DEFAULT_STATE_FILENAME
-        _dispatch_alerts(reports, cfg.alerts, state_path)
+        _dispatch_alerts(reports, targets, cfg.alerts, state_path)
 
     verify_report = VerifyReport(
         checker_version=__version__,
@@ -182,15 +182,62 @@ def verify_command(
     raise typer.Exit(0 if verify_report.ok else 1)
 
 
-alert_app = typer.Typer(
-    name="alert",
-    help="Inspect or test alert dispatch.",
+alerts_app = typer.Typer(
+    name="alerts",
+    help="Inspect or test configured alerters.",
     no_args_is_help=True,
 )
 
 
-@alert_app.command("test")
-def alert_test_command(
+def _alerts_list_impl(ctx: typer.Context, config: Path | None) -> None:
+    """List every ``[alerts.<name>]`` section configured in the TOML."""
+    state_obj = _state(ctx)
+    config_path = config if config is not None else default_config_path()
+    if not config_path.exists():
+        raise typer.BadParameter(
+            f"No config at {config_path}. Provide --config <path> or create a ./{DEFAULT_CONFIG_FILENAME}.",
+        )
+    cfg = load_config(config_path)
+
+    rows: list[dict[str, object]] = []
+    if cfg.alerts is not None and cfg.alerts.slack is not None:
+        rows.append(
+            {
+                "name": "slack",
+                "transport": "Incoming Webhook",
+                "notify_on": [s.value for s in cfg.alerts.slack.notify_on],
+                "timeout_s": cfg.alerts.slack.timeout_s,
+            }
+        )
+
+    if state_obj.quiet:
+        return
+
+    if state_obj.json_output:
+        typer.echo(json.dumps(rows, indent=2, sort_keys=True))
+        return
+
+    console = Console()
+    table = Table(title=f"Configured alerters ({config_path})")
+    table.add_column("Name", style="cyan", no_wrap=True)
+    table.add_column("Transport", style="dim")
+    table.add_column("notify_on")
+    table.add_column("timeout_s", justify="right", style="dim")
+    if not rows:
+        console.print(table)
+        console.print("[dim]No alerters configured. Add an [alerts.<name>] section to enable.[/]")
+        return
+    for r in rows:
+        table.add_row(
+            str(r["name"]),
+            str(r["transport"]),
+            ", ".join(r["notify_on"]) if isinstance(r["notify_on"], list) else str(r["notify_on"]),
+            str(r["timeout_s"]),
+        )
+    console.print(table)
+
+
+def _alerts_list_command(
     ctx: typer.Context,
     config: Path | None = typer.Option(
         None,
@@ -200,7 +247,32 @@ def alert_test_command(
         envvar="CHAP_CHECKER_CONFIG",
     ),
 ) -> None:
-    """Send a synthetic transition to every configured alerter.
+    """List configured alerters."""
+    _alerts_list_impl(ctx, config)
+
+
+alerts_app.command("list", help="List configured alerters.")(_alerts_list_command)
+alerts_app.command("ls", hidden=True)(_alerts_list_command)
+
+
+@alerts_app.command("test")
+def alerts_test_command(
+    ctx: typer.Context,
+    name: str | None = typer.Option(
+        None,
+        "--name",
+        "-n",
+        help="Send only to this alerter (must be a configured alerter name). Default: every configured alerter.",
+    ),
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help=f"Path to a TOML config (defaults to ./{DEFAULT_CONFIG_FILENAME} if present).",
+        envvar="CHAP_CHECKER_CONFIG",
+    ),
+) -> None:
+    """Send a synthetic transition to every (or a named) configured alerter.
 
     Verifies the webhook URL works without waiting for a real failure.
     """
@@ -218,6 +290,14 @@ def alert_test_command(
     if not alerters:
         raise typer.BadParameter("No alerters configured.")
 
+    if name is not None:
+        configured_names = sorted(b.alerter.name for b in alerters)
+        alerters = [b for b in alerters if b.alerter.name == name]
+        if not alerters:
+            raise typer.BadParameter(
+                f"No configured alerter named '{name}'. Configured: {', '.join(configured_names)}."
+            )
+
     test_transition = Transition(
         kind="failure",
         target_name="test",
@@ -225,7 +305,7 @@ def alert_test_command(
         check_name="alert-test",
         previous_status=Status.OK,
         current_status=Status.FAIL,
-        message="Test alert from `chap-checker alert test`.",
+        message="Test alert from `chap-checker alerts test`.",
         duration_ms=0.0,
         occurred_at=datetime.now(UTC),
     )
@@ -257,7 +337,7 @@ def alert_test_command(
     raise typer.Exit(0 if report.ok else 1)
 
 
-app.add_typer(alert_app, name="alert")
+app.add_typer(alerts_app, name="alerts")
 
 
 checks_app = typer.Typer(
@@ -369,10 +449,18 @@ def _build_alerters(cfg: AlertsConfig) -> list[AlerterBinding]:
 
 def _dispatch_alerts(
     reports: list[RunReport],
+    targets: list[TargetEntry],
     alerts_cfg: AlertsConfig,
     state_path: Path,
 ) -> None:
     """Compute transitions, notify alerters, then persist state (only if delivery succeeded).
+
+    Per-target opt-in: each ``TargetEntry.alerts`` lists which configured
+    alerter names should fire for that target. A transition only reaches an
+    alerter when the source target opted into that alerter's name. State is
+    still tracked for every target (it's cheap and lets the operator flip an
+    instance from silent to alerting later without spurious "first failure"
+    pings for sustained outages).
 
     Delivery failures (Slack 5xx, transport errors) are caught so they cannot
     change the run's exit code, but on failure the new state is *not* saved.
@@ -384,6 +472,8 @@ def _dispatch_alerts(
     bindings = _build_alerters(alerts_cfg)
     if not bindings:
         return
+
+    target_alerts = {t.name: set(t.alerts) for t in targets}
 
     notify_on_union: set[Status] = set()
     for binding in bindings:
@@ -400,10 +490,12 @@ def _dispatch_alerts(
     async def _send_all() -> bool:
         all_ok = True
         for binding in bindings:
+            alerter_name = binding.alerter.name
             filtered = [
                 t
                 for t in transitions
-                if t.current_status in binding.notify_on or t.previous_status in binding.notify_on
+                if alerter_name in target_alerts.get(t.target_name, set())
+                and (t.current_status in binding.notify_on or t.previous_status in binding.notify_on)
             ]
             if not filtered:
                 continue
