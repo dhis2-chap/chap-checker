@@ -170,7 +170,7 @@ class DashboardServer:
             # refresh, not ping alone. Refreshes where every check is
             # SKIPPED don't tell the operator anything new so they're
             # dropped from the history strip.
-            run_statuses = [c.status for c in r.results if c.status is not Status.SKIPPED]
+            run_statuses: list[Status] = [c.status for c in r.results if c.status is not Status.SKIPPED]
             if run_statuses:
                 worst = _worst(run_statuses)
                 durations = [c.duration_ms for c in r.results if c.status is not Status.SKIPPED]
