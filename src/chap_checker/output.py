@@ -9,7 +9,7 @@ from rich.console import Console
 from rich.table import Table
 
 from chap_checker.checks.base import Status
-from chap_checker.runner import RunReport
+from chap_checker.runner import RunReport, VerifyReport
 
 _STATUS_STYLE = {
     Status.OK: "bold green",
@@ -20,34 +20,22 @@ _STATUS_STYLE = {
 }
 
 
-def render(reports: list[RunReport], *, json_output: bool) -> None:
-    """Write ``reports`` to stdout.
+def render(report: VerifyReport, *, json_output: bool) -> None:
+    """Write ``report`` to stdout.
 
     Args:
-        reports: One :class:`RunReport` per target.
+        report: Verify-invocation result.
         json_output: If True, emit a single JSON document; otherwise render a
             Rich table per target.
     """
     if json_output:
-        _render_json(reports)
+        _render_json(report)
     else:
-        _render_tables(reports)
+        _render_tables(report.runs)
 
 
-def _render_json(reports: list[RunReport]) -> None:
-    payload = {
-        "ok": all(r.ok for r in reports),
-        "runs": [
-            {
-                "target_name": r.target_name,
-                "target_url": r.target_url,
-                "ok": r.ok,
-                "results": [c.model_dump(mode="json") for c in r.results],
-            }
-            for r in reports
-        ],
-    }
-    json.dump(payload, sys.stdout, indent=2, sort_keys=True)
+def _render_json(report: VerifyReport) -> None:
+    json.dump(report.model_dump(mode="json"), sys.stdout, indent=2, sort_keys=True)
     sys.stdout.write("\n")
 
 

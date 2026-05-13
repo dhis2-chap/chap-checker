@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 from chap_checker.checks.base import Check, CheckResult, Status, all_checks
 from chap_checker.client import Dhis2Client, Dhis2Target
@@ -20,6 +21,16 @@ class TargetEntry(BaseModel):
     target: Dhis2Target
 
 
+class TargetSummary(BaseModel):
+    """Per-target counts of check results by status."""
+
+    ok: int = 0
+    warn: int = 0
+    fail: int = 0
+    error: int = 0
+    skipped: int = 0
+
+
 class RunReport(BaseModel):
     """Results for a single target."""
 
@@ -27,10 +38,35 @@ class RunReport(BaseModel):
     target_url: str
     results: list[CheckResult] = Field(default_factory=list)
 
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def ok(self) -> bool:
         """True if every check came back ``OK``."""
         return all(r.status is Status.OK for r in self.results)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def summary(self) -> TargetSummary:
+        """Counts of results by status for this target."""
+        counts: dict[str, int] = {"ok": 0, "warn": 0, "fail": 0, "error": 0, "skipped": 0}
+        for r in self.results:
+            counts[r.status.value] += 1
+        return TargetSummary(**counts)
+
+
+class VerifyReport(BaseModel):
+    """Top-level report for a single ``chap-checker verify`` invocation."""
+
+    checker_version: str
+    started_at: datetime
+    finished_at: datetime
+    runs: list[RunReport]
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def ok(self) -> bool:
+        """True if every target's checks all came back ``OK``."""
+        return all(r.ok for r in self.runs)
 
 
 async def run_checks(target: Dhis2Target, checks: list[Check] | None = None) -> list[CheckResult]:

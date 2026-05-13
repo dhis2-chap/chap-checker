@@ -24,7 +24,7 @@ from chap_checker.config import (
 from chap_checker.logging import configure as configure_logging
 from chap_checker.logging import get_logger
 from chap_checker.output import render
-from chap_checker.runner import RunReport, TargetEntry, run_targets_sync
+from chap_checker.runner import RunReport, TargetEntry, VerifyReport, run_targets_sync
 from chap_checker.state import GlobalState
 from chap_checker.state_store import (
     DEFAULT_STATE_FILENAME,
@@ -157,17 +157,25 @@ def verify_command(
         timeout=timeout,
         insecure=insecure,
     )
+    started_at = datetime.now(UTC)
     reports = run_targets_sync(targets)
+    finished_at = datetime.now(UTC)
 
     if not no_alerts and cfg is not None and cfg.alerts is not None and config_path is not None:
         state_path = state if state is not None else config_path.parent / DEFAULT_STATE_FILENAME
         _dispatch_alerts(reports, cfg.alerts, state_path)
 
-    if not state_obj.quiet:
-        render(reports, json_output=state_obj.json_output)
+    verify_report = VerifyReport(
+        checker_version=__version__,
+        started_at=started_at,
+        finished_at=finished_at,
+        runs=reports,
+    )
 
-    exit_code = 0 if all(r.ok for r in reports) else 1
-    raise typer.Exit(exit_code)
+    if not state_obj.quiet:
+        render(verify_report, json_output=state_obj.json_output)
+
+    raise typer.Exit(0 if verify_report.ok else 1)
 
 
 alert_app = typer.Typer(

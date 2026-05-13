@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import stat
 import tomllib
 from pathlib import Path
 
@@ -10,8 +11,11 @@ from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
 from chap_checker.checks.base import Status
 from chap_checker.client import Dhis2Target
+from chap_checker.logging import get_logger
 
 DEFAULT_CONFIG_FILENAME = "chap-checker.toml"
+
+_log = get_logger("config")
 
 
 class InstanceConfig(BaseModel):
@@ -23,7 +27,7 @@ class InstanceConfig(BaseModel):
     username: str
     password: str | None = None
     password_env: str | None = None
-    timeout_s: float = 10.0
+    timeout_s: float = Field(default=10.0, gt=0)
     verify_tls: bool = True
 
     @model_validator(mode="after")
@@ -61,7 +65,7 @@ class SlackAlertConfig(BaseModel):
     webhook_url: HttpUrl | None = None
     webhook_url_env: str | None = None
     notify_on: list[Status] = Field(default_factory=lambda: [Status.FAIL, Status.ERROR, Status.WARN])
-    timeout_s: float = 10.0
+    timeout_s: float = Field(default=10.0, gt=0)
 
     @model_validator(mode="after")
     def _exactly_one_webhook_source(self) -> "SlackAlertConfig":
@@ -113,4 +117,37 @@ def load_config(path: Path) -> CheckerConfig:
     """Parse a TOML config file into a :class:`CheckerConfig`."""
     with path.open("rb") as f:
         data = tomllib.load(f)
-    return CheckerConfig.model_validate(data)
+    cfg = CheckerConfig.model_validate(data)
+    _warn_if_insecure_permissions(path, cfg)
+    return cfg
+
+
+def _has_inline_secret(cfg: CheckerConfig) -> bool:
+    if any(i.password is not None for i in cfg.instances.values()):
+        return True
+    if cfg.alerts is not None and cfg.alerts.slack is not None and cfg.alerts.slack.webhook_url is not None:
+        return True
+    return False
+
+
+def _warn_if_insecure_permissions(path: Path, cfg: CheckerConfig) -> None:
+    """Log a warning when ``path`` is group- or world-readable AND carries inline secrets.
+
+    Webhook URLs and inline passwords are credentials; the file should be
+    ``chmod 0600``. Skipped on non-POSIX where the bits don't apply.
+    """
+    if os.name != "posix":
+        return
+    if not _has_inline_secret(cfg):
+        return
+    try:
+        mode = stat.S_IMODE(path.stat().st_mode)
+    except OSError:
+        return
+    if mode & 0o077:
+        _log.warning(
+            "%s contains inline credentials and is mode %o; recommend `chmod 600 %s`.",
+            path,
+            mode,
+            path,
+        )
