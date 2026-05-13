@@ -8,6 +8,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
+from chap_checker.checks.base import Status
 from chap_checker.client import Dhis2Target
 
 DEFAULT_CONFIG_FILENAME = "chap-checker.toml"
@@ -52,12 +53,48 @@ class InstanceConfig(BaseModel):
         )
 
 
+class SlackAlertConfig(BaseModel):
+    """Slack Incoming Webhook alerter configuration."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    webhook_url: HttpUrl | None = None
+    webhook_url_env: str | None = None
+    notify_on: list[Status] = Field(default_factory=lambda: [Status.FAIL, Status.ERROR, Status.WARN])
+    timeout_s: float = 10.0
+
+    @model_validator(mode="after")
+    def _exactly_one_webhook_source(self) -> "SlackAlertConfig":
+        if (self.webhook_url is None) == (self.webhook_url_env is None):
+            raise ValueError("set exactly one of 'webhook_url' or 'webhook_url_env'")
+        return self
+
+    def resolve_webhook_url(self) -> str:
+        """Return the webhook URL, reading from env if ``webhook_url_env`` is set."""
+        if self.webhook_url is not None:
+            return str(self.webhook_url)
+        assert self.webhook_url_env is not None  # guarded by validator
+        value = os.environ.get(self.webhook_url_env)
+        if value is None:
+            raise RuntimeError(f"Environment variable '{self.webhook_url_env}' is not set.")
+        return value
+
+
+class AlertsConfig(BaseModel):
+    """``[alerts.*]`` section — one optional sub-section per alerter."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    slack: SlackAlertConfig | None = None
+
+
 class CheckerConfig(BaseModel):
     """Top-level ``chap-checker.toml`` document."""
 
     model_config = ConfigDict(extra="forbid")
 
     instances: dict[str, InstanceConfig] = Field(default_factory=dict)
+    alerts: AlertsConfig | None = None
 
     def get(self, name: str) -> InstanceConfig:
         """Return one instance by name or raise :class:`KeyError`."""

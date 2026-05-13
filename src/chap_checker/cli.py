@@ -2,17 +2,37 @@
 
 from __future__ import annotations
 
+import asyncio
+from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
 
 from chap_checker import __version__
+from chap_checker.alerts.base import AlerterBinding, Transition
+from chap_checker.alerts.slack import SlackAlerter
+from chap_checker.checks.base import Status
 from chap_checker.client import Dhis2Target
-from chap_checker.config import DEFAULT_CONFIG_FILENAME, default_config_path, load_config
+from chap_checker.config import (
+    DEFAULT_CONFIG_FILENAME,
+    AlertsConfig,
+    CheckerConfig,
+    default_config_path,
+    load_config,
+)
 from chap_checker.logging import configure as configure_logging
+from chap_checker.logging import get_logger
 from chap_checker.output import render
-from chap_checker.runner import run_targets_sync
+from chap_checker.runner import RunReport, TargetEntry, run_targets_sync
 from chap_checker.state import GlobalState
+from chap_checker.state_store import (
+    DEFAULT_STATE_FILENAME,
+    compute_transitions,
+    load_state,
+    save_state,
+)
+
+_log = get_logger("cli")
 
 app = typer.Typer(
     name="chap-checker",
@@ -30,6 +50,12 @@ def root(
         "--json",
         help="Emit machine-readable JSON instead of a Rich table (cron-friendly).",
     ),
+    quiet: bool = typer.Option(
+        False,
+        "--quiet",
+        "-q",
+        help="Suppress stdout entirely; just run checks, dispatch alerts, and exit (cron-friendly).",
+    ),
     version: bool = typer.Option(False, "--version", "-v", help="Show version and exit."),
 ) -> None:
     """Global options shared by every subcommand."""
@@ -37,7 +63,7 @@ def root(
         typer.echo(f"chap-checker {__version__}")
         raise typer.Exit()
     configure_logging(debug)
-    ctx.obj = GlobalState(debug=debug, json_output=json_output)
+    ctx.obj = GlobalState(debug=debug, json_output=json_output, quiet=quiet)
     if ctx.invoked_subcommand is None:
         typer.echo(ctx.get_help())
 
@@ -76,6 +102,13 @@ def verify_command(
     ),
     timeout: float = typer.Option(10.0, "--timeout", help="HTTP timeout per request (seconds, ad-hoc mode)."),
     insecure: bool = typer.Option(False, "--insecure", help="Skip TLS certificate verification (ad-hoc mode)."),
+    no_alerts: bool = typer.Option(False, "--no-alerts", help="Skip alert dispatch even if configured."),
+    state: Path | None = typer.Option(
+        None,
+        "--state",
+        help=f"Path to the persisted state file (default: ./{DEFAULT_STATE_FILENAME} next to the config).",
+        envvar="CHAP_CHECKER_STATE",
+    ),
 ) -> None:
     """Run all registered checks against one or more DHIS2 instances.
 
@@ -87,8 +120,8 @@ def verify_command(
 
     Without ``--instance``, every instance in the config is checked.
     """
-    state = _state(ctx)
-    targets = _resolve_targets(
+    state_obj = _state(ctx)
+    targets, cfg, config_path = _resolve_run_context(
         config=config,
         instance=instance,
         url=url,
@@ -98,13 +131,86 @@ def verify_command(
         insecure=insecure,
     )
     reports = run_targets_sync(targets)
-    render(reports, json_output=state.json_output)
+
+    if not no_alerts and cfg is not None and cfg.alerts is not None and config_path is not None:
+        state_path = state if state is not None else config_path.parent / DEFAULT_STATE_FILENAME
+        _dispatch_alerts(reports, cfg.alerts, state_path)
+
+    if not state_obj.quiet:
+        render(reports, json_output=state_obj.json_output)
 
     exit_code = 0 if all(r.ok for r in reports) else 1
     raise typer.Exit(exit_code)
 
 
-def _resolve_targets(
+alert_app = typer.Typer(
+    name="alert",
+    help="Inspect or test alert dispatch.",
+    no_args_is_help=True,
+)
+
+
+@alert_app.command("test")
+def alert_test_command(
+    ctx: typer.Context,
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help=f"Path to a TOML config (defaults to ./{DEFAULT_CONFIG_FILENAME} if present).",
+        envvar="CHAP_CHECKER_CONFIG",
+    ),
+) -> None:
+    """Send a synthetic transition to every configured alerter.
+
+    Verifies the webhook URL works without waiting for a real failure.
+    """
+    state_obj = _state(ctx)
+    config_path = config if config is not None else default_config_path()
+    if not config_path.exists():
+        raise typer.BadParameter(
+            f"No config at {config_path}. Provide --config <path> or create a ./{DEFAULT_CONFIG_FILENAME}.",
+        )
+    cfg = load_config(config_path)
+    if cfg.alerts is None:
+        raise typer.BadParameter(f"{config_path} has no [alerts.*] section.")
+
+    alerters = _build_alerters(cfg.alerts)
+    if not alerters:
+        raise typer.BadParameter("No alerters configured.")
+
+    test_transition = Transition(
+        kind="failure",
+        target_name="test",
+        target_url="https://test.example.com",
+        check_name="alert-test",
+        previous_status=Status.OK,
+        current_status=Status.FAIL,
+        message="Test alert from `chap-checker alert test`.",
+        duration_ms=0.0,
+        occurred_at=datetime.now(UTC),
+    )
+
+    async def _send_all() -> None:
+        for binding in alerters:
+            if not state_obj.quiet:
+                typer.echo(f"Sending test message via {binding.alerter.name}...")
+            try:
+                await binding.alerter.notify([test_transition])
+                if not state_obj.quiet:
+                    typer.echo("  OK")
+            except Exception as exc:  # noqa: BLE001 - matches alerter semantics
+                if not state_obj.quiet:
+                    typer.echo(f"  FAILED: {exc}")
+                _log.exception("alerter %s failed", binding.alerter.name)
+
+    asyncio.run(_send_all())
+
+
+app.add_typer(alert_app, name="alert")
+
+
+def _resolve_run_context(
     *,
     config: Path | None,
     instance: str | None,
@@ -113,7 +219,8 @@ def _resolve_targets(
     password: str | None,
     timeout: float,
     insecure: bool,
-) -> list[tuple[str, Dhis2Target]]:
+) -> tuple[list[TargetEntry], CheckerConfig | None, Path | None]:
+    """Build the list of targets to check plus the loaded config (if any)."""
     if url is not None:
         if instance is not None:
             raise typer.BadParameter("--instance cannot be combined with --url; --url is ad-hoc mode.")
@@ -126,7 +233,7 @@ def _resolve_targets(
             timeout_s=timeout,
             verify_tls=not insecure,
         )
-        return [("ad-hoc", target)]
+        return [TargetEntry(name="ad-hoc", target=target)], None, None
 
     config_path = config if config is not None else default_config_path()
     if not config_path.exists():
@@ -143,9 +250,65 @@ def _resolve_targets(
             entry = cfg.get(instance)
         except KeyError as exc:
             raise typer.BadParameter(str(exc)) from exc
-        return [(instance, entry.to_target())]
+        return [TargetEntry(name=instance, target=entry.to_target())], cfg, config_path
 
-    return [(name, entry.to_target()) for name, entry in cfg.instances.items()]
+    targets = [TargetEntry(name=name, target=entry.to_target()) for name, entry in cfg.instances.items()]
+    return targets, cfg, config_path
+
+
+def _build_alerters(cfg: AlertsConfig) -> list[AlerterBinding]:
+    """Instantiate one :class:`AlerterBinding` per configured ``[alerts.<name>]`` section."""
+    out: list[AlerterBinding] = []
+    if cfg.slack is not None:
+        out.append(
+            AlerterBinding(
+                alerter=SlackAlerter(
+                    webhook_url=cfg.slack.resolve_webhook_url(),
+                    timeout_s=cfg.slack.timeout_s,
+                ),
+                notify_on=set(cfg.slack.notify_on),
+            )
+        )
+    return out
+
+
+def _dispatch_alerts(
+    reports: list[RunReport],
+    alerts_cfg: AlertsConfig,
+    state_path: Path,
+) -> None:
+    """Compute transitions, persist new state, and notify each alerter."""
+    bindings = _build_alerters(alerts_cfg)
+    if not bindings:
+        return
+
+    notify_on_union: set[Status] = set()
+    for binding in bindings:
+        notify_on_union.update(binding.notify_on)
+
+    now = datetime.now(UTC)
+    previous = load_state(state_path)
+    transitions, new_state = compute_transitions(previous, reports, notify_on_union, now)
+    save_state(state_path, new_state)
+
+    if not transitions:
+        return
+
+    async def _send_all() -> None:
+        for binding in bindings:
+            filtered = [
+                t
+                for t in transitions
+                if t.current_status in binding.notify_on or t.previous_status in binding.notify_on
+            ]
+            if not filtered:
+                continue
+            try:
+                await binding.alerter.notify(filtered)
+            except Exception:  # noqa: BLE001 - alerts must not change exit code
+                _log.exception("alerter %s failed", binding.alerter.name)
+
+    asyncio.run(_send_all())
 
 
 def _state(ctx: typer.Context) -> GlobalState:

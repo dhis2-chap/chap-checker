@@ -17,6 +17,13 @@ def test_help_lists_global_flags() -> None:
     assert result.exit_code == 0
     assert "--debug" in result.stdout
     assert "--json" in result.stdout
+    assert "--quiet" in result.stdout
+
+
+def test_alert_test_subcommand_registered() -> None:
+    result = runner.invoke(app, ["alert", "--help"])
+    assert result.exit_code == 0
+    assert "test" in result.stdout
 
 
 def test_verify_help_lists_credentials() -> None:

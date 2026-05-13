@@ -13,6 +13,13 @@ from chap_checker.logging import get_logger
 _log = get_logger("runner")
 
 
+class TargetEntry(BaseModel):
+    """A named target ready to be checked."""
+
+    name: str
+    target: Dhis2Target
+
+
 class RunReport(BaseModel):
     """Results for a single target."""
 
@@ -46,16 +53,22 @@ async def run_checks(target: Dhis2Target, checks: list[Check] | None = None) -> 
     return results
 
 
-async def run_targets(targets: list[tuple[str, Dhis2Target]]) -> list[RunReport]:
-    """Run all registered checks against each ``(name, target)`` pair sequentially."""
+async def run_targets(targets: list[TargetEntry]) -> list[RunReport]:
+    """Run all registered checks against each :class:`TargetEntry` sequentially."""
     reports: list[RunReport] = []
-    for name, target in targets:
-        _log.debug("running target %s", name)
-        results = await run_checks(target)
-        reports.append(RunReport(target_name=name, target_url=str(target.base_url), results=results))
+    for entry in targets:
+        _log.debug("running target %s", entry.name)
+        results = await run_checks(entry.target)
+        reports.append(
+            RunReport(
+                target_name=entry.name,
+                target_url=str(entry.target.base_url),
+                results=results,
+            )
+        )
     return reports
 
 
-def run_targets_sync(targets: list[tuple[str, Dhis2Target]]) -> list[RunReport]:
+def run_targets_sync(targets: list[TargetEntry]) -> list[RunReport]:
     """Synchronous wrapper around :func:`run_targets`."""
     return asyncio.run(run_targets(targets))

@@ -10,3 +10,4 @@ class GlobalState(BaseModel):
 
     debug: bool = False
     json_output: bool = False
+    quiet: bool = False

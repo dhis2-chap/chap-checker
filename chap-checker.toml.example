@@ -15,4 +15,20 @@ url = "https://dhis2.example.org"
 username = "REPLACE_ME"
 # Prefer pulling secrets from the environment in shared / CI setups:
 password_env = "ANOTHER_EXAMPLE_PASSWORD"
-timeout_s = 15.0
+
+# Optional overrides (shown with their defaults):
+# timeout_s = 10.0
+# verify_tls = true
+
+# Optional: alert to Slack when a check's status changes (stateful;
+# transitions only). State is persisted to ./chap-checker.state.json
+# (or --state <path>) next to this config.
+[alerts.slack]
+# Use either an inline URL or pull from the environment. Treat the webhook
+# URL as a credential.
+# webhook_url = "https://hooks.slack.com/services/REPLACE/ME/HERE"
+webhook_url_env = "SLACK_WEBHOOK_URL"
+
+# Optional overrides (shown with their defaults):
+# notify_on = ["fail", "error", "warn"]
+# timeout_s = 10.0
