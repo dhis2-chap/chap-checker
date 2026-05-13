@@ -67,9 +67,17 @@ class CheckRowModel(BaseModel):
 
 
 class HistoryPointModel(BaseModel):
-    """One past ping result. Used for the uptime/latency sparkline."""
+    """One past refresh outcome, used for the uptime sparkline.
 
-    ok: bool
+    ``status`` is the worst check status across the refresh - OK if
+    everything passed, WARN if any non-fatal check flagged something,
+    FAIL/ERROR if any check failed. ``latency_ms`` is the average
+    duration of the non-skipped checks in that refresh, kept around
+    so the bar tooltip can still report a number even though the bar
+    color itself is no longer latency-driven.
+    """
+
+    status: Status
     latency_ms: int | None = None
 
 
@@ -109,10 +117,12 @@ class _TileTracker:
     ping_total: int = 0
     last_refresh: datetime | None = None
     last_report: RunReport | None = None
-    # Rolling per-refresh ping history (most recent on the right). Each
-    # entry is (ok, latency_ms). Kept in-memory only, like the cumulative
-    # counters above - the dashboard is a live view, not a metrics store.
-    history: deque[tuple[bool, int | None]] = field(
+    # Rolling per-refresh history (most recent on the right). Each entry
+    # is (worst_status, avg_latency_ms) for one refresh cycle - the bar
+    # colour follows the overall check outcome, not ping alone. Kept
+    # in-memory only, like the cumulative counters above; the dashboard
+    # is a live view, not a metrics store.
+    history: deque[tuple[Status, int | None]] = field(
         default_factory=lambda: deque(maxlen=_HISTORY_LEN),
     )
 
@@ -154,10 +164,18 @@ class DashboardServer:
             ping = next((c for c in r.results if c.name == "dhis2_ping"), None)
             if ping is not None and ping.status is not Status.SKIPPED:
                 t.ping_total += 1
-                ok = ping.status is Status.OK
-                if ok:
+                if ping.status is Status.OK:
                     t.ping_ok += 1
-                t.history.append((ok, int(ping.duration_ms) if ok else None))
+            # Sparkline history reflects the overall worst status of this
+            # refresh, not ping alone. Refreshes where every check is
+            # SKIPPED don't tell the operator anything new so they're
+            # dropped from the history strip.
+            run_statuses = [c.status for c in r.results if c.status is not Status.SKIPPED]
+            if run_statuses:
+                worst = _worst(run_statuses)
+                durations = [c.duration_ms for c in r.results if c.status is not Status.SKIPPED]
+                avg_latency = int(sum(durations) / len(durations)) if durations else None
+                t.history.append((worst, avg_latency))
         self.last_refresh = now
 
         if self.alerts_enabled and self.cfg.alerts is not None and self.state_path is not None:
@@ -189,7 +207,7 @@ class DashboardServer:
                 total_count=0,
                 ping_ok=t.ping_ok,
                 ping_total=t.ping_total,
-                history=[HistoryPointModel(ok=o, latency_ms=lat) for o, lat in t.history],
+                history=[HistoryPointModel(status=s, latency_ms=lat) for s, lat in t.history],
             )
         statuses = [r.status for r in report.results]
         worst = _worst(statuses)
@@ -218,7 +236,7 @@ class DashboardServer:
                 )
                 for r in report.results
             ],
-            history=[HistoryPointModel(ok=o, latency_ms=lat) for o, lat in t.history],
+            history=[HistoryPointModel(status=s, latency_ms=lat) for s, lat in t.history],
         )
 
 

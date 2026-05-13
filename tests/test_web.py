@@ -86,10 +86,9 @@ def test_snapshot_reflects_tracker_state() -> None:
         ],
     )
     tracker = _TileTracker(ping_ok=3, ping_total=3, last_report=report)
-    # Three prior ping outcomes - last one is a failure, so the sparkline
-    # has something to show. Mirrors what _refresh_once accumulates over
-    # successive cycles.
-    tracker.history.extend([(True, 120), (True, 105), (False, None)])
+    # Three prior refresh outcomes - one OK, one degraded, one failure
+    # so all three sparkline colour paths get covered.
+    tracker.history.extend([(Status.OK, 120), (Status.WARN, 140), (Status.FAIL, None)])
     server.trackers["prod"] = tracker
     snap = server.snapshot()
     tile = snap.tiles[0]
@@ -101,10 +100,10 @@ def test_snapshot_reflects_tracker_state() -> None:
     assert tile.uptime_pct == 100.0
     assert [c.name for c in tile.checks] == ["ping", "system_info"]
     assert [c.symbol for c in tile.checks] == ["✓", "✓"]
-    assert [(p.ok, p.latency_ms) for p in tile.history] == [
-        (True, 120),
-        (True, 105),
-        (False, None),
+    assert [(p.status, p.latency_ms) for p in tile.history] == [
+        (Status.OK, 120),
+        (Status.WARN, 140),
+        (Status.FAIL, None),
     ]
 
 

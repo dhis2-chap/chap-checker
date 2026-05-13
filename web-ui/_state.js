@@ -61,14 +61,19 @@
       down: status === "down",
     }));
     const latency = typeof tile.latency_ms === "number" ? tile.latency_ms : 0;
-    // Real per-refresh ping history from the server. Each entry is the
-    // outcome of one /api/ping call; the artifact's UptimeBars reads
-    // {ok, latency} and the LatencySpark reads .latency, so we map to
-    // that shape and pass it straight through.
-    const history = (tile.history || []).map((p) => ({
-      ok: !!p.ok,
-      latency: typeof p.latency_ms === "number" ? p.latency_ms : null,
-    }));
+    // Real per-refresh history from the server. Each entry carries the
+    // worst check status across that refresh; the artifact's UptimeBars
+    // colors the bar from it (ok=green / warn=amber / down=red). We
+    // also pass through `ok` and `latency` so the artifact's other
+    // viz modes (LatencySpark) keep working unmodified.
+    const history = (tile.history || []).map((p) => {
+      const s = mapStatus(p.status);
+      return {
+        status: s,
+        ok: s === "ok",
+        latency: typeof p.latency_ms === "number" ? p.latency_ms : null,
+      };
+    });
     return {
       id: tile.name,
       name: tile.name.toUpperCase(),
