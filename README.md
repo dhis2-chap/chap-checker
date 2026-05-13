@@ -271,6 +271,25 @@ Append structured runs to a log for ingestion:
 message to the channel, so put it behind a manual run after webhook
 changes or when you suspect the pipeline is broken.
 
+## TUI dashboard (experimental)
+
+```bash
+chap-checker dashboard
+```
+
+Textual-based dashboard with one tile per configured instance. The grid
+adapts to the instance count (1 column for 1 instance, up to 4 for 10+),
+and each tile shows the rolled-up status, the cumulative `dhis2_ping`
+success ratio since the dashboard launched, and the first non-OK message.
+
+Keys: `a` toggles Slack/alert dispatch globally (default OFF -- the
+"TUI is enough, don't page anyone" case), `r` refreshes immediately,
+`q` quits. Auto-refresh interval defaults to 30s; override with
+`--interval <seconds>`.
+
+When alert dispatch is toggled on, the same per-instance `alerts = [...]`
+opt-in from the TOML applies; instances without an opt-in stay silent.
+
 ## Development
 
 ```bash
