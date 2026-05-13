@@ -72,6 +72,13 @@ class Dhis2ChapSystemInfoCheck:
                 message="chap-core responded but body was not JSON.",
                 duration_ms=duration_ms,
             )
+        if not isinstance(body, dict):
+            return CheckResult(
+                name=self.name,
+                status=Status.FAIL,
+                message="Unexpected chap-core /system/info response shape (expected a JSON object).",
+                duration_ms=duration_ms,
+            )
 
         info = ChapCoreSystemInfo.model_validate({**body, "raw": body})
         if not info.version:
