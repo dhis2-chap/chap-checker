@@ -89,24 +89,33 @@ def compute_transitions(
             prev_status = prev.status if prev is not None else Status.OK
             curr_status = result.status
 
-            if curr_status != prev_status:
-                if curr_status in notify_set or prev_status in notify_set:
-                    kind: TransitionKind = "recovery" if curr_status is Status.OK else "failure"
-                    transitions.append(
-                        Transition(
-                            kind=kind,
-                            target_name=report.target_name,
-                            target_url=report.target_url,
-                            check_name=result.name,
-                            previous_status=prev_status,
-                            current_status=curr_status,
-                            message=result.message,
-                            duration_ms=result.duration_ms,
-                            occurred_at=now,
-                        )
-                    )
-                new_states[key] = CheckState(status=curr_status, since=now)
-            else:
+            if curr_status == prev_status:
                 new_states[key] = prev if prev is not None else CheckState(status=curr_status, since=now)
+                continue
+
+            new_states[key] = CheckState(status=curr_status, since=now)
+
+            # SKIPPED is informational: never emit a transition through it.
+            # The real signal is whatever caused the skip, which has its own transition.
+            if curr_status is Status.SKIPPED or prev_status is Status.SKIPPED:
+                continue
+
+            if curr_status not in notify_set and prev_status not in notify_set:
+                continue
+
+            kind: TransitionKind = "recovery" if curr_status is Status.OK else "failure"
+            transitions.append(
+                Transition(
+                    kind=kind,
+                    target_name=report.target_name,
+                    target_url=report.target_url,
+                    check_name=result.name,
+                    previous_status=prev_status,
+                    current_status=curr_status,
+                    message=result.message,
+                    duration_ms=result.duration_ms,
+                    occurred_at=now,
+                )
+            )
 
     return transitions, StateFile(states=new_states)

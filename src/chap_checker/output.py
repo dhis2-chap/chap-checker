@@ -16,6 +16,7 @@ _STATUS_STYLE = {
     Status.WARN: "bold yellow",
     Status.FAIL: "bold red",
     Status.ERROR: "bold magenta",
+    Status.SKIPPED: "dim",
 }
 
 

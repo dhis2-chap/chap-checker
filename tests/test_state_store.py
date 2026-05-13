@@ -104,3 +104,33 @@ def test_warn_in_notify_on_fires_on_anomaly() -> None:
 
     assert len(transitions) == 1
     assert transitions[0].current_status is Status.WARN
+
+
+def test_ok_to_skipped_does_not_transition() -> None:
+    now = datetime.now(UTC)
+    previous = StateFile()  # implicit OK
+    reports = [_report("prod", _result("system-info", Status.SKIPPED, "Skipped: ping not OK."))]
+    transitions, new_state = compute_transitions(previous, reports, {Status.FAIL, Status.ERROR, Status.WARN}, now)
+
+    assert transitions == []
+    assert new_state.states["prod::system-info"].status is Status.SKIPPED
+
+
+def test_fail_to_skipped_does_not_transition() -> None:
+    now = datetime.now(UTC)
+    earlier = datetime(2026, 1, 1, tzinfo=UTC)
+    previous = StateFile(states={"prod::system-info": CheckState(status=Status.FAIL, since=earlier)})
+    reports = [_report("prod", _result("system-info", Status.SKIPPED, "Skipped: ping not OK."))]
+    transitions, _ = compute_transitions(previous, reports, {Status.FAIL, Status.ERROR, Status.WARN}, now)
+
+    assert transitions == []
+
+
+def test_skipped_to_ok_does_not_transition() -> None:
+    now = datetime.now(UTC)
+    earlier = datetime(2026, 1, 1, tzinfo=UTC)
+    previous = StateFile(states={"prod::system-info": CheckState(status=Status.SKIPPED, since=earlier)})
+    reports = [_report("prod", _result("system-info", Status.OK, "back"))]
+    transitions, _ = compute_transitions(previous, reports, {Status.FAIL, Status.ERROR, Status.WARN}, now)
+
+    assert transitions == []

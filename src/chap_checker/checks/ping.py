@@ -14,6 +14,7 @@ class PingCheck:
     name = "ping"
     description = "Server reachable and credentials accepted."
     order = 10
+    requires: list[str] = []
 
     async def run(self, client: Dhis2Client) -> CheckResult:
         start = time.perf_counter()

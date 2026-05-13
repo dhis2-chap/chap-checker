@@ -54,6 +54,7 @@ class ChapRouteCheck:
     name = "chap-route"
     description = "DHIS2 route '/api/routes/chap' exists and is enabled."
     order = 30
+    requires: list[str] = ["ping"]
 
     async def run(self, client: Dhis2Client) -> CheckResult:
         start = time.perf_counter()
@@ -116,6 +117,7 @@ class ChapCoreCheck:
     name = "chap-core"
     description = "chap-core reachable via /api/routes/chap/run/system/info and reports a version."
     order = 40
+    requires: list[str] = ["chap-route"]
 
     async def run(self, client: Dhis2Client) -> CheckResult:
         start = time.perf_counter()

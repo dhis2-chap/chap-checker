@@ -36,20 +36,36 @@ class RunReport(BaseModel):
 async def run_checks(target: Dhis2Target, checks: list[Check] | None = None) -> list[CheckResult]:
     """Run ``checks`` (default: all registered) against ``target`` sequentially.
 
-    Sequential execution keeps DHIS2 load low and makes log output readable;
-    we can revisit concurrency once we have many checks.
+    A check whose ``requires`` includes any prior result that is not ``OK``
+    is skipped (status :attr:`Status.SKIPPED`) without contacting the server.
+    This stops the cascade where one failed foundational check produces N
+    inevitable downstream failures.
     """
     selected = checks if checks is not None else all_checks()
     results: list[CheckResult] = []
+    results_by_name: dict[str, CheckResult] = {}
     async with Dhis2Client(target) as client:
         for check in selected:
-            _log.debug("running check %s", check.name)
-            try:
-                result = await check.run(client)
-            except Exception as exc:  # noqa: BLE001 - never let one check break the run
-                _log.exception("check %s crashed", check.name)
-                result = CheckResult(name=check.name, status=Status.ERROR, message=f"Crashed: {exc}")
+            failed_prereqs = [
+                req
+                for req in check.requires
+                if req not in results_by_name or results_by_name[req].status is not Status.OK
+            ]
+            if failed_prereqs:
+                result = CheckResult(
+                    name=check.name,
+                    status=Status.SKIPPED,
+                    message=f"Skipped: {', '.join(failed_prereqs)} not OK.",
+                )
+            else:
+                _log.debug("running check %s", check.name)
+                try:
+                    result = await check.run(client)
+                except Exception as exc:  # noqa: BLE001 - never let one check break the run
+                    _log.exception("check %s crashed", check.name)
+                    result = CheckResult(name=check.name, status=Status.ERROR, message=f"Crashed: {exc}")
             results.append(result)
+            results_by_name[check.name] = result
     return results
 
 

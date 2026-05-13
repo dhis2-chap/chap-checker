@@ -33,6 +33,7 @@ class ModelingAppCheck:
     name = "modeling-app"
     description = "DHIS2 app with app_hub_id of the modeling app is installed and reports a version."
     order = 50
+    requires: list[str] = ["ping"]
 
     async def run(self, client: Dhis2Client) -> CheckResult:
         start = time.perf_counter()

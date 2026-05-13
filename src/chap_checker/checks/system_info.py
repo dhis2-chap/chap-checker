@@ -30,6 +30,7 @@ class SystemInfoCheck:
     name = "system-info"
     description = "DHIS2 /api/system/info reachable and reports a version."
     order = 20
+    requires: list[str] = ["ping"]
 
     async def run(self, client: Dhis2Client) -> CheckResult:
         start = time.perf_counter()
