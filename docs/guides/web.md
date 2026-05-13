@@ -35,7 +35,7 @@ The command palette currently exposes:
 
 Type to filter the list. Click an item or hit `Enter` to run it. New
 commands are a small JSX addition in
-[`web-ui/src/app.jsx`](https://github.com/dhis2-chap/chap-checker/blob/main/web-ui/src/app.jsx).
+[`src/chap_checker/web_ui/src/app.jsx`](https://github.com/dhis2-chap/chap-checker/blob/main/src/chap_checker/web_ui/src/app.jsx).
 
 ![Command palette open in the web dashboard](../assets/web-dashboard-palette.png)
 
@@ -53,7 +53,7 @@ The command palette exposes two runtime tweaks for the look:
 - **Density**: `default`, `comfortable`, `TV`, `wall (big numbers)`.
 
 Defined as CSS custom-property bundles in
-[`web-ui/src/app.jsx`](https://github.com/dhis2-chap/chap-checker/blob/main/web-ui/src/app.jsx)
+[`src/chap_checker/web_ui/src/app.jsx`](https://github.com/dhis2-chap/chap-checker/blob/main/src/chap_checker/web_ui/src/app.jsx)
 (`THEMES`, `DENSITY`) and applied by `applyTheme()` on every tweak
 change. Selections live in React state for the session; a page reload
 resets to the defaults.
@@ -63,7 +63,7 @@ resets to the defaults.
 A small FastAPI app + a React/Babel-standalone SPA. No build step.
 
 ```
-web-ui/
+src/chap_checker/web_ui/
 ├── index.html      Loads vendor/React + vendor/Babel + src/*.jsx in order
 ├── vendor/         React 18.3.1 UMD + Babel 7.29.0 standalone (committed)
 ├── _state.js       Wiring layer (polls /api/state, maps to artifact shape)
@@ -74,11 +74,16 @@ web-ui/
     └── tweaks-panel.jsx
 ```
 
+Living inside the `chap_checker` package means the assets ship with
+both editable installs and built wheels (uv_build picks up everything
+under `src/chap_checker/` automatically).
+
 - FastAPI runs the checks on a background `asyncio` task every
   `--interval` seconds.
 - `GET /api/state` returns the current snapshot as JSON.
-- `app.mount("/", StaticFiles(directory="web-ui", html=True))` serves
-  every other path; `index.html` is auto-returned for `/`.
+- The web UI is mounted via `StaticFiles(directory=web_ui, html=False)`
+  with a dedicated `GET /` handler returning `index.html`; every other
+  path is served directly off the bundled `web_ui/` tree.
 - `_state.js` exposes `window.CK_useLiveState(pollSec)` — a React hook
   that polls `/api/state`, maps the server schema to the artifact's
   `INSTANCES_BASE` shape, and returns the latest snapshot. `app.jsx`
