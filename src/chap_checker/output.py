@@ -56,7 +56,10 @@ def _render_tables(reports: list[RunReport]) -> None:
     )
     for report in reports:
         title = f"chap-checker - {report.target_name} - {report.target_url}"
-        table = Table(title=title)
+        # `expand=True` stretches every table to the full terminal width so
+        # rows look like one consistent slab, and per-column `min_width`
+        # keeps Check / Status / Duration aligned across targets.
+        table = Table(title=title, expand=True)
         table.add_column("Check", style="cyan", no_wrap=True, min_width=check_w)
         table.add_column("Status", no_wrap=True, min_width=status_w)
         table.add_column("Duration", justify="right", style="dim", min_width=duration_w)
