@@ -261,10 +261,12 @@ def make_app(server: DashboardServer) -> FastAPI:
     async def api_state() -> JSONResponse:
         return JSONResponse(server.snapshot().model_dump(mode="json"))
 
-    # The React SPA + Babel-standalone wiring lives in ``web-ui/`` next to
-    # the repo root. StaticFiles serves index.html on GET / and every
-    # vendor/src/* asset directly. Path resolved relative to this module
-    # so it works from an editable install or a built wheel.
+    # The React SPA + Babel-standalone wiring lives next to this module
+    # inside the chap_checker package (``web_ui/``). StaticFiles serves
+    # index.html on GET / and every vendor/src/* asset directly. Bundling
+    # the assets inside the package means they ship with both editable
+    # installs and built wheels (uv_build picks up everything under
+    # src/chap_checker/ automatically).
     web_ui = _web_ui_dir()
 
     @app.get("/")
@@ -277,13 +279,16 @@ def make_app(server: DashboardServer) -> FastAPI:
 
 
 def _web_ui_dir() -> Path:
-    """Return the ``web-ui/`` directory, raising a friendly error if missing."""
-    # src/chap_checker/web.py -> ../../web-ui from the repo root.
-    here = Path(__file__).resolve()
-    candidate = here.parent.parent.parent / "web-ui"
+    """Return the bundled ``web_ui/`` directory, raising if missing.
+
+    The directory sits next to ``web.py`` inside the ``chap_checker``
+    package. Resolving it via ``__file__`` keeps it on the same path
+    in editable installs, built wheels, and zipped sdists.
+    """
+    candidate = Path(__file__).resolve().parent / "web_ui"
     if not (candidate / "index.html").exists():
         raise FileNotFoundError(
-            f"web-ui/index.html not found at {candidate}. "
+            f"web_ui/index.html not found at {candidate}. "
             "The web dashboard expects the React assets to ship alongside the package."
         )
     return candidate

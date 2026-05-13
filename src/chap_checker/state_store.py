@@ -170,4 +170,15 @@ def compute_transitions(
                 )
             )
 
+    # Carry forward state for (target, check) pairs not observed in this
+    # run. Verify supports partial runs via ``--instance`` and ``--check``
+    # which share the same state file as the full run; without this carry
+    # the partial run would silently drop every other key, and the next
+    # full run would treat a sustained failure as a fresh first-failure
+    # and re-alert. Stale entries (instance removed from config, check
+    # renamed) are a soft leak, not a correctness bug - a manual prune
+    # is the right tool for that.
+    for key, state in previous.states.items():
+        new_states.setdefault(key, state)
+
     return transitions, StateFile(states=new_states)
