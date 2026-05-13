@@ -100,3 +100,33 @@ def test_slack_swallows_transport_error() -> None:
     )
     # Should not raise.
     asyncio.run(alerter.notify([_failure()]))
+
+
+def test_slack_raise_on_error_propagates_5xx() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, text="boom")
+
+    alerter = SlackAlerter(
+        webhook_url="https://hooks.slack.com/x",
+        transport=httpx.MockTransport(handler),
+        raise_on_error=True,
+    )
+    import pytest
+
+    with pytest.raises(RuntimeError, match="500"):
+        asyncio.run(alerter.notify([_failure()]))
+
+
+def test_slack_raise_on_error_propagates_transport_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("nope")
+
+    alerter = SlackAlerter(
+        webhook_url="https://hooks.slack.com/x",
+        transport=httpx.MockTransport(handler),
+        raise_on_error=True,
+    )
+    import pytest
+
+    with pytest.raises(httpx.ConnectError):
+        asyncio.run(alerter.notify([_failure()]))

@@ -69,10 +69,12 @@ class SlackAlerter:
         webhook_url: str,
         timeout_s: float = 10.0,
         transport: httpx.AsyncBaseTransport | None = None,
+        raise_on_error: bool = False,
     ) -> None:
         self._webhook_url = webhook_url
         self._timeout_s = timeout_s
         self._transport = transport
+        self._raise_on_error = raise_on_error
 
     async def notify(self, transitions: list[Transition]) -> None:
         if not transitions:
@@ -81,14 +83,17 @@ class SlackAlerter:
         try:
             async with httpx.AsyncClient(timeout=self._timeout_s, transport=self._transport) as client:
                 response = await client.post(self._webhook_url, json=payload.model_dump(mode="json"))
-                if response.status_code >= 400:
-                    _log.warning(
-                        "slack webhook returned %s: %s",
-                        response.status_code,
-                        response.text[:200],
-                    )
-        except Exception:  # noqa: BLE001 - never propagate
+        except Exception:
+            if self._raise_on_error:
+                raise
             _log.exception("slack notify failed")
+            return
+
+        if response.status_code >= 400:
+            msg = f"slack webhook returned {response.status_code}: {response.text[:200]}"
+            if self._raise_on_error:
+                raise RuntimeError(msg)
+            _log.warning(msg)
 
 
 def _color_for(transition: Transition) -> str:

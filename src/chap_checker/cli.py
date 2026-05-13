@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
+from pydantic import BaseModel, Field
 
 from chap_checker import __version__
 from chap_checker.alerts.base import AlerterBinding, Transition
@@ -33,6 +34,22 @@ from chap_checker.state_store import (
 )
 
 _log = get_logger("cli")
+
+
+class AlertTestResult(BaseModel):
+    """Outcome of sending one synthetic test alert to a single alerter."""
+
+    alerter: str
+    ok: bool
+    error: str | None = None
+
+
+class AlertTestReport(BaseModel):
+    """Combined result of ``chap-checker alert test`` across all alerters."""
+
+    ok: bool
+    results: list[AlertTestResult] = Field(default_factory=list)
+
 
 app = typer.Typer(
     name="chap-checker",
@@ -175,7 +192,7 @@ def alert_test_command(
     if cfg.alerts is None:
         raise typer.BadParameter(f"{config_path} has no [alerts.*] section.")
 
-    alerters = _build_alerters(cfg.alerts)
+    alerters = _build_alerters(cfg.alerts, raise_on_error=True)
     if not alerters:
         raise typer.BadParameter("No alerters configured.")
 
@@ -191,20 +208,31 @@ def alert_test_command(
         occurred_at=datetime.now(UTC),
     )
 
-    async def _send_all() -> None:
+    chatter = not state_obj.quiet and not state_obj.json_output
+
+    async def _send_all() -> AlertTestReport:
+        results: list[AlertTestResult] = []
         for binding in alerters:
-            if not state_obj.quiet:
+            if chatter:
                 typer.echo(f"Sending test message via {binding.alerter.name}...")
             try:
                 await binding.alerter.notify([test_transition])
-                if not state_obj.quiet:
+                results.append(AlertTestResult(alerter=binding.alerter.name, ok=True))
+                if chatter:
                     typer.echo("  OK")
-            except Exception as exc:  # noqa: BLE001 - matches alerter semantics
-                if not state_obj.quiet:
+            except Exception as exc:  # noqa: BLE001 - surface every failure as a result
+                results.append(AlertTestResult(alerter=binding.alerter.name, ok=False, error=str(exc)))
+                if chatter:
                     typer.echo(f"  FAILED: {exc}")
                 _log.exception("alerter %s failed", binding.alerter.name)
+        return AlertTestReport(ok=all(r.ok for r in results), results=results)
 
-    asyncio.run(_send_all())
+    report = asyncio.run(_send_all())
+
+    if state_obj.json_output and not state_obj.quiet:
+        typer.echo(report.model_dump_json(indent=2))
+
+    raise typer.Exit(0 if report.ok else 1)
 
 
 app.add_typer(alert_app, name="alert")
@@ -256,8 +284,15 @@ def _resolve_run_context(
     return targets, cfg, config_path
 
 
-def _build_alerters(cfg: AlertsConfig) -> list[AlerterBinding]:
-    """Instantiate one :class:`AlerterBinding` per configured ``[alerts.<name>]`` section."""
+def _build_alerters(cfg: AlertsConfig, *, raise_on_error: bool = False) -> list[AlerterBinding]:
+    """Instantiate one :class:`AlerterBinding` per configured ``[alerts.<name>]`` section.
+
+    Args:
+        cfg: Parsed alerts configuration.
+        raise_on_error: If True, alerters propagate delivery failures (used by
+            ``alert test`` so the test surfaces broken webhooks instead of
+            silently swallowing them).
+    """
     out: list[AlerterBinding] = []
     if cfg.slack is not None:
         out.append(
@@ -265,6 +300,7 @@ def _build_alerters(cfg: AlertsConfig) -> list[AlerterBinding]:
                 alerter=SlackAlerter(
                     webhook_url=cfg.slack.resolve_webhook_url(),
                     timeout_s=cfg.slack.timeout_s,
+                    raise_on_error=raise_on_error,
                 ),
                 notify_on=set(cfg.slack.notify_on),
             )
