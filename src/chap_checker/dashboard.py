@@ -67,16 +67,16 @@ _STRIP_COLOR_BY_STATUS = {
 _STRIP_COLOR_EMPTY = "#222"
 
 # Eighth-block characters drawn from bottom up. Each one occupies a
-# single terminal cell, but the filled portion grows as the index
-# climbs - perfect for a one-line sparkline whose height reflects a
-# 0..1 metric (here: pass ratio for the refresh).
-_SPARK_BLOCKS = ("▁", "▂", "▃", "▄", "▅", "▆", "▇", "█")
+# single terminal cell; the filled portion grows as the index climbs.
+# We use these so each strip cell can encode the refresh's pass ratio
+# (height) in addition to the worst-check status (colour).
+_HEIGHT_BLOCKS = ("▁", "▂", "▃", "▄", "▅", "▆", "▇", "█")
 
 
-def _spark_block(ratio: float) -> str:
+def _height_block(ratio: float) -> str:
     """Return the eighth-block character that visually fills ``ratio``."""
-    idx = max(0, min(len(_SPARK_BLOCKS) - 1, int(round(ratio * (len(_SPARK_BLOCKS) - 1)))))
-    return _SPARK_BLOCKS[idx]
+    idx = max(0, min(len(_HEIGHT_BLOCKS) - 1, int(round(ratio * (len(_HEIGHT_BLOCKS) - 1)))))
+    return _HEIGHT_BLOCKS[idx]
 
 
 def columns_for(n_instances: int) -> int:
@@ -330,22 +330,23 @@ class InstanceTile(Container):
     InstanceTile #checks {
         height: auto;
     }
+    InstanceTile .tile-footer {
+        dock: bottom;
+        height: auto;
+        layout: vertical;
+    }
     InstanceTile .uptime-header {
         height: 1;
-        dock: bottom;
         color: #555;
         padding: 0 1;
-        margin-bottom: 0;
     }
     InstanceTile .uptime-strip {
         height: 1;
-        dock: bottom;
         padding: 0 1;
         margin-bottom: 1;
     }
     InstanceTile .stats-row {
         height: 3;
-        dock: bottom;
         padding-top: 1;
         align: center top;
     }
@@ -391,18 +392,31 @@ class InstanceTile(Container):
             yield Static("", classes="ping", id="ping")
         yield Static("CHECKS", classes="checks-header")
         yield Vertical(id="checks")
-        yield Static("", classes="uptime-header", id="uptime-header")
-        yield Static("", classes="uptime-strip", id="uptime-strip")
-        with Horizontal(classes="stats-row"):
-            with Vertical(classes="stat-cell"):
-                yield Static("latency", classes="stat-label")
-                yield Static("--", classes="stat-value", id="latency")
-            with Vertical(classes="stat-cell"):
-                yield Static("updated", classes="stat-label")
-                yield Static("--", classes="stat-value", id="updated")
-            with Vertical(classes="stat-cell"):
-                yield Static("uptime", classes="stat-label")
-                yield Static("--", classes="stat-value", id="uptime")
+        # Footer block: uptime header + history strip + stats row all
+        # dock to the bottom together. Individually docking each piece
+        # didn't compose well with the existing stats-row dock and the
+        # strip ended up collapsed to zero height.
+        with Vertical(classes="tile-footer"):
+            yield Static(
+                f"UPTIME · LAST {_HISTORY_LEN} CHECKS",
+                classes="uptime-header",
+                id="uptime-header",
+            )
+            yield Static(
+                f"[{_STRIP_COLOR_EMPTY}]" + ("▁" * _HISTORY_LEN) + "[/]",
+                classes="uptime-strip",
+                id="uptime-strip",
+            )
+            with Horizontal(classes="stats-row"):
+                with Vertical(classes="stat-cell"):
+                    yield Static("latency", classes="stat-label")
+                    yield Static("--", classes="stat-value", id="latency")
+                with Vertical(classes="stat-cell"):
+                    yield Static("updated", classes="stat-label")
+                    yield Static("--", classes="stat-value", id="updated")
+                with Vertical(classes="stat-cell"):
+                    yield Static("uptime", classes="stat-label")
+                    yield Static("--", classes="stat-value", id="uptime")
 
     def on_mount(self) -> None:
         # Tick the "updated Xs ago" string every second.
@@ -478,7 +492,7 @@ class InstanceTile(Container):
         else:
             self.query_one("#uptime", Static).update("--")
 
-        # Uptime strip: 30 colored blocks reflecting the last refreshes,
+        # Uptime strip: 30 coloured blocks reflecting the last refreshes,
         # padded with dim slots on the left until the buffer fills.
         self.query_one("#uptime-header", Static).update(self._render_history_header())
         self.query_one("#uptime-strip", Static).update(self._render_history_strip())
@@ -495,13 +509,13 @@ class InstanceTile(Container):
         return label
 
     def _render_history_strip(self) -> str:
-        """Render the colored sparkline strip below the header.
+        """Render the coloured block strip below the header.
 
         Each cell carries two pieces of information:
 
         - colour from the worst non-skipped status of that refresh
           (green / amber / red / magenta-error)
-        - height from the pass ratio (`ok_count / total_count`) using
+        - height from the pass ratio (``ok_count / total_count``) using
           the eighth-block glyphs so partial outages are visible at a
           glance without losing the colour signal.
         """
@@ -510,7 +524,7 @@ class InstanceTile(Container):
         for status, ok_n, total_n in self.history:
             color = _STRIP_COLOR_BY_STATUS.get(status, _STRIP_COLOR_EMPTY)
             ratio = (ok_n / total_n) if total_n > 0 else 0.0
-            parts.append(f"[{color}]{_spark_block(ratio)}[/]")
+            parts.append(f"[{color}]{_height_block(ratio)}[/]")
         return "".join(parts)
 
     def _tick_updated(self) -> None:
