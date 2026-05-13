@@ -377,16 +377,28 @@ function CenterViz({ kind, inst, density }) {
 function UptimeBars({ inst, density }) {
   const tv = density === 'tv';
   const wall = density === 'wall';
-  const h = inst.history || [];
+  const real = inst.history || [];
   const okColor   = 'var(--green)';
   const downColor = 'var(--red)';
   const warnColor = 'var(--amber)';
 
-  const latencies = h.map(x => x.latency).filter(x => x != null);
+  // CK-WIRING: pad to a fixed 30-slot width so the bars area always
+  // looks like a strip of distinct samples even on a fresh server
+  // with one or two real history points. Empty slots are dim and
+  // non-interactive ({noData: true}); they're not counted in the
+  // uptime percentage.
+  const SLOTS = 30;
+  const pad = Math.max(0, SLOTS - real.length);
+  const h = [
+    ...Array.from({ length: pad }, () => ({ noData: true })),
+    ...real,
+  ];
+
+  const latencies = real.map(x => x.latency).filter(x => x != null);
   const maxLat = Math.max(200, ...latencies);
   const minLat = Math.min(80, ...latencies);
-  const successCount = h.filter(s => s.ok).length;
-  const pct = h.length ? ((successCount / h.length) * 100) : 100;
+  const successCount = real.filter(s => s.ok).length;
+  const pct = real.length ? ((successCount / real.length) * 100) : 100;
 
   return (
     <div style={{
@@ -407,12 +419,20 @@ function UptimeBars({ inst, density }) {
         display:'flex', alignItems:'stretch', gap: tv ? 3 : 2,
       }}>
         {h.map((s, i) => {
+          // CK-WIRING: padded "no data yet" slot (see UptimeBars top).
+          if (s.noData) {
+            return (
+              <div key={i} style={{
+                flex: 1, background: 'var(--green-vdim)', opacity: 0.4,
+              }} />
+            );
+          }
           let color = okColor;
           if (!s.ok) color = downColor;
           else if (s.latency != null && s.latency > minLat + (maxLat - minLat) * 0.8) color = warnColor;
           // CK-WIRING: per-bar native tooltip. Order in `h` is oldest →
           // newest; `(h.length - i)` is "samples back from now". The
-          // server keeps history points without timestamps so we use a
+          // server keeps history points without timestamps so we use
           // relative position rather than a clock time.
           const slot = h.length - i;
           const title = s.ok
@@ -423,7 +443,6 @@ function UptimeBars({ inst, density }) {
               flex: 1, background: color,
               opacity: s.ok ? 0.9 : 1,
               boxShadow: s.ok ? 'none' : '0 0 8px rgba(255,90,90,0.6)',
-              cursor: 'help',
             }} />
           );
         })}
