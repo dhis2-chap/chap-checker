@@ -441,6 +441,79 @@ def alerts_test_command(
 app.add_typer(alerts_app, name="alerts")
 
 
+@app.command("web")
+def web_command(
+    ctx: typer.Context,
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help=f"Path to a TOML config (defaults to ./{DEFAULT_CONFIG_FILENAME} if present).",
+        envvar="CHAP_CHECKER_CONFIG",
+    ),
+    interval: float = typer.Option(30.0, "--interval", help="Server-side check refresh interval (seconds).", min=2.0),
+    alerts_enabled: bool = typer.Option(
+        False,
+        "--alerts/--no-alerts",
+        help=(
+            "Dispatch Slack/etc. alerts from refresh cycles. Off by default - the dashboard is "
+            "usually all you need; flip this on if you want this dashboard to also page."
+        ),
+    ),
+    state: Path | None = typer.Option(
+        None,
+        "--state",
+        help=f"State file path (default: ./{DEFAULT_STATE_FILENAME} next to the config).",
+        envvar="CHAP_CHECKER_STATE",
+    ),
+    host: str = typer.Option(
+        "127.0.0.1",
+        "--host",
+        help="Bind address. Use 0.0.0.0 to expose on the local network (e.g. for a TV).",
+    ),
+    port: int = typer.Option(8765, "--port", help="Port to listen on.", min=1, max=65535),
+) -> None:
+    """Launch the web dashboard.
+
+    A single-page browser dashboard with the same tile layout and palette
+    as the Textual TUI. A FastAPI background task runs checks every
+    `--interval` seconds; the browser polls `/api/state` every few seconds
+    and re-renders tiles client-side.
+
+    Designed to fill a TV screen with no scrolling - pin a kiosk browser
+    at the URL and leave it.
+    """
+    config_path = config if config is not None else default_config_path()
+    if not config_path.exists():
+        raise typer.BadParameter(
+            f"No config at {config_path}. Provide --config <path> or create a ./{DEFAULT_CONFIG_FILENAME}.",
+        )
+    cfg = load_config(config_path)
+    if not cfg.instances:
+        raise typer.BadParameter(f"{config_path} contains no [instances.<name>] entries.")
+
+    targets = [entry.to_target_entry(name) for name, entry in cfg.instances.items()]
+    state_path = state if state is not None else config_path.parent / DEFAULT_STATE_FILENAME
+
+    # Late import so the FastAPI / uvicorn deps only load when the web
+    # subcommand actually runs.
+    from chap_checker.web import run as run_web
+
+    typer.echo(f"chap-checker web dashboard on http://{host}:{port}")
+    typer.echo(f"  config:   {config_path}")
+    typer.echo(f"  interval: {interval}s")
+    typer.echo(f"  alerts:   {'on' if alerts_enabled else 'off'}")
+    run_web(
+        targets=targets,
+        cfg=cfg,
+        state_path=state_path,
+        interval_s=interval,
+        alerts_enabled=alerts_enabled,
+        host=host,
+        port=port,
+    )
+
+
 checks_app = typer.Typer(
     name="checks",
     help="Inspect available checks.",
