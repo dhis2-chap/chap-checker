@@ -9,6 +9,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+import click
 import typer
 from pydantic import BaseModel, Field
 from rich.console import Console
@@ -216,6 +217,14 @@ def verify_command(
     `alerts = [...]` opt-in; skip dispatch entirely with `--no-alerts`.
     """
     state_obj = _state(ctx)
+    # Capture which of the auth-mode flags actually came from the
+    # command line (vs an envvar fallback or default) so the mutex
+    # check below doesn't fire on a passive `DHIS2_PASSWORD` leaking
+    # into a `--token-env` invocation.
+    cli_source = {
+        name: ctx.get_parameter_source(name) == click.core.ParameterSource.COMMANDLINE
+        for name in ("password", "password_env", "token", "token_env", "username")
+    }
     targets, cfg, config_path = _resolve_run_context(
         config=config,
         instance=instance,
@@ -228,6 +237,7 @@ def verify_command(
         timeout=timeout,
         insecure=insecure,
         check_names=check,
+        cli_source=cli_source,
     )
     # CLI flag wins; else use the config value; else the built-in default.
     resolved_concurrency = (
@@ -657,6 +667,89 @@ def _resolve_adhoc_password(*, password: str | None, password_env: str | None) -
     )
 
 
+def _build_adhoc_target(
+    *,
+    url: str,
+    username: str | None,
+    password: str | None,
+    password_env: str | None,
+    token: str | None,
+    token_env: str | None,
+    timeout: float,
+    insecure: bool,
+    cli_source: dict[str, bool],
+) -> Dhis2Target:
+    """Build the single Dhis2Target for ad-hoc verify mode.
+
+    Mode-detection rules:
+
+    1. If both token-family flags AND password-family flags were
+       passed on the **command line**, error out (true intent
+       conflict).
+    2. Otherwise, if a token-family flag was on the command line,
+       token mode wins regardless of which env vars happen to be set
+       in the shell.
+    3. Symmetrically for password-family flags.
+    4. If no auth flag was on the command line at all, fall back to
+       whichever env var is populated. If both ``DHIS2_TOKEN`` and
+       ``DHIS2_PASSWORD`` are exported, that's ambiguous and we
+       error so cron jobs don't silently flip modes between hosts.
+    """
+    token_flag_explicit = cli_source.get("token", False) or cli_source.get("token_env", False)
+    password_flag_explicit = (
+        cli_source.get("password", False) or cli_source.get("password_env", False) or cli_source.get("username", False)
+    )
+
+    if token_flag_explicit and password_flag_explicit:
+        raise typer.BadParameter(
+            "Pass either password flags (--password / --password-env / --username) "
+            "or token flags (--token / --token-env), not both.",
+        )
+
+    # When no flag was given, an envvar-populated value is the only
+    # signal we have - use it to pick a mode.
+    has_token_value = token is not None or token_env is not None
+    has_password_value = password is not None or password_env is not None
+
+    if token_flag_explicit:
+        use_token = True
+    elif password_flag_explicit:
+        use_token = False
+    elif has_token_value and has_password_value:
+        raise typer.BadParameter(
+            "DHIS2_TOKEN and DHIS2_PASSWORD are both set in the environment. "
+            "Pass --token-env or --password-env (or --token / --password) to "
+            "pick a mode explicitly.",
+        )
+    elif has_token_value:
+        use_token = True
+    else:
+        # has_password_value or fully empty - either way password
+        # mode handles it (the resolver will prompt or error).
+        use_token = False
+
+    if use_token:
+        resolved_token = _resolve_adhoc_token(token=token, token_env=token_env)
+        return Dhis2Target(
+            base_url=url,  # type: ignore[arg-type]  # Pydantic coerces str -> HttpUrl
+            token=resolved_token,
+            timeout_s=timeout,
+            verify_tls=not insecure,
+        )
+    if username is None:
+        raise typer.BadParameter(
+            "--url requires --username (with a password) or one of --token / --token-env / DHIS2_TOKEN.",
+        )
+    resolved_password = _resolve_adhoc_password(password=password, password_env=password_env)
+    return Dhis2Target(
+        base_url=url,  # type: ignore[arg-type]  # Pydantic coerces str -> HttpUrl
+        username=username,
+        password=resolved_password,
+        timeout_s=timeout,
+        verify_tls=not insecure,
+    )
+
+
 def _resolve_run_context(
     *,
     config: Path | None,
@@ -670,6 +763,7 @@ def _resolve_run_context(
     timeout: float,
     insecure: bool,
     check_names: list[str] | None,
+    cli_source: dict[str, bool] | None = None,
 ) -> tuple[list[TargetEntry], CheckerConfig | None, Path | None]:
     """Build the list of targets to check plus the loaded config (if any).
 
@@ -677,6 +771,13 @@ def _resolve_run_context(
     run. In ad-hoc mode it's applied directly. In config mode it overrides
     each instance's per-instance ``checks`` field for this run; unknown names
     fail with a clear CLI error rather than a runtime KeyError.
+
+    ``cli_source`` maps each auth-mode flag name to whether it was
+    explicitly passed on the command line (vs filled in from envvar /
+    default). It's used to disambiguate "user wants token mode" from
+    "DHIS2_PASSWORD happens to be exported in the shell". Tests pass
+    ``None`` and the resolver falls back to treating any populated
+    value as CLI-explicit (legacy behaviour).
     """
     if check_names:
         try:
@@ -687,36 +788,17 @@ def _resolve_run_context(
     if url is not None:
         if instance is not None:
             raise typer.BadParameter("--instance cannot be combined with --url; --url is ad-hoc mode.")
-        # Decide auth mode. Password and token flags are mutually
-        # exclusive; if any token flag is set we're in token mode.
-        has_password_flag = password is not None or password_env is not None
-        has_token_flag = token is not None or token_env is not None
-        if has_password_flag and has_token_flag:
-            raise typer.BadParameter(
-                "Pass either password flags (--password / --password-env) "
-                "or token flags (--token / --token-env), not both.",
-            )
-        if has_token_flag:
-            resolved_token = _resolve_adhoc_token(token=token, token_env=token_env)
-            target = Dhis2Target(
-                base_url=url,  # type: ignore[arg-type]  # Pydantic coerces str -> HttpUrl
-                token=resolved_token,
-                timeout_s=timeout,
-                verify_tls=not insecure,
-            )
-        else:
-            if username is None:
-                raise typer.BadParameter(
-                    "--url requires --username (with a password) or one of --token / --token-env / DHIS2_TOKEN.",
-                )
-            resolved_password = _resolve_adhoc_password(password=password, password_env=password_env)
-            target = Dhis2Target(
-                base_url=url,  # type: ignore[arg-type]  # Pydantic coerces str -> HttpUrl
-                username=username,
-                password=resolved_password,
-                timeout_s=timeout,
-                verify_tls=not insecure,
-            )
+        target = _build_adhoc_target(
+            url=url,
+            username=username,
+            password=password,
+            password_env=password_env,
+            token=token,
+            token_env=token_env,
+            timeout=timeout,
+            insecure=insecure,
+            cli_source=cli_source or {},
+        )
         return [TargetEntry(name="ad-hoc", target=target, check_names=check_names)], None, None
 
     config_path = config if config is not None else default_config_path()
@@ -783,7 +865,7 @@ async def dispatch_alerts_async(
     transitions, new_state = compute_transitions(previous, reports, notify_on_union, now)
 
     if not transitions:
-        save_state(state_path, new_state)
+        _safe_save_state(state_path, new_state)
         return
 
     all_ok = True
@@ -804,9 +886,28 @@ async def dispatch_alerts_async(
             _log.exception("alerter %s failed", binding.alerter.name)
 
     if all_ok:
-        save_state(state_path, new_state)
+        _safe_save_state(state_path, new_state)
     else:
         _log.warning("alerter delivery failed; not saving state so transitions will retry on the next run")
+
+
+def _safe_save_state(state_path: Path, new_state: object) -> None:
+    """Persist state, swallowing I/O failures.
+
+    A bad ``--state`` path, a read-only filesystem, or a permissions
+    issue must not change the exit code that the checks themselves
+    produced. Mirrors the existing alerter contract - log and move
+    on. Type of ``new_state`` is intentionally ``object`` here to
+    keep this helper agnostic to the state_store import surface;
+    callers always pass a ``StateFile``.
+    """
+    try:
+        from chap_checker.state_store import StateFile
+
+        assert isinstance(new_state, StateFile)
+        save_state(state_path, new_state)
+    except Exception:  # noqa: BLE001 - state-write failure must not crash verify
+        _log.exception("could not write state file at %s; continuing", state_path)
 
 
 def _dispatch_alerts(

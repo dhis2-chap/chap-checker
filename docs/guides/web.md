@@ -76,7 +76,11 @@ src/chap_checker/web_ui/
 
 Living inside the `chap_checker` package means the assets ship with
 both editable installs and built wheels (uv_build picks up everything
-under `src/chap_checker/` automatically).
+under `src/chap_checker/` automatically). The page loads no external
+resources - React and Babel are vendored under `vendor/`, no web fonts
+are fetched, and the body CSS falls back to the platform monospace
+stack - so the dashboard works offline, in air-gapped kiosks, and
+behind strict CSP without any third-party trust dependency.
 
 - FastAPI runs the checks on a background `asyncio` task every
   `--interval` seconds.

@@ -4,9 +4,13 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>chap-checker</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" />
+  <!--
+    No web-font load - the body CSS falls back to JetBrains Mono if the
+    operator has it installed, then to the platform monospace stack
+    (ui-monospace, SF Mono, Menlo, Consolas). Keeping the dashboard
+    self-contained means it works offline, in air-gapped kiosks, and
+    behind strict CSP without any third-party trust dependency.
+  -->
   <style>
     :root {
       /* phosphor (default; live-swapped by app.jsx when the theme tweak changes) */

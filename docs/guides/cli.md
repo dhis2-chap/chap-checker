@@ -42,6 +42,13 @@ mutually exclusive.
 Cron / CI should use `--password-env` or `--token-env` so the secret
 never lands in shell history or process listings.
 
+Mode detection only looks at flags **you typed**: having
+`DHIS2_PASSWORD` exported in the shell while you invoke
+`--token-env FOO` keeps you in token mode (the ambient password is
+simply ignored). If neither auth flag is on the command line and
+**both** `DHIS2_TOKEN` and `DHIS2_PASSWORD` are exported, the CLI
+errors out asking you to pick a mode explicitly rather than guessing.
+
 | Flag                          | Purpose                                                                                                                                  |
 | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | `--config <path>` / `-c`      | Override the default `./chap-checker.toml`. Env: `CHAP_CHECKER_CONFIG`.                                                                   |
