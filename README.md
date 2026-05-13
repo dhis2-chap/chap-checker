@@ -44,11 +44,12 @@ chap-checker checks list           # Rich table
 chap-checker --json checks list    # JSON for tooling
 ```
 
-### Restricting checks per instance
+### Restricting checks (per instance or per run)
 
-By default every registered check runs. To skip parts of the stack on a given
-instance, set `checks` in the TOML - the transitive `requires` of each named
-check are pulled in automatically:
+By default every registered check runs. There are two ways to narrow the set;
+both pull in transitive `requires` automatically.
+
+**Per instance (config)** - persistent for that instance:
 
 ```toml
 # DHIS2-only instance (no chap stack):
@@ -68,6 +69,19 @@ checks = ["dhis2_chap_system_info"]   # pulls in ping, system_info, route, chap_
 
 Unknown names are rejected at config load. There is no "exclude" syntax today;
 list the checks you want.
+
+**Per run (CLI)** - one-off override, works in both ad-hoc and config modes:
+
+```bash
+# Ad-hoc, run only ping
+chap-checker verify --url https://dhis2.example.com -u admin -p ... --check dhis2_ping
+
+# Against the configured instances, run only the chap probes once
+chap-checker verify --check dhis2_chap_ping --check dhis2_chap_system_info
+```
+
+`--check` / `--checks` accepts repeated flag values. When given, it overrides
+any per-instance `checks` setting for that run.
 
 ### Adding a new check
 
@@ -126,6 +140,9 @@ chap-checker verify --config /etc/chap-checker.toml
 - `--url`, `--username` / `-u`, `--password` / `-p` - ad-hoc mode (env
   `DHIS2_URL` / `DHIS2_USERNAME` / `DHIS2_PASSWORD`).
 - `--timeout <seconds>`, `--insecure` - ad-hoc-mode HTTP knobs.
+- `--check <name>` (alias `--checks`) - restrict the run to these check
+  names; repeat the flag for multiple. Transitive `requires` are pulled
+  in. Overrides any per-instance `checks` in the TOML for this run.
 - `--no-alerts` (or `--no-alert`) - skip alert dispatch on this run.
 - `--state <path>` - state file location (env `CHAP_CHECKER_STATE`).
 
