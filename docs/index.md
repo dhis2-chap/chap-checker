@@ -35,22 +35,27 @@ pipx install chap-checker
 
 ## Quick start
 
-Ad-hoc against a single instance (password resolved safely):
+Ad-hoc against a single instance (credentials resolved safely):
 
 ```bash
-# Recommended: read the password from a named environment variable.
+# With a DHIS2 Personal Access Token (recommended on modern servers):
+export PROD_TOKEN=...
+chap-checker verify \
+    --url https://dhis2.example.com \
+    --token-env PROD_TOKEN
+
+# With a password (Basic auth) read from a named env var:
 export PROD_PASSWORD=...
 chap-checker verify \
     --url https://dhis2.example.com \
     --username admin \
     --password-env PROD_PASSWORD
 
-# Alternative: omit --password / --password-env entirely and you'll be
-# prompted on the terminal (hidden input). The DHIS2_PASSWORD env var
-# also works as a default.
-
-# Passing --password inline still works but is discouraged - the value
-# ends up in shell history and `ps` output.
+# Omit --password / --token entirely and you'll be prompted on the
+# terminal (hidden input). DHIS2_TOKEN / DHIS2_PASSWORD env vars
+# work as defaults too. Passing --password / --token inline still
+# works but is discouraged - the value lands in shell history and
+# `ps` output. Token and password flags are mutually exclusive.
 ```
 
 Multiple instances in `./chap-checker.toml`:

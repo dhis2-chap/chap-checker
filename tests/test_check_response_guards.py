@@ -24,6 +24,10 @@ def _client(handler: Callable[[httpx.Request], httpx.Response]) -> Dhis2Client:
     )
     client = Dhis2Client(target)
     # Replace the internal AsyncClient with one wired to the mock transport.
+    # We re-pass username/password explicitly here; the validator on the
+    # target guarantees both are set on this path.
+    assert target.username is not None
+    assert target.password is not None
     client._client = httpx.AsyncClient(
         auth=(target.username, target.password),
         timeout=target.timeout_s,

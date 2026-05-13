@@ -26,6 +26,17 @@ username = "REPLACE_ME"
 password_env = "ANOTHER_EXAMPLE_PASSWORD"
 checks = ["dhis2_ping", "dhis2_system_info"]
 
+# Token-based auth (DHIS2 Personal Access Token). Mutually exclusive
+# with `password` / `password_env` on the same instance. The token is
+# sent as `Authorization: ApiToken <value>`; `username` is optional
+# in token mode.
+[instances.token-example]
+url = "https://dhis2.example.net"
+# Inline (NOT recommended for shared files):
+# token = "REPLACE_ME"
+# Recommended:
+token_env = "EXAMPLE_DHIS2_TOKEN"
+
 # Optional per-instance overrides (shown with their defaults):
 # timeout_s = 10.0
 # verify_tls = true
