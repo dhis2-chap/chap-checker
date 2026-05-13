@@ -9,11 +9,15 @@ launch time via ``--alerts`` / ``--no-alerts``.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from datetime import datetime
+from functools import partial
 from pathlib import Path
+from typing import Any
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual.command import DiscoveryHit, Hit, Hits, Provider
 from textual.containers import Container, Grid, Horizontal, Vertical
 from textual.widget import Widget
 from textual.widgets import Static
@@ -426,6 +430,52 @@ class InstanceTile(Container):
             pass
 
 
+class ChapCheckerCommands(Provider):
+    """Custom command-palette entries for the chap-checker dashboard.
+
+    Surfaces in Textual's built-in palette (Ctrl+P). Mirrors the web
+    dashboard's palette so the same items are available in both surfaces.
+    """
+
+    def _entries(self) -> list[tuple[str, str, Callable[[], Any]]]:
+        app = self.app
+        return [
+            (
+                "Refresh now",
+                "Re-run every check immediately.",
+                partial(app.run_action, "refresh"),
+            ),
+            (
+                "Open GitHub repository",
+                "github.com/dhis2-chap/chap-checker",
+                partial(app.open_url, "https://github.com/dhis2-chap/chap-checker"),
+            ),
+            (
+                "Open documentation",
+                "dhis2-chap.github.io/chap-checker",
+                partial(app.open_url, "https://dhis2-chap.github.io/chap-checker/"),
+            ),
+        ]
+
+    async def search(self, query: str) -> Hits:
+        """Yield palette hits matching ``query`` (filtered + scored)."""
+        matcher = self.matcher(query)
+        for name, help_text, callback in self._entries():
+            score = matcher.match(name)
+            if score > 0:
+                yield Hit(
+                    score,
+                    matcher.highlight(name),
+                    callback,
+                    help=help_text,
+                )
+
+    async def discover(self) -> Hits:
+        """Yield every entry without filtering (shown when the palette opens empty)."""
+        for name, help_text, callback in self._entries():
+            yield DiscoveryHit(name, callback, help=help_text)
+
+
 class DashboardApp(App[None]):
     """Textual dashboard for chap-checker."""
 
@@ -444,6 +494,8 @@ class DashboardApp(App[None]):
         Binding("q", "quit", "Quit"),
         Binding("r", "refresh", "Refresh"),
     ]
+
+    COMMANDS = App.COMMANDS | {ChapCheckerCommands}
 
     def __init__(
         self,

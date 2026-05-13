@@ -10,6 +10,8 @@ Same tile layout, palette, and status semantics as the
 TV screen with no scrolling. Designed for a kiosk display: pin a browser at
 the URL and walk away.
 
+![chap-checker web dashboard against four DHIS2 play servers](../assets/web-dashboard.png)
+
 ## Keys
 
 | Key             | Action                                       |
@@ -31,6 +33,12 @@ The command palette currently exposes:
 Type to filter the list. Click an item or hit `Enter` to run it. New
 commands are a small JS addition in
 [`src/chap_checker/web.py`](https://github.com/dhis2-chap/chap-checker/blob/main/src/chap_checker/web.py).
+
+![Command palette open in the web dashboard](../assets/web-dashboard-palette.png)
+
+The [TUI dashboard](dashboard.md#command-palette) ships the same
+chap-checker commands via Textual's built-in palette (`Ctrl+P`), so the
+same muscle memory works in both surfaces.
 
 ## Architecture
 
