@@ -101,7 +101,25 @@ Permissions: `chap-checker.toml` carries credentials; keep it `chmod 600`. The
 config loader warns on POSIX if the file is group- or world-readable while
 holding any inline `password` or `webhook_url`.
 
-Verify the wiring without breaking a real instance:
+### Creating the Slack webhook
+
+1. Open https://api.slack.com/apps and **Create New App -> From scratch**
+   (or reuse an existing app).
+2. In the app, open **Features -> Incoming Webhooks** and toggle activation on.
+3. Click **Add New Webhook to Workspace** and pick the channel the alerts
+   should land in.
+4. Copy the generated URL - it looks like
+   `https://hooks.slack.com/services/T.../B.../...`.
+5. Put it in `chap-checker.toml` either inline as `webhook_url` or, preferred,
+   set `webhook_url_env = "SLACK_WEBHOOK_URL"` and export the URL in the
+   environment / your secrets manager.
+
+Treat the webhook URL as a credential: anyone who has it can post to the
+channel. Slack's full guide: https://api.slack.com/messaging/webhooks
+
+### Testing the wiring
+
+Verify the webhook without breaking a real instance:
 
 ```bash
 chap-checker alert test                # human-readable
