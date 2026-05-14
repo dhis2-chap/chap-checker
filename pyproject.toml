@@ -24,6 +24,7 @@ dependencies = [
   "textual>=8.0.0",
   "fastapi>=0.115.0",
   "uvicorn[standard]>=0.30.0",
+  "dhis2w-client>=0.13.1",
 ]
 
 [project.urls]

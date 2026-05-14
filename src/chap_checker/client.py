@@ -1,4 +1,12 @@
-"""Thin HTTP client for a DHIS2 server, used by checks."""
+"""Thin HTTP client for a DHIS2 server, used by checks.
+
+Wraps :class:`httpx.AsyncClient` for transport and delegates Authorization
+header generation to :mod:`dhis2w_client.v42.auth` providers so chap-checker
+shares the auth abstraction with the rest of the dhis2w toolkit. The full
+``dhis2w_client.Dhis2Client`` isn't used here: its ``connect()`` does a
+version-probe round-trip and raises on 4xx, both of which are states this
+tool needs to *report* on rather than throw on.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +14,7 @@ from types import TracebackType
 from typing import Any, Self
 
 import httpx
+from dhis2w_client import AuthProvider, BasicAuth, PatAuth
 from pydantic import BaseModel, Field, HttpUrl, model_validator
 
 from chap_checker.logging import get_logger
@@ -56,33 +65,32 @@ class Dhis2Target(BaseModel):
         path = path.lstrip("/")
         return f"{base}/api/{path}"
 
+    def auth_provider(self) -> AuthProvider:
+        """Build the dhis2w-client ``AuthProvider`` matching this target's mode."""
+        if self.token is not None:
+            return PatAuth(token=self.token)
+        assert self.username is not None and self.password is not None  # validator
+        return BasicAuth(username=self.username, password=self.password)
+
 
 class Dhis2Client:
     """Async DHIS2 HTTP client.
 
-    Wraps :class:`httpx.AsyncClient` with basic auth, base-URL handling and
-    debug logging. Use as an async context manager.
+    Wraps :class:`httpx.AsyncClient` with auth, base-URL handling and debug
+    logging. Authorization headers come from the
+    :class:`dhis2w_client.AuthProvider` built from the target, so swapping
+    between Basic / PAT / (future) OAuth2 happens upstream of this class.
+    Use as an async context manager.
     """
 
     def __init__(self, target: Dhis2Target) -> None:
         self._target = target
-        kwargs: dict[str, Any] = {
-            "timeout": target.timeout_s,
-            "verify": target.verify_tls,
-            "follow_redirects": True,
-        }
-        if target.token is not None:
-            # DHIS2 Personal Access Tokens use the custom `ApiToken`
-            # scheme, NOT standard Bearer - the server only recognises
-            # this exact header value for PATs.
-            kwargs["headers"] = {"Authorization": f"ApiToken {target.token}"}
-        else:
-            # Validator guarantees username+password are both set when
-            # token is None.
-            assert target.username is not None
-            assert target.password is not None
-            kwargs["auth"] = (target.username, target.password)
-        self._client = httpx.AsyncClient(**kwargs)
+        self._auth: AuthProvider = target.auth_provider()
+        self._client = httpx.AsyncClient(
+            timeout=target.timeout_s,
+            verify=target.verify_tls,
+            follow_redirects=True,
+        )
 
     @property
     def target(self) -> Dhis2Target:
@@ -105,8 +113,15 @@ class Dhis2Client:
 
         Args:
             path: Path under ``/api`` (e.g. ``"system/info"``).
-            **kwargs: Forwarded to :meth:`httpx.AsyncClient.get`.
+            **kwargs: Forwarded to :meth:`httpx.AsyncClient.get`. A
+                ``headers`` mapping is merged on top of the auth header
+                produced by the configured :class:`AuthProvider`, so
+                callers can add ``Accept`` / ``X-*`` without dropping
+                auth.
         """
         url = self._target.api_url(path)
+        auth_headers = await self._auth.headers()
+        caller_headers = kwargs.pop("headers", None) or {}
+        headers = {**auth_headers, **caller_headers}
         _log.debug("GET %s", url)
-        return await self._client.get(url, **kwargs)
+        return await self._client.get(url, headers=headers, **kwargs)
