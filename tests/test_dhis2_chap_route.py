@@ -27,8 +27,8 @@ def _client(handler: Callable[[httpx.Request], httpx.Response]) -> Dhis2Client:
         password="p",
     )
     client = Dhis2Client(target)
-    client._client = httpx.AsyncClient(
-        auth=("u", "p"),
+    client._inner._http = httpx.AsyncClient(
+        base_url=str(target.base_url).rstrip("/"),
         timeout=target.timeout_s,
         transport=httpx.MockTransport(handler),
     )

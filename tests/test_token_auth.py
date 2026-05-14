@@ -68,8 +68,10 @@ def test_client_sends_apitoken_header() -> None:
 
     target = Dhis2Target(base_url=cast(HttpUrl, "https://x.example"), token="abc123")
     client = Dhis2Client(target)
-    client._client = httpx.AsyncClient(
-        headers={"Authorization": f"ApiToken {target.token}"},
+    # The auth header is built by dhis2w_client.PatAuth on every request,
+    # so the MockTransport-backed AsyncClient does not need to set it.
+    client._inner._http = httpx.AsyncClient(
+        base_url=str(target.base_url).rstrip("/"),
         timeout=target.timeout_s,
         transport=httpx.MockTransport(handler),
     )

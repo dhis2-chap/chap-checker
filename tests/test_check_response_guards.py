@@ -23,13 +23,14 @@ def _client(handler: Callable[[httpx.Request], httpx.Response]) -> Dhis2Client:
         password="p",
     )
     client = Dhis2Client(target)
-    # Replace the internal AsyncClient with one wired to the mock transport.
-    # We re-pass username/password explicitly here; the validator on the
-    # target guarantees both are set on this path.
-    assert target.username is not None
-    assert target.password is not None
-    client._client = httpx.AsyncClient(
-        auth=(target.username, target.password),
+    # Preset the upstream client's HTTP pool with a MockTransport-backed
+    # AsyncClient. The upstream `connect()` only constructs a fresh pool
+    # when `_http is None`, so seeding it here keeps `connect()` from
+    # touching the network and routes every request through the handler.
+    # The auth header is added per-request inside the upstream client's
+    # `_request`, so no `auth=` kwarg is needed on the AsyncClient.
+    client._inner._http = httpx.AsyncClient(
+        base_url=str(target.base_url).rstrip("/"),
         timeout=target.timeout_s,
         transport=httpx.MockTransport(handler),
     )
