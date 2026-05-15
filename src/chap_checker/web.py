@@ -35,7 +35,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from chap_checker.checks.base import Status
-from chap_checker.config import CheckerConfig
+from chap_checker.config import CheckerConfig, load_config
 from chap_checker.dashboard import _extract_dhis2_version, _worst
 from chap_checker.logging import get_logger
 from chap_checker.runner import RunReport, TargetEntry, run_targets
@@ -136,12 +136,40 @@ class DashboardServer:
     state_path: Path | None
     interval_s: float
     alerts_enabled: bool
+    config_path: Path | None = None
     trackers: dict[str, _TileTracker] = field(default_factory=dict)
     last_refresh: datetime | None = None
 
     def __post_init__(self) -> None:
         for entry in self.targets:
             self.trackers.setdefault(entry.name, _TileTracker())
+
+    def reload(self) -> tuple[set[str], set[str]]:
+        """Re-read ``config_path`` from disk and swap targets / cfg in place.
+
+        Returns ``(added_names, removed_names)`` so callers can surface the
+        delta to the operator. Trackers for surviving instances are kept
+        (their history strip stays warm); trackers for removed instances
+        are dropped; trackers for added instances start empty.
+
+        Raises ``RuntimeError`` when ``config_path`` is None and the loader's
+        own exceptions (``FileNotFoundError``, ``tomllib.TOMLDecodeError``,
+        ``pydantic.ValidationError``) on bad config — callers should catch
+        and report rather than let the background loop crash.
+        """
+        if self.config_path is None:
+            raise RuntimeError("No config_path set — server was launched without one.")
+        new_cfg = load_config(self.config_path)
+        new_targets = [entry.to_target_entry(name) for name, entry in new_cfg.instances.items()]
+        old_names = {t.name for t in self.targets}
+        new_names = {t.name for t in new_targets}
+        self.targets = new_targets
+        self.cfg = new_cfg
+        for removed in old_names - new_names:
+            self.trackers.pop(removed, None)
+        for added in new_names - old_names:
+            self.trackers.setdefault(added, _TileTracker())
+        return new_names - old_names, old_names - new_names
 
     async def run_loop(self) -> None:
         """Background task: refresh + dispatch every ``interval_s`` seconds, forever."""
@@ -261,6 +289,29 @@ def make_app(server: DashboardServer) -> FastAPI:
     async def api_state() -> JSONResponse:
         return JSONResponse(server.snapshot().model_dump(mode="json"))
 
+    @app.post("/api/reload")
+    async def api_reload() -> JSONResponse:
+        """Re-read the config file and apply targets / cfg in place.
+
+        Returns 200 with the delta on success; 400 with the error message
+        when the config can't be parsed or is invalid (does not crash the
+        background refresh loop).
+        """
+        try:
+            added, removed = server.reload()
+        except FileNotFoundError as exc:
+            return JSONResponse({"status": "error", "message": str(exc)}, status_code=404)
+        except Exception as exc:  # noqa: BLE001 - surface any parse / validation error
+            return JSONResponse({"status": "error", "message": str(exc)}, status_code=400)
+        return JSONResponse(
+            {
+                "status": "ok",
+                "instance_count": len(server.targets),
+                "added": sorted(added),
+                "removed": sorted(removed),
+            }
+        )
+
     # The React SPA + Babel-standalone wiring lives next to this module
     # inside the chap_checker package (``web_ui/``). StaticFiles serves
     # index.html on GET / and every vendor/src/* asset directly. Bundling
@@ -302,6 +353,7 @@ def run(
     alerts_enabled: bool = False,
     host: str = "127.0.0.1",
     port: int = 8765,
+    config_path: Path | None = None,
 ) -> None:
     """Launch the web dashboard on ``host:port``.
 
@@ -316,6 +368,7 @@ def run(
         state_path=state_path,
         interval_s=interval_s,
         alerts_enabled=alerts_enabled,
+        config_path=config_path,
     )
     app = make_app(server)
     # Late import - uvicorn is heavyish and only needed when serving.

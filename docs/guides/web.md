@@ -27,6 +27,10 @@ display: pin a browser at the URL and walk away.
 The command palette currently exposes:
 
 - **Refresh now**
+- **Reload config** — POST `/api/reload`; re-reads `chap-checker.toml`
+  and swaps targets / cfg in place. The next `/api/state` poll picks up
+  any new / removed instance tiles automatically. Also reachable via
+  the **reload config** button in the header next to the clock.
 - **Toggle fullscreen**
 - **Density:** default / comfortable / TV / wall
 - **Theme:** phosphor green / amber / high contrast

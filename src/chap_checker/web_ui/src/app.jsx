@@ -128,7 +128,7 @@ function formatClock(d) {
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
-function Header({ instances, alertsOn, refreshSec, clock }) {
+function Header({ instances, alertsOn, refreshSec, clock, reload, reloadState }) {
   const downCount = instances.filter(i => i.status === 'down').length;
   return (
     <header style={{
@@ -150,13 +150,48 @@ function Header({ instances, alertsOn, refreshSec, clock }) {
         <Sep />
         <span style={{ color:'var(--ink-dim)' }}>refresh every {refreshSec}s</span>
       </div>
-      <div style={{
-        color: 'var(--green)', fontVariantNumeric:'tabular-nums',
-        fontSize: 'calc(var(--fs-head) * 1.1)',
-      }}>
-        {clock}
+      <div style={{ display:'flex', alignItems:'center', gap:14 }}>
+        <ReloadButton onClick={reload} state={reloadState} />
+        <div style={{
+          color: 'var(--green)', fontVariantNumeric:'tabular-nums',
+          fontSize: 'calc(var(--fs-head) * 1.1)',
+        }}>
+          {clock}
+        </div>
       </div>
     </header>
+  );
+}
+
+function ReloadButton({ onClick, state }) {
+  const isPending = state.status === 'pending';
+  const label = (
+    state.status === 'pending' ? 'reloading...' :
+    state.status === 'ok'      ? state.message :
+    state.status === 'error'   ? state.message :
+                                 'reload config'
+  );
+  const color = (
+    state.status === 'error' ? 'var(--red)' :
+    state.status === 'ok'    ? 'var(--green)' :
+                               'var(--ink-dim)'
+  );
+  return (
+    <button
+      onClick={onClick}
+      disabled={isPending}
+      title="Re-read chap-checker.toml"
+      style={{
+        background:'transparent',
+        border:'1px solid var(--green-vdim)',
+        color, padding:'2px 10px',
+        fontFamily:'inherit', fontSize:'inherit',
+        cursor: isPending ? 'default' : 'pointer',
+        opacity: isPending ? 0.7 : 1,
+      }}
+    >
+      {label}
+    </button>
   );
 }
 
@@ -191,6 +226,32 @@ function App() {
   const [lastRefreshAt, setLastRefreshAt] = React.useState(Date.now());
   const [paletteOpen, setPaletteOpen] = React.useState(false);
   const [refreshTick, setRefreshTick] = React.useState(0);
+  const [reloadState, setReloadState] = React.useState({ status: 'idle', message: '' });
+
+  // POST /api/reload and surface success / failure as a transient
+  // button label. The next /api/state poll picks up the new instance
+  // set automatically, so no client-side cache invalidation is needed.
+  const reload = React.useCallback(async () => {
+    setReloadState({ status: 'pending', message: '' });
+    try {
+      const r = await fetch('/api/reload', { method: 'POST' });
+      const body = await r.json().catch(() => ({}));
+      if (r.ok) {
+        const n = body.instance_count ?? '?';
+        const added = (body.added || []).length;
+        const removed = (body.removed || []).length;
+        const delta = (added || removed)
+          ? ` (+${added} -${removed})`
+          : '';
+        setReloadState({ status: 'ok', message: `reloaded · ${n} instance(s)${delta}` });
+      } else {
+        setReloadState({ status: 'error', message: `error: ${body.message || r.statusText}` });
+      }
+    } catch (err) {
+      setReloadState({ status: 'error', message: `error: ${err}` });
+    }
+    setTimeout(() => setReloadState({ status: 'idle', message: '' }), 4000);
+  }, []);
   const refreshSec = 8;
 
   // CK-WIRING: live data from FastAPI's /api/state. Hook is provided by
@@ -262,6 +323,7 @@ function App() {
   // commands
   const commands = React.useMemo(() => [
     { id:'refresh', label:'Refresh now', hint:'r', run:() => { setLastRefreshAt(Date.now()); setRefreshTick(x=>x+1); } },
+    { id:'reload',  label:'Reload config', hint:'re-reads chap-checker.toml', run: reload },
     { id:'fs', label:'Toggle fullscreen', hint:'f', run:() => {
         if (document.fullscreenElement) document.exitFullscreen?.();
         else document.documentElement.requestFullscreen?.();
@@ -287,7 +349,7 @@ function App() {
       run:() => window.open('https://github.com/dhis2-chap/chap-checker', '_blank', 'noopener') },
     { id:'docs', label:'Open documentation',
       run:() => window.open('https://dhis2-chap.github.io/chap-checker/', '_blank', 'noopener') },
-  ], [t.demoDown]);
+  ], [t.demoDown, reload]);
 
   // global keybindings
   React.useEffect(() => {
@@ -345,6 +407,8 @@ function App() {
         alertsOn={live ? !!live.alertsOn : false}
         refreshSec={live ? Math.floor(live.refreshSec || refreshSec) : refreshSec}
         clock={formatClock(now)}
+        reload={reload}
+        reloadState={reloadState}
       />
 
       {/* grid */}
