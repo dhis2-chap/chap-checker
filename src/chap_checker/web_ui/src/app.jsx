@@ -128,7 +128,7 @@ function formatClock(d) {
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
-function Header({ instances, alertsOn, refreshSec, clock, reload, reloadState }) {
+function Header({ instances, alertsOn, refreshSec, clock, reload, reloadState, title }) {
   const downCount = instances.filter(i => i.status === 'down').length;
   return (
     <header style={{
@@ -137,7 +137,7 @@ function Header({ instances, alertsOn, refreshSec, clock, reload, reloadState })
       fontSize:'var(--fs-head)', flexShrink:0,
     }}>
       <div style={{ display:'flex', alignItems:'center', gap:14 }}>
-        <span style={{ color:'var(--green)', fontWeight:700 }}>DHIS2 / Climate Instance Checker</span>
+        <span style={{ color:'var(--green)', fontWeight:700 }}>{title}</span>
         <Sep />
         <span style={{ color:'var(--ink-dim)' }}>
           <span style={{ color: downCount > 0 ? 'var(--red)' : 'var(--green)' }}>{instances.length}</span>{' '}
@@ -267,6 +267,27 @@ function App() {
 
   // apply theme/density vars when tweaks change
   React.useEffect(() => { applyTheme(t); }, [t.theme, t.density, t.statusMode, t.crt]);
+
+  // Bootstrap the theme from chap-checker.toml's [ui].theme on first
+  // /api/state response, but only if the user hasn't already overridden
+  // it via the palette (in which case t.theme will differ from the JSX
+  // default). The toml is the source of truth for fresh installs;
+  // localStorage palette picks win after that.
+  const themeBootstrappedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (themeBootstrappedRef.current) return;
+    if (!live || !live.uiTheme) return;
+    if (t.theme === TWEAK_DEFAULTS.theme && live.uiTheme !== t.theme) {
+      setTweak('theme', live.uiTheme);
+    }
+    themeBootstrappedRef.current = true;
+  }, [live, t.theme]);
+
+  // Keep the browser-tab title in sync with the configured ui.title so
+  // tab-switching and bookmarks reflect the operator's brand.
+  React.useEffect(() => {
+    if (live && live.uiTitle) document.title = live.uiTitle;
+  }, [live && live.uiTitle]);
 
   // clock + auto refresh
   React.useEffect(() => {
@@ -409,6 +430,7 @@ function App() {
         clock={formatClock(now)}
         reload={reload}
         reloadState={reloadState}
+        title={(live && live.uiTitle) || 'DHIS2 / Climate Instance Checker'}
       />
 
       {/* grid */}

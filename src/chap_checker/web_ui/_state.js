@@ -109,7 +109,7 @@
    *
    * @param {number} pollSec How often to fetch /api/state.
    * @returns {{instances: Array, lastRefreshAt: number, alertsOn: boolean,
-   *           refreshSec: number} | null}
+   *           refreshSec: number, uiTitle: string, uiTheme: string} | null}
    */
   function useLiveState(pollSec) {
     const [state, setState] = React.useState(null);
@@ -130,6 +130,8 @@
               : Date.now(),
             alertsOn: !!data.alerts_enabled,
             refreshSec: data.interval_s || pollSec,
+            uiTitle: data.ui_title || "DHIS2 / Climate Instance Checker",
+            uiTheme: data.ui_theme || "phosphor",
           });
         } catch (e) {
           // Transient network blip - try again on the next tick.

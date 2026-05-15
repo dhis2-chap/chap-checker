@@ -108,3 +108,27 @@ Bump it up for many same-network targets, down to `1` to force serial
 execution. Hard upper bound 100.
 
 CLI flag `--concurrency N` on `verify` overrides the config value for one run.
+
+## UI branding and theme
+
+```toml
+[ui]
+title = "DHIS2 / Climate Instance Checker"  # default; 1-120 chars
+theme = "phosphor"                          # phosphor | amber | high | tokyo
+```
+
+`title` is the top-left header text shown in both the [Textual TUI](dashboard.md)
+and the [web dashboard](web.md). The web also syncs `document.title` so the
+browser tab matches.
+
+`theme` selects the web color palette. The web's command palette
+(`Ctrl+K`/`⌘K`) also exposes the same options at runtime — the config value
+acts as the **starting default**, and a per-user palette pick (persisted in
+browser `localStorage`) wins over the config until cleared. The Textual TUI
+uses its own accent (Textual's built-in palette / theme is available via
+`Ctrl+P` system commands; config-driven TUI theming is not wired yet).
+
+Both fields are optional; omit `[ui]` to take the defaults. `chap-checker
+reload` (Ctrl+R in the TUI, button in the web header) re-reads the section
+along with the rest of the config — the web picks up `title` changes on the
+next `/api/state` poll without a reload of the browser tab.

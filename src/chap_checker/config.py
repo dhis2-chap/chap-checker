@@ -6,7 +6,7 @@ import os
 import stat
 import tomllib
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
@@ -168,6 +168,27 @@ class AlertsConfig(BaseModel):
     slack: SlackAlertConfig | None = None
 
 
+UiTheme = Literal["phosphor", "amber", "high", "tokyo"]
+DEFAULT_UI_TITLE = "DHIS2 / Climate Instance Checker"
+
+
+class UiConfig(BaseModel):
+    """``[ui]`` section — branding and theme presented in both surfaces.
+
+    ``title`` is the top-left header text shown in the Textual TUI and the
+    web dashboard. ``theme`` selects the web color palette; the web
+    palette also exposes it at runtime via the command palette, so the
+    config value acts as the *starting default* — a per-user palette
+    pick (persisted in browser storage) wins over the config until
+    that override is cleared.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(default=DEFAULT_UI_TITLE, min_length=1, max_length=120)
+    theme: UiTheme = "phosphor"
+
+
 DEFAULT_CONCURRENCY = 5
 
 
@@ -178,6 +199,7 @@ class CheckerConfig(BaseModel):
 
     instances: dict[str, InstanceConfig] = Field(default_factory=dict)
     alerts: AlertsConfig | None = None
+    ui: UiConfig = Field(default_factory=UiConfig)
     concurrency: int = Field(default=DEFAULT_CONCURRENCY, gt=0, le=100)
 
     def get(self, name: str) -> InstanceConfig:
