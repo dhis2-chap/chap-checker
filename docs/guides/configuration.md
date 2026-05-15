@@ -121,12 +121,12 @@ theme = "phosphor"                          # phosphor | amber | high | tokyo | 
 and the [web dashboard](web.md). The web also syncs `document.title` so the
 browser tab matches.
 
-`theme` selects the web color palette. The web's command palette
-(`Ctrl+K`/`⌘K`) also exposes the same options at runtime — the config value
-acts as the **starting default**, and a per-user palette pick (persisted in
-browser `localStorage`) wins over the config until cleared. The Textual TUI
-uses its own accent (Textual's built-in palette / theme is available via
-`Ctrl+P` system commands; config-driven TUI theming is not wired yet).
+`theme` selects the palette for both the web and the Textual TUI. The
+web's command palette (`Ctrl+K`/`⌘K`) also exposes the same options at
+runtime — for the web, the config value acts as the **starting default**
+and a per-user palette pick (persisted in browser `localStorage`) wins
+over the config until cleared. For the TUI the config value is applied
+on mount and re-applied on reload (`Ctrl+R` re-reads the toml).
 
 Themes:
 
