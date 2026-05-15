@@ -245,13 +245,21 @@ function Sep() {
 }
 
 function Footer({ lastRefresh, paletteOpen }) {
+  // Footer mirrors the Header's `--header-bg`/`--header-ink` chain so on
+  // dhis2 the chrome brackets the content with two matching blue
+  // strips. Dark themes leave the vars unset and fall through to the
+  // original transparent strip with `--ink-dim` text.
+  const bg = 'var(--header-bg, transparent)';
+  const ink = 'var(--header-ink, var(--ink-dim))';
+  const accent = 'var(--header-ink, var(--green-2))';
   return (
     <footer style={{
       display:'flex', justifyContent:'space-between',
       padding:'8px 18px', borderTop:'1px solid var(--green-vdim)',
-      fontSize:'var(--fs-foot)', color:'var(--ink-dim)', flexShrink:0,
+      background: bg, color: ink,
+      fontSize:'var(--fs-foot)', flexShrink:0,
     }}>
-      <span>last refresh <span style={{ color:'var(--green-2)' }}>{lastRefresh}</span></span>
+      <span>last refresh <span style={{ color: accent }}>{lastRefresh}</span></span>
       <span style={{ display:'flex', gap:14 }}>
         <span><Kbd>r</Kbd> refresh</span>
         <span>·</span>
@@ -262,7 +270,7 @@ function Footer({ lastRefresh, paletteOpen }) {
 }
 
 function Kbd({ children }) {
-  return <span style={{ color:'var(--green-2)' }}>{children}</span>;
+  return <span style={{ color:'var(--header-ink, var(--green-2))' }}>{children}</span>;
 }
 
 function App() {
