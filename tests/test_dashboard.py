@@ -7,6 +7,7 @@ behaviour, which don't need a running event loop.
 
 from typing import cast
 
+import pytest
 from pydantic import HttpUrl
 
 from chap_checker.checks.base import CheckResult, Status
@@ -249,3 +250,39 @@ def test_all_other_themes_are_dark_mode() -> None:
         if name == "dhis2":
             continue
         assert builder().dark is True, f"{name} should be dark=True"
+
+
+@pytest.mark.parametrize("theme", list(_THEME_BUILDERS))
+def test_dashboard_app_mounts_under_every_theme(theme: str) -> None:
+    """Each ui.theme value must let the DashboardApp mount without a TCSS error.
+
+    Regression for: the first cut used `$text-disabled` as a border colour
+    and pill background. That token resolves to ``auto 38%`` (alpha-based
+    foreground), which Textual's parser rejects for borders/backgrounds —
+    but only at runtime, when the App's theme variables are loaded into
+    the stylesheet. Mounting the app under Pilot is the cheapest way to
+    catch that class of mistake.
+    """
+    import asyncio
+
+    from chap_checker.config import CheckerConfig, InstanceConfig, UiConfig
+    from chap_checker.dashboard import DashboardApp
+
+    cfg = CheckerConfig(
+        instances={"x": InstanceConfig(url=cast(HttpUrl, "https://x.example"), username="u", password="p")},
+        ui=UiConfig(theme=theme),  # type: ignore[arg-type]
+    )
+
+    async def _mount() -> None:
+        app = DashboardApp(
+            targets=[_entry("x")],
+            cfg=cfg,
+            config_path=None,
+            state_path=None,
+            interval_s=300.0,
+            alerts_enabled=False,
+        )
+        async with app.run_test(headless=True) as pilot:
+            await pilot.pause()
+
+    asyncio.run(_mount())

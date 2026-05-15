@@ -43,7 +43,11 @@ _STRIP_TOKEN_BY_STATUS: dict[Status, str] = {
     Status.WARN: "warning",
     Status.FAIL: "error",
     Status.ERROR: "error",
-    Status.SKIPPED: "text-disabled",
+    # `text-disabled` is alpha-based (`auto 38%`) and won't work as a Rich
+    # `Style` value; use a real surface-tinted hex instead. Both SKIPPED
+    # and EMPTY slots intentionally share the same dim placeholder colour
+    # because both mean "nothing meaningful happened here".
+    Status.SKIPPED: "panel-lighten-3",
 }
 _STRIP_TOKEN_EMPTY = "surface-lighten-2"
 
@@ -70,6 +74,14 @@ def _phosphor_theme() -> Theme:
         panel="#161616",
         foreground="#dddddd",
         dark=True,
+        variables={
+            # Header / footer strip — dark themes blend into the body bg
+            # so the chrome doesn't shout. Only dhis2 paints a coloured
+            # strip; everything else inherits the screen background.
+            "header-bg": "#0e0e0e",
+            "header-brand": "#7DD345",
+            "header-meta": "#aaaaaa",
+        },
     )
 
 
@@ -85,6 +97,11 @@ def _amber_theme() -> Theme:
         panel="#100b07",
         foreground="#e8d4a8",
         dark=True,
+        variables={
+            "header-bg": "#0a0705",
+            "header-brand": "#ffb84d",
+            "header-meta": "#aaaaaa",
+        },
     )
 
 
@@ -100,6 +117,11 @@ def _high_theme() -> Theme:
         panel="#0c0c0c",
         foreground="#ffffff",
         dark=True,
+        variables={
+            "header-bg": "#000000",
+            "header-brand": "#9eff9e",
+            "header-meta": "#cccccc",
+        },
     )
 
 
@@ -115,6 +137,11 @@ def _tokyo_theme() -> Theme:
         panel="#161922",
         foreground="#c0caf5",
         dark=True,
+        variables={
+            "header-bg": "#11131a",
+            "header-brand": "#7aa2f7",
+            "header-meta": "#aaaaaa",
+        },
     )
 
 
@@ -130,6 +157,14 @@ def _dhis2_theme() -> Theme:
         panel="#e3e7eb",
         foreground="#1e293b",
         dark=False,
+        variables={
+            # The web version's signature look: a deep DHIS2-blue strip
+            # bracketing the top and bottom of the dashboard, white text
+            # on it. Mirrored here so both surfaces match.
+            "header-bg": "#1f4d75",
+            "header-brand": "#ffffff",
+            "header-meta": "#cdd5e0",
+        },
     )
 
 
@@ -274,24 +309,24 @@ class DashboardHeader(Horizontal):
     DashboardHeader {
         height: 1;
         padding: 0 2;
-        background: $background;
+        background: $header-bg;
     }
     DashboardHeader .hdr-name {
-        color: $success;
+        color: $header-brand;
         text-style: bold;
         width: auto;
     }
     DashboardHeader .hdr-pipe {
-        color: $text-disabled;
+        color: $header-meta;
         width: 3;
         content-align: center middle;
     }
     DashboardHeader .hdr-text {
-        color: $text-muted;
+        color: $header-meta;
         width: auto;
     }
     DashboardHeader .hdr-clock {
-        color: $text-muted;
+        color: $header-meta;
         width: 1fr;
         content-align: right middle;
     }
@@ -335,16 +370,19 @@ class DashboardFooter(Horizontal):
     DashboardFooter {
         height: 1;
         padding: 0 2;
-        background: $background;
+        background: $header-bg;
     }
     DashboardFooter Static {
         width: auto;
-        color: $text-muted;
+        color: $header-meta;
     }
     """
 
     def compose(self) -> ComposeResult:
-        yield Static(f"[bold {_ACCENT}]\\[q][/] quit   [bold {_ACCENT}]\\[r][/] refresh")
+        # Brackets pop in $header-brand so they remain legible on the
+        # coloured strip (dhis2 paints it dark blue; dark themes leave
+        # the strip transparent and inherit the original accent).
+        yield Static("[bold $header-brand]\\[q][/] quit   [bold $header-brand]\\[r][/] refresh")
 
 
 class CheckRow(Horizontal):
@@ -397,7 +435,7 @@ class InstanceTile(Container):
     DEFAULT_CSS = """
     InstanceTile {
         background: $surface;
-        border-left: thick $text-disabled;
+        border-left: thick $surface-lighten-2;
         padding: 1 2;
         height: 100%;
         layout: vertical;
@@ -418,7 +456,7 @@ class InstanceTile(Container):
         background: $error-muted;
     }
     InstanceTile.tile-status-skipped {
-        border-left: thick $text-disabled;
+        border-left: thick $surface-lighten-2;
     }
     InstanceTile .row {
         height: 1;
@@ -464,7 +502,7 @@ class InstanceTile(Container):
         text-style: bold;
     }
     InstanceTile .pill-skipped {
-        background: $text-disabled;
+        background: $surface-lighten-2;
         color: auto;
     }
     InstanceTile .summary {
@@ -758,6 +796,14 @@ class DashboardApp(App[None]):
         self.alerts_enabled = alerts_enabled
         self.tiles: dict[str, InstanceTile] = {}
         self._refreshing = False
+        # Register the themes here, not in on_mount: DEFAULT_CSS strings
+        # that reference custom variables like `$header-bg` get parsed
+        # when the App's stylesheet is built (between __init__ and
+        # on_mount), so the active theme — with its `variables` payload —
+        # must already be selected by then.
+        for builder in _THEME_BUILDERS.values():
+            self.register_theme(builder())
+        self.theme = _textual_theme_name(self.cfg.ui.theme)
 
     def compose(self) -> ComposeResult:
         yield DashboardHeader(
@@ -779,9 +825,6 @@ class DashboardApp(App[None]):
         yield DashboardFooter()
 
     def on_mount(self) -> None:
-        for builder in _THEME_BUILDERS.values():
-            self.register_theme(builder())
-        self.theme = _textual_theme_name(self.cfg.ui.theme)
         self.set_interval(self.interval_s, self.action_refresh)
         self.call_after_refresh(self.action_refresh)
 
