@@ -37,6 +37,33 @@ const THEMES = {
     '--green':'#7aa2f7','--green-2':'#5d87ee','--green-dim':'#384a78','--green-vdim':'#1c2740',
     '--ink-dim':'#7a85a8','--ink-vdim':'#3a4567',
   },
+  // DHIS2-styled light mode: warm grey body, off-white tile cards,
+  // calmer slate-blue header. Status colors keep their semantic
+  // meaning (green/amber/red) but desaturate a notch for legibility
+  // and to keep the overall palette gentle on the eyes — earlier
+  // material-design shades read as harsh under prolonged viewing.
+  // `--header-bg` / `--header-ink` are dhis2-only — every other
+  // theme falls back to a transparent header strip through the Header
+  // component's CSS fallback chain.
+  dhis2: {
+    // Body and "empty slot" share a single darker grey so the gaps
+    // between cards, the unused grid cells, and the padding around
+    // the grid all read as one continuous tray. The cards then sit
+    // visibly on top via the lighter --bg-elev.
+    '--bg':'#c5cad0','--bg-elev':'#e3e7eb',
+    '--green':'#2e6b32','--green-2':'#1f4a22','--green-dim':'#b8d5ba','--green-vdim':'#bfc4ca',
+    '--ink-dim':'#4e5b66','--ink-vdim':'#8a929c',
+    '--red':'#a8302f','--red-dim':'#e8c4c4',
+    '--amber':'#b85b00','--amber-dim':'#e8d2a8',
+    '--header-bg':'#1f4d75','--header-ink':'#eef1f4',
+    '--badge-ok-fg':'#ffffff','--badge-warn-fg':'#ffffff','--badge-down-fg':'#ffffff',
+    '--palette-item-fg':'#2c353d',
+    // Primary text colour, distinct from --green so titles/numbers no
+    // longer read as "near-black" while OK badge / checkmarks still
+    // register as green. Dark themes leave --ink unset and fall back
+    // to --green, keeping the original neon look.
+    '--ink':'#1e293b',
+  },
 };
 
 const DENSITY = {
@@ -105,9 +132,24 @@ function buildHistory(inst, downNow) {
   return arr;
 }
 
+// Theme keys that some themes set and others don't (e.g. dhis2's
+// dedicated header strip + light-mode red/amber overrides). They must
+// be reset on every theme swap so switching FROM dhis2 TO phosphor
+// doesn't leave the blue header bar in place. Keys present in every
+// theme dict (--bg, --green, ...) don't need this because setProperty
+// just overwrites them.
+const RESETTABLE_THEME_KEYS = [
+  '--header-bg', '--header-ink',
+  '--red', '--red-dim', '--amber', '--amber-dim',
+  '--badge-ok-fg', '--badge-warn-fg', '--badge-down-fg',
+  '--palette-item-fg',
+  '--ink',
+];
+
 function applyTheme(t) {
   const root = document.documentElement;
   // theme
+  RESETTABLE_THEME_KEYS.forEach(k => root.style.removeProperty(k));
   const theme = THEMES[t.theme] || THEMES.phosphor;
   Object.entries(theme).forEach(([k,v]) => root.style.setProperty(k, v));
   // density
@@ -130,30 +172,37 @@ function formatClock(d) {
 
 function Header({ instances, alertsOn, refreshSec, clock, reload, reloadState, title }) {
   const downCount = instances.filter(i => i.status === 'down').length;
+  // `--header-bg` / `--header-ink` are dhis2-theme-only; other themes
+  // fall through to a transparent strip with the body's accent text
+  // colour, matching the pre-existing dark-mode look.
+  const headerBg = 'var(--header-bg, transparent)';
+  const brandColor = 'var(--header-ink, var(--green))';
+  const metaColor = 'var(--header-ink, var(--ink-dim))';
   return (
     <header style={{
       display:'flex', justifyContent:'space-between', alignItems:'center',
       padding:'10px 18px', borderBottom:'1px solid var(--green-vdim)',
+      background: headerBg,
       fontSize:'var(--fs-head)', flexShrink:0,
     }}>
       <div style={{ display:'flex', alignItems:'center', gap:14 }}>
-        <span style={{ color:'var(--green)', fontWeight:700 }}>{title}</span>
+        <span style={{ color: brandColor, fontWeight:700 }}>{title}</span>
         <Sep />
-        <span style={{ color:'var(--ink-dim)' }}>
-          <span style={{ color: downCount > 0 ? 'var(--red)' : 'var(--green)' }}>{instances.length}</span>{' '}
+        <span style={{ color: metaColor, opacity: 0.85 }}>
+          <span style={{ color: downCount > 0 ? 'var(--red)' : brandColor }}>{instances.length}</span>{' '}
           instance(s){downCount > 0 && <span style={{ color:'var(--red)' }}> · {downCount} DOWN</span>}
         </span>
         <Sep />
-        <span style={{ color:'var(--ink-dim)' }}>
-          alerts <span style={{ color: alertsOn ? 'var(--green)' : 'var(--ink-dim)' }}>{alertsOn ? 'ON' : 'OFF'}</span>
+        <span style={{ color: metaColor, opacity: 0.85 }}>
+          alerts <span style={{ color: alertsOn ? brandColor : metaColor }}>{alertsOn ? 'ON' : 'OFF'}</span>
         </span>
         <Sep />
-        <span style={{ color:'var(--ink-dim)' }}>refresh every {refreshSec}s</span>
+        <span style={{ color: metaColor, opacity: 0.85 }}>refresh every {refreshSec}s</span>
       </div>
       <div style={{ display:'flex', alignItems:'center', gap:14 }}>
         <ReloadButton onClick={reload} state={reloadState} />
         <div style={{
-          color: 'var(--green)', fontVariantNumeric:'tabular-nums',
+          color: brandColor, fontVariantNumeric:'tabular-nums',
           fontSize: 'calc(var(--fs-head) * 1.1)',
         }}>
           {clock}
@@ -171,10 +220,14 @@ function ReloadButton({ onClick, state }) {
     state.status === 'error'   ? state.message :
                                  'reload config'
   );
+  // Idle/pending colours fall through to the header-ink so the button is
+  // legible on dhis2's dark blue header strip; dark themes still get the
+  // original --ink-dim grey via the CSS fallback.
+  const idleColor = 'var(--header-ink, var(--ink-dim))';
   const color = (
     state.status === 'error' ? 'var(--red)' :
-    state.status === 'ok'    ? 'var(--green)' :
-                               'var(--ink-dim)'
+    state.status === 'ok'    ? 'var(--header-ink, var(--green))' :
+                               idleColor
   );
   return (
     <button
@@ -183,7 +236,7 @@ function ReloadButton({ onClick, state }) {
       title="Re-read chap-checker.toml"
       style={{
         background:'transparent',
-        border:'1px solid var(--green-vdim)',
+        border:'1px solid var(--header-ink, var(--green-vdim))',
         color, padding:'2px 10px',
         fontFamily:'inherit', fontSize:'inherit',
         cursor: isPending ? 'default' : 'pointer',
@@ -200,13 +253,21 @@ function Sep() {
 }
 
 function Footer({ lastRefresh, paletteOpen }) {
+  // Footer mirrors the Header's `--header-bg`/`--header-ink` chain so on
+  // dhis2 the chrome brackets the content with two matching blue
+  // strips. Dark themes leave the vars unset and fall through to the
+  // original transparent strip with `--ink-dim` text.
+  const bg = 'var(--header-bg, transparent)';
+  const ink = 'var(--header-ink, var(--ink-dim))';
+  const accent = 'var(--header-ink, var(--green-2))';
   return (
     <footer style={{
       display:'flex', justifyContent:'space-between',
       padding:'8px 18px', borderTop:'1px solid var(--green-vdim)',
-      fontSize:'var(--fs-foot)', color:'var(--ink-dim)', flexShrink:0,
+      background: bg, color: ink,
+      fontSize:'var(--fs-foot)', flexShrink:0,
     }}>
-      <span>last refresh <span style={{ color:'var(--green-2)' }}>{lastRefresh}</span></span>
+      <span>last refresh <span style={{ color: accent }}>{lastRefresh}</span></span>
       <span style={{ display:'flex', gap:14 }}>
         <span><Kbd>r</Kbd> refresh</span>
         <span>·</span>
@@ -217,7 +278,7 @@ function Footer({ lastRefresh, paletteOpen }) {
 }
 
 function Kbd({ children }) {
-  return <span style={{ color:'var(--green-2)' }}>{children}</span>;
+  return <span style={{ color:'var(--header-ink, var(--green-2))' }}>{children}</span>;
 }
 
 function App() {
@@ -361,6 +422,7 @@ function App() {
     { id:'theme-amber',    label:'Theme: amber', run:() => setTweak('theme','amber') },
     { id:'theme-high',     label:'Theme: high contrast', run:() => setTweak('theme','high') },
     { id:'theme-tokyo',    label:'Theme: tokyo night (blue)', run:() => setTweak('theme','tokyo') },
+    { id:'theme-dhis2',    label:'Theme: dhis2 (light)', run:() => setTweak('theme','dhis2') },
     // CK-WIRING: the artifact ships a demoDown toggle that swaps PLAY-41
     // into a FAIL state for design preview. With live data that's
     // misleading (real failures show real), so it's omitted from the
@@ -402,7 +464,8 @@ function App() {
   }, [paletteOpen, t.demoDown]);
 
   // layout grid: auto, 2x2, 3x2, 4x1
-  const gridStyle = React.useMemo(() => {
+  const isCardLayout = t.theme === 'dhis2';
+  const gridGeom = React.useMemo(() => {
     const n = instances.length;
     let cols = 2, rows = 2;
     if (t.layout === '2x2') { cols=2; rows=2; }
@@ -413,13 +476,18 @@ function App() {
       else cols = Math.min(n, n <= 4 ? 2 : 3);
       rows = Math.ceil(n/cols);
     }
-    return {
-      flex: 1, display:'grid', minHeight:0,
-      gridTemplateColumns: `repeat(${cols}, 1fr)`,
-      gridTemplateRows: `repeat(${rows}, 1fr)`,
-      gap: 0,
-    };
+    return { cols, rows };
   }, [t.layout, t.density, instances.length]);
+  const gridStyle = React.useMemo(() => ({
+    flex: 1, display:'grid', minHeight:0,
+    gridTemplateColumns: `repeat(${gridGeom.cols}, 1fr)`,
+    gridTemplateRows: `repeat(${gridGeom.rows}, 1fr)`,
+    // dhis2 (light) reads as a card-based dashboard; switch hairline
+    // dividers off and use a 4px gap so panels feel like seated tiles.
+    // Dark themes keep the original terminal-grid hairlines.
+    gap: isCardLayout ? 4 : 0,
+    padding: isCardLayout ? 4 : 0,
+  }), [gridGeom, isCardLayout]);
 
   return (
     <>
@@ -436,15 +504,23 @@ function App() {
       {/* grid */}
       <div style={gridStyle}>
         {instances.map((inst, i) => {
-          // hairline dividers between cells (terminal feel)
-          const cols = parseInt(gridStyle.gridTemplateColumns.match(/repeat\((\d+)/)[1], 10);
+          // hairline dividers between cells (terminal feel) — suppressed
+          // on card-layout themes where the gap itself separates panels.
+          const { cols } = gridGeom;
           const col = i % cols;
           const row = Math.floor(i / cols);
           const totalRows = Math.ceil(instances.length / cols);
-          const borderRight = col < cols - 1 ? '1px solid var(--green-vdim)' : 'none';
-          const borderBottom = row < totalRows - 1 ? '1px solid var(--green-vdim)' : 'none';
+          const borderRight = isCardLayout || col === cols - 1 ? 'none' : '1px solid var(--green-vdim)';
+          const borderBottom = isCardLayout || row === totalRows - 1 ? 'none' : '1px solid var(--green-vdim)';
           return (
-            <div key={inst.id} style={{ borderRight, borderBottom, minHeight:0, minWidth:0, overflow:'hidden', display:'flex' }}>
+            <div
+              key={inst.id}
+              style={{
+                borderRight, borderBottom,
+                background: isCardLayout ? 'var(--bg-elev)' : 'transparent',
+                minHeight:0, minWidth:0, overflow:'hidden', display:'flex',
+              }}
+            >
               <Card
                 inst={inst}
                 statusMode={t.statusMode}
@@ -457,6 +533,9 @@ function App() {
             </div>
           );
         })}
+        {/* Unfilled grid cells show the body bg directly (no placeholder
+            divs needed); on dhis2 that's the same darker grey as every
+            gap, so empty slots blend into the surrounding tray. */}
       </div>
 
       <Footer lastRefresh={lastRefresh} paletteOpen={paletteOpen} />
@@ -506,6 +585,7 @@ function App() {
                        {value:'amber',    label:'Amber'},
                        {value:'high',     label:'High contrast'},
                        {value:'tokyo',    label:'Tokyo night'},
+                       {value:'dhis2',    label:'DHIS2 (light)'},
                      ]}
                      onChange={v => setTweak('theme', v)} />
 

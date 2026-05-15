@@ -2,10 +2,15 @@
 const { useState, useEffect, useMemo } = React;
 
 function StatusBadge({ status, size = 'sm' }) {
+  // Badge text defaults to a near-black that reads on the bright
+  // status fills the dark themes use. The light-mode (dhis2) theme
+  // sets `--badge-{ok,warn,down}-fg` to white because its status
+  // backgrounds are dark green / dark amber / dark red, where
+  // near-black text disappears into the fill.
   const map = {
-    ok:   { label:'OK',   bg:'var(--green)', fg:'#001a00' },
-    warn: { label:'WARN', bg:'var(--amber)', fg:'#1a1000' },
-    down: { label:'DOWN', bg:'var(--red)',   fg:'#1a0000' },
+    ok:   { label:'OK',   bg:'var(--green)', fg:'var(--badge-ok-fg, #001a00)' },
+    warn: { label:'WARN', bg:'var(--amber)', fg:'var(--badge-warn-fg, #1a1000)' },
+    down: { label:'DOWN', bg:'var(--red)',   fg:'var(--badge-down-fg, #1a0000)' },
   };
   const s = map[status] || map.ok;
   const px = size === 'lg' ? '6px 14px' : size === 'md' ? '3px 9px' : '1px 7px';
@@ -21,7 +26,10 @@ function StatusBadge({ status, size = 'sm' }) {
 
 function Check({ name, ok, down }) {
   const color = down ? '#fff' : (ok ? 'var(--green)' : 'var(--red)');
-  const dim = down ? 'rgba(255,255,255,0.85)' : 'var(--green)';
+  // `--ink` overrides primary text-only uses of --green (so they don't
+  // double as status accents). Dark themes leave it unset and fall back
+  // to --green, preserving the original neon look.
+  const dim = down ? 'rgba(255,255,255,0.85)' : 'var(--ink, var(--green))';
   return (
     <div style={{
       display:'flex', justifyContent:'space-between', alignItems:'baseline',
@@ -45,7 +53,7 @@ function Stat({ label, value, big, invert }) {
         letterSpacing: '0.02em',
       }}>{label}</span>
       <span style={{
-        color: invert ? '#fff' : 'var(--green)', fontWeight: 700,
+        color: invert ? '#fff' : 'var(--ink, var(--green))', fontWeight: 700,
         fontSize: big ? 'calc(var(--fs-stat) * 1.6)' : 'var(--fs-stat)',
         fontVariantNumeric:'tabular-nums',
         textShadow: invert ? '0 1px 0 rgba(0,0,0,0.25)' : 'none',
@@ -131,7 +139,7 @@ function Card({ inst, statusMode, density, centerViz, showUrl, showChecks, showM
     }} />
   );
 
-  const titleColor = isWarn ? 'var(--amber)' : 'var(--green)';
+  const titleColor = isWarn ? 'var(--amber)' : 'var(--ink, var(--green))';
 
   return (
     <div style={{
@@ -177,11 +185,11 @@ function Card({ inst, statusMode, density, centerViz, showUrl, showChecks, showM
       }}>
         <StatusBadge status={inst.status} size={wall ? 'lg' : tv ? 'md' : 'sm'} />
         <span style={{ color:'var(--ink-dim)', fontSize: tv?'calc(var(--fs-base)*1.3)':'var(--fs-base)' }}>
-          <span style={{ color:'var(--green)' }}>{inst.checksPassed}/{inst.checksTotal}</span> checks
+          <span style={{ color:'var(--ink, var(--green))' }}>{inst.checksPassed}/{inst.checksTotal}</span> checks
         </span>
         <span style={{ color:'var(--ink-dim)', fontSize: tv?'calc(var(--fs-base)*1.3)':'var(--fs-base)' }}>
-          <span style={{ color:'var(--green)' }}>{inst.pingPassed}/{inst.pingTotal}</span> ping (
-          <span style={{ color: inst.pingPct === 100 ? 'var(--green)' : 'var(--amber)' }}>{inst.pingPct}%</span>)
+          <span style={{ color:'var(--ink, var(--green))' }}>{inst.pingPassed}/{inst.pingTotal}</span> ping (
+          <span style={{ color: inst.pingPct === 100 ? 'var(--ink, var(--green))' : 'var(--amber)' }}>{inst.pingPct}%</span>)
         </span>
       </div>
 
