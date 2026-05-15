@@ -37,19 +37,21 @@ const THEMES = {
     '--green':'#7aa2f7','--green-2':'#5d87ee','--green-dim':'#384a78','--green-vdim':'#1c2740',
     '--ink-dim':'#7a85a8','--ink-vdim':'#3a4567',
   },
-  // DHIS2-styled light mode: light grey body, white tile cards, dark
-  // header strip with the DHIS2 blue. Status colors keep their semantic
-  // meaning (green/amber/red) but pick darker shades so they read on
-  // white. `--header-bg` / `--header-ink` are dhis2-only — every other
+  // DHIS2-styled light mode: warm grey body, off-white tile cards,
+  // calmer slate-blue header. Status colors keep their semantic
+  // meaning (green/amber/red) but desaturate a notch for legibility
+  // and to keep the overall palette gentle on the eyes — earlier
+  // material-design shades read as harsh under prolonged viewing.
+  // `--header-bg` / `--header-ink` are dhis2-only — every other
   // theme falls back to a transparent header strip through the Header
   // component's CSS fallback chain.
   dhis2: {
-    '--bg':'#f4f6f8','--bg-elev':'#ffffff',
-    '--green':'#2e7d32','--green-2':'#1b5e20','--green-dim':'#a5d6a7','--green-vdim':'#e0e3e7',
-    '--ink-dim':'#546e7a','--ink-vdim':'#90a4ae',
-    '--red':'#d32f2f','--red-dim':'#ffcdd2',
-    '--amber':'#ed6c02','--amber-dim':'#ffe0b2',
-    '--header-bg':'#1976d2','--header-ink':'#ffffff',
+    '--bg':'#e9ecf0','--bg-elev':'#f5f7f9',
+    '--green':'#2e6b32','--green-2':'#1f4a22','--green-dim':'#b8d5ba','--green-vdim':'#d6dadf',
+    '--ink-dim':'#4e5b66','--ink-vdim':'#8a929c',
+    '--red':'#a8302f','--red-dim':'#e8c4c4',
+    '--amber':'#b85b00','--amber-dim':'#e8d2a8',
+    '--header-bg':'#1f4d75','--header-ink':'#eef1f4',
   },
 };
 
