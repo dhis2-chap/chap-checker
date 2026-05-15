@@ -25,7 +25,7 @@ from textual.widget import Widget
 from textual.widgets import Static
 
 from chap_checker.checks.base import CheckResult, Status
-from chap_checker.config import CheckerConfig
+from chap_checker.config import CheckerConfig, load_config
 from chap_checker.runner import RunReport, TargetEntry, run_targets
 
 _ACCENT = "#7DD345"
@@ -558,6 +558,11 @@ class ChapCheckerCommands(Provider):
                 partial(app.run_action, "refresh"),
             ),
             (
+                "Reload config",
+                "Re-read chap-checker.toml from disk.",
+                partial(app.run_action, "reload"),
+            ),
+            (
                 "Open GitHub repository",
                 "github.com/dhis2-chap/chap-checker",
                 partial(app.open_url, "https://github.com/dhis2-chap/chap-checker"),
@@ -605,6 +610,7 @@ class DashboardApp(App[None]):
     BINDINGS = [
         Binding("q", "quit", "Quit"),
         Binding("r", "refresh", "Refresh"),
+        Binding("ctrl+r", "reload", "Reload config"),
     ]
 
     COMMANDS = App.COMMANDS | {ChapCheckerCommands}
@@ -667,6 +673,42 @@ class DashboardApp(App[None]):
                 await dispatch_alerts_async(reports, self.targets, self.cfg.alerts, self.state_path)
         finally:
             self._refreshing = False
+
+    async def action_reload(self) -> None:
+        """Re-read ``chap-checker.toml`` and apply the new config in place.
+
+        Targets and per-target check sets / auth / urls are swapped so the
+        next refresh uses the new config. Tiles are not rebuilt — if the
+        instance set changed, a notification points the operator at a
+        restart so the grid reflects the new layout.
+        """
+        if self.config_path is None:
+            self.notify("No config path — running with ad-hoc target.", severity="warning")
+            return
+        try:
+            new_cfg = load_config(self.config_path)
+        except Exception as exc:  # noqa: BLE001 - any error surfaces as a toast
+            self.notify(f"Reload failed: {exc}", severity="error")
+            return
+        new_targets = [entry.to_target_entry(name) for name, entry in new_cfg.instances.items()]
+        old_names = {t.name for t in self.targets}
+        new_names = {t.name for t in new_targets}
+        self.targets = new_targets
+        self.cfg = new_cfg
+        if old_names != new_names:
+            added = sorted(new_names - old_names)
+            removed = sorted(old_names - new_names)
+            parts: list[str] = []
+            if added:
+                parts.append(f"+{len(added)} ({', '.join(added)})")
+            if removed:
+                parts.append(f"-{len(removed)} ({', '.join(removed)})")
+            self.notify(
+                f"Instance set changed: {' '.join(parts)}. Restart dashboard to update tiles.",
+                severity="warning",
+            )
+        else:
+            self.notify(f"Reloaded {self.config_path.name} ({len(self.targets)} instance(s)).")
 
 
 def run(

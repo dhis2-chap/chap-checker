@@ -26,6 +26,7 @@ be left on a TV / second monitor so the operator sees at a glance what's up.
 | Key      | Action                                                          |
 | -------- | --------------------------------------------------------------- |
 | `r`      | Refresh immediately (otherwise auto every `--interval` seconds).|
+| `Ctrl+R` | Reload `chap-checker.toml` from disk.                           |
 | `Ctrl+P` | Open the [command palette](#command-palette).                   |
 | `q`      | Quit.                                                           |
 
@@ -38,6 +39,10 @@ registers a small Provider that adds dashboard-specific entries, so the
 same items are available in both the TUI and the [web dashboard](web.md):
 
 - **Refresh now** — re-run every check immediately.
+- **Reload config** — re-read `chap-checker.toml` from disk and apply the
+  new targets / auth / check sets in place. Tiles for surviving instances
+  hot-swap; if the instance set itself changed, a notification points you
+  at a restart so the grid layout reflects the new count.
 - **Open GitHub repository** — opens `github.com/dhis2-chap/chap-checker`
   in your default browser.
 - **Open documentation** — opens this docs site.

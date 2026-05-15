@@ -557,6 +557,7 @@ def web_command(
         state_path=state_path,
         interval_s=interval,
         alerts_enabled=alerts_enabled,
+        config_path=config_path,
         host=host,
         port=port,
     )
