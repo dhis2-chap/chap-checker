@@ -57,6 +57,12 @@ const THEMES = {
     '--amber':'#b85b00','--amber-dim':'#e8d2a8',
     '--header-bg':'#1f4d75','--header-ink':'#eef1f4',
     '--badge-ok-fg':'#ffffff','--badge-warn-fg':'#ffffff','--badge-down-fg':'#ffffff',
+    '--palette-item-fg':'#2c353d',
+    // Primary text colour, distinct from --green so titles/numbers no
+    // longer read as "near-black" while OK badge / checkmarks still
+    // register as green. Dark themes leave --ink unset and fall back
+    // to --green, keeping the original neon look.
+    '--ink':'#1e293b',
   },
 };
 
@@ -136,6 +142,8 @@ const RESETTABLE_THEME_KEYS = [
   '--header-bg', '--header-ink',
   '--red', '--red-dim', '--amber', '--amber-dim',
   '--badge-ok-fg', '--badge-warn-fg', '--badge-down-fg',
+  '--palette-item-fg',
+  '--ink',
 ];
 
 function applyTheme(t) {

@@ -83,7 +83,11 @@ function CommandPalette({ open, onClose, commands }) {
                 display:'flex', justifyContent:'space-between', alignItems:'center',
                 padding: '10px 18px',
                 background: i === idx ? 'rgba(110,224,110,0.10)' : 'transparent',
-                color: i === idx ? 'var(--green)' : '#cfd8cf',
+                // `--palette-item-fg` defaults to the pale grey designed
+                // for dark-bg dialogs; light themes (dhis2) override it
+                // to a dark grey so non-selected items stay readable on
+                // the near-white palette panel.
+                color: i === idx ? 'var(--green)' : 'var(--palette-item-fg, #cfd8cf)',
                 cursor:'default',
                 fontSize: 14,
                 borderLeft: i === idx ? '2px solid var(--green)' : '2px solid transparent',
