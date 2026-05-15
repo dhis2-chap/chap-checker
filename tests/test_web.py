@@ -143,7 +143,7 @@ def test_index_serves_html() -> None:
         r = client.get("/")
         assert r.status_code == 200
         assert "text/html" in r.headers["content-type"]
-        assert "chap-checker" in r.text
+        assert "DHIS2 / Climate Instance Checker" in r.text
         # The poller lives in _state.js; check it's served too.
         r2 = client.get("/_state.js")
         assert r2.status_code == 200

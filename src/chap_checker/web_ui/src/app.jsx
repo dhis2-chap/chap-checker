@@ -137,7 +137,7 @@ function Header({ instances, alertsOn, refreshSec, clock }) {
       fontSize:'var(--fs-head)', flexShrink:0,
     }}>
       <div style={{ display:'flex', alignItems:'center', gap:14 }}>
-        <span style={{ color:'var(--green)', fontWeight:700 }}>chap-checker</span>
+        <span style={{ color:'var(--green)', fontWeight:700 }}>DHIS2 / Climate Instance Checker</span>
         <Sep />
         <span style={{ color:'var(--ink-dim)' }}>
           <span style={{ color: downCount > 0 ? 'var(--red)' : 'var(--green)' }}>{instances.length}</span>{' '}
