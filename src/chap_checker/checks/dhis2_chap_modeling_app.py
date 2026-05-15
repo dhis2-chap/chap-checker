@@ -5,13 +5,13 @@ from __future__ import annotations
 import time
 from typing import Any, ClassVar
 
+from dhis2w_client import Dhis2Client
 from pydantic import BaseModel, ConfigDict, Field
 
 from chap_checker.checks.base import CheckResult, Status, register_check
-from chap_checker.client import Dhis2Client
 
 MODELING_APP_HUB_ID = "a29851f9-82a7-4ecd-8b2c-58e0f220bc75"
-APPS_PATH = "apps"
+APPS_PATH = "/api/apps"
 
 
 class Dhis2App(BaseModel):
@@ -41,7 +41,7 @@ class Dhis2ChapModelingAppCheck:
     async def run(self, client: Dhis2Client) -> CheckResult:
         start = time.perf_counter()
         try:
-            response = await client.get(APPS_PATH)
+            response = await client.get_response(APPS_PATH)
         except Exception as exc:  # noqa: BLE001
             return CheckResult(
                 name=self.name,

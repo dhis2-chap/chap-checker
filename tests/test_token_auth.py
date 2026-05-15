@@ -1,8 +1,9 @@
 """Tests for DHIS2 Personal Access Token (PAT) auth.
 
 Covers the Dhis2Target validator (mutex between password and token),
-the Dhis2Client wire-level header it sends, the InstanceConfig
-resolver, and the CLI --token / --token-env flags.
+the wire-level Authorization header the upstream `dhis2w_client` sends
+when the target opens a client, the InstanceConfig resolver, and the
+CLI --token / --token-env flags.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ from pydantic import HttpUrl, ValidationError
 from typer.testing import CliRunner
 
 from chap_checker.cli import _resolve_adhoc_token, app
-from chap_checker.client import Dhis2Client, Dhis2Target
+from chap_checker.client import Dhis2Target
 from chap_checker.config import InstanceConfig
 
 runner = CliRunner()
@@ -54,7 +55,7 @@ def test_target_password_without_username_raises() -> None:
         Dhis2Target(base_url=cast(HttpUrl, "https://x.example"), password="p")
 
 
-# ---------- Dhis2Client wire-level header ----------
+# ---------- Wire-level Authorization header ----------
 
 
 def test_client_sends_apitoken_header() -> None:
@@ -67,10 +68,10 @@ def test_client_sends_apitoken_header() -> None:
         return httpx.Response(200, json={})
 
     target = Dhis2Target(base_url=cast(HttpUrl, "https://x.example"), token="abc123")
-    client = Dhis2Client(target)
+    client = target.open()
     # The auth header is built by dhis2w_client.PatAuth on every request,
     # so the MockTransport-backed AsyncClient does not need to set it.
-    client._inner._http = httpx.AsyncClient(
+    client._http = httpx.AsyncClient(
         base_url=str(target.base_url).rstrip("/"),
         timeout=target.timeout_s,
         transport=httpx.MockTransport(handler),
@@ -80,7 +81,7 @@ def test_client_sends_apitoken_header() -> None:
 
     async def go() -> None:
         async with client:
-            await client.get("system/info")
+            await client.get_response("/api/system/info")
 
     asyncio.run(go())
     assert captured["authorization"] == "ApiToken abc123"

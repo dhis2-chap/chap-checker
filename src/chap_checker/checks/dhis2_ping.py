@@ -5,8 +5,9 @@ from __future__ import annotations
 import time
 from typing import ClassVar
 
+from dhis2w_client import Dhis2Client
+
 from chap_checker.checks.base import CheckResult, Status, register_check
-from chap_checker.client import Dhis2Client
 
 
 @register_check
@@ -21,7 +22,7 @@ class Dhis2PingCheck:
     async def run(self, client: Dhis2Client) -> CheckResult:
         start = time.perf_counter()
         try:
-            response = await client.get("me")
+            response = await client.get_response("/api/me")
         except Exception as exc:  # noqa: BLE001 - surface any transport error as a result
             return CheckResult(
                 name=self.name,

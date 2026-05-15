@@ -8,7 +8,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field, computed_field
 
 from chap_checker.checks.base import Check, CheckResult, Status, all_checks, resolve_checks
-from chap_checker.client import Dhis2Client, Dhis2Target
+from chap_checker.client import Dhis2Target
 from chap_checker.logging import get_logger
 
 _log = get_logger("runner")
@@ -92,7 +92,7 @@ async def run_checks(target: Dhis2Target, checks: list[Check] | None = None) -> 
     selected = checks if checks is not None else all_checks()
     results: list[CheckResult] = []
     results_by_name: dict[str, CheckResult] = {}
-    async with Dhis2Client(target) as client:
+    async with target.open() as client:
         for check in selected:
             failed_prereqs = [
                 req
@@ -122,7 +122,7 @@ async def run_targets(targets: list[TargetEntry], concurrency: int = 5) -> list[
 
     If ``entry.check_names`` is set, it picks the checks (and their transitive
     ``requires``); otherwise every registered check runs. Each target uses
-    its own :class:`Dhis2Client` so there is no shared HTTP state between
+    its own upstream ``Dhis2Client`` so there is no shared HTTP state between
     parallel runs. Reports come back in the input order (``asyncio.gather``
     preserves it), so per-target tables render in the same order the
     instances appear in the config.

@@ -5,10 +5,10 @@ from __future__ import annotations
 import time
 from typing import Any, ClassVar
 
+from dhis2w_client import Dhis2Client
 from pydantic import BaseModel, ConfigDict, Field
 
 from chap_checker.checks.base import CheckResult, Status, register_check
-from chap_checker.client import Dhis2Client
 
 
 class Dhis2SystemInfo(BaseModel):
@@ -36,7 +36,7 @@ class Dhis2SystemInfoCheck:
     async def run(self, client: Dhis2Client) -> CheckResult:
         start = time.perf_counter()
         try:
-            response = await client.get("system/info")
+            response = await client.get_response("/api/system/info")
         except Exception as exc:  # noqa: BLE001
             return CheckResult(
                 name=self.name,

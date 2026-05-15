@@ -5,12 +5,12 @@ from __future__ import annotations
 import time
 from typing import Any, ClassVar
 
+from dhis2w_client import Dhis2Client
 from pydantic import BaseModel, ConfigDict, Field
 
 from chap_checker.checks.base import CheckResult, Status, register_check
-from chap_checker.client import Dhis2Client
 
-ROUTE_PROXY_PATH = "routes/chap/run/system/info"
+ROUTE_PROXY_PATH = "/api/routes/chap/run/system/info"
 
 
 class ChapCoreSystemInfo(BaseModel):
@@ -38,7 +38,7 @@ class Dhis2ChapSystemInfoCheck:
     async def run(self, client: Dhis2Client) -> CheckResult:
         start = time.perf_counter()
         try:
-            response = await client.get(ROUTE_PROXY_PATH)
+            response = await client.get_response(ROUTE_PROXY_PATH)
         except Exception as exc:  # noqa: BLE001
             return CheckResult(
                 name=self.name,
@@ -52,14 +52,14 @@ class Dhis2ChapSystemInfoCheck:
             return CheckResult(
                 name=self.name,
                 status=Status.FAIL,
-                message=f"/api/{ROUTE_PROXY_PATH} returned 404 (route missing or chap-core has no /system/info).",
+                message=f"{ROUTE_PROXY_PATH} returned 404 (route missing or chap-core has no /system/info).",
                 duration_ms=duration_ms,
             )
         if response.status_code >= 400:
             return CheckResult(
                 name=self.name,
                 status=Status.FAIL,
-                message=f"Unexpected status {response.status_code} from /api/{ROUTE_PROXY_PATH}.",
+                message=f"Unexpected status {response.status_code} from {ROUTE_PROXY_PATH}.",
                 duration_ms=duration_ms,
             )
 

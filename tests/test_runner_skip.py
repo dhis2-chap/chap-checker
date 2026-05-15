@@ -1,9 +1,10 @@
 from typing import Any, cast
 
 import pytest
+from dhis2w_client import Dhis2Client
 
 from chap_checker.checks.base import Check, CheckResult, Status
-from chap_checker.client import Dhis2Client, Dhis2Target
+from chap_checker.client import Dhis2Target
 from chap_checker.runner import run_checks
 
 
@@ -37,12 +38,14 @@ def _target() -> Dhis2Target:
     )
 
 
-@pytest.mark.asyncio
-async def test_dependent_check_skipped_when_prereq_fails(monkeypatch: pytest.MonkeyPatch) -> None:
-    failing = _FakeCheck("ping", Status.FAIL)
-    dependent = _FakeCheck("system-info", Status.OK, requires=["ping"])
+def _stub_upstream(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Patch the upstream Dhis2Client's context-manager protocol to no-ops.
 
-    # Don't actually open an HTTP client.
+    Tests in this module exercise `run_checks`'s skip / cascade logic with
+    fake checks — they don't need a real HTTP pool. The stub keeps
+    `target.open()` cheap and side-effect-free.
+    """
+
     async def _fake_aenter(self: Any) -> Any:
         return self
 
@@ -51,6 +54,14 @@ async def test_dependent_check_skipped_when_prereq_fails(monkeypatch: pytest.Mon
 
     monkeypatch.setattr(Dhis2Client, "__aenter__", _fake_aenter)
     monkeypatch.setattr(Dhis2Client, "__aexit__", _fake_aexit)
+
+
+@pytest.mark.asyncio
+async def test_dependent_check_skipped_when_prereq_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    failing = _FakeCheck("ping", Status.FAIL)
+    dependent = _FakeCheck("system-info", Status.OK, requires=["ping"])
+
+    _stub_upstream(monkeypatch)
 
     results = await run_checks(_target(), checks=[_as_check(failing), _as_check(dependent)])
 
@@ -64,14 +75,7 @@ async def test_dependent_check_runs_when_prereq_ok(monkeypatch: pytest.MonkeyPat
     foundational = _FakeCheck("ping", Status.OK)
     dependent = _FakeCheck("system-info", Status.OK, requires=["ping"])
 
-    async def _fake_aenter(self: Any) -> Any:
-        return self
-
-    async def _fake_aexit(self: Any, *args: Any) -> None:
-        return None
-
-    monkeypatch.setattr(Dhis2Client, "__aenter__", _fake_aenter)
-    monkeypatch.setattr(Dhis2Client, "__aexit__", _fake_aexit)
+    _stub_upstream(monkeypatch)
 
     results = await run_checks(_target(), checks=[_as_check(foundational), _as_check(dependent)])
 
@@ -86,14 +90,7 @@ async def test_unrelated_check_runs_even_when_sibling_fails(monkeypatch: pytest.
     failing = _FakeCheck("chap-route", Status.FAIL, requires=["ping"])
     independent = _FakeCheck("modeling-app", Status.OK, requires=["ping"])
 
-    async def _fake_aenter(self: Any) -> Any:
-        return self
-
-    async def _fake_aexit(self: Any, *args: Any) -> None:
-        return None
-
-    monkeypatch.setattr(Dhis2Client, "__aenter__", _fake_aenter)
-    monkeypatch.setattr(Dhis2Client, "__aexit__", _fake_aexit)
+    _stub_upstream(monkeypatch)
 
     results = await run_checks(_target(), checks=[_as_check(ping), _as_check(failing), _as_check(independent)])
     by_name = {r.name: r for r in results}

@@ -6,6 +6,7 @@ from typing import cast
 
 import httpx
 import pytest
+from dhis2w_client import Dhis2Client
 from pydantic import HttpUrl
 
 from chap_checker.checks.base import Status
@@ -13,7 +14,7 @@ from chap_checker.checks.dhis2_chap_modeling_app import Dhis2ChapModelingAppChec
 from chap_checker.checks.dhis2_chap_system_info import Dhis2ChapSystemInfoCheck
 from chap_checker.checks.dhis2_ping import Dhis2PingCheck
 from chap_checker.checks.dhis2_system_info import Dhis2SystemInfoCheck
-from chap_checker.client import Dhis2Client, Dhis2Target
+from chap_checker.client import Dhis2Target
 
 
 def _client(handler: Callable[[httpx.Request], httpx.Response]) -> Dhis2Client:
@@ -22,14 +23,14 @@ def _client(handler: Callable[[httpx.Request], httpx.Response]) -> Dhis2Client:
         username="u",
         password="p",
     )
-    client = Dhis2Client(target)
+    client = target.open()
     # Preset the upstream client's HTTP pool with a MockTransport-backed
     # AsyncClient. The upstream `connect()` only constructs a fresh pool
     # when `_http is None`, so seeding it here keeps `connect()` from
     # touching the network and routes every request through the handler.
     # The auth header is added per-request inside the upstream client's
     # `_request`, so no `auth=` kwarg is needed on the AsyncClient.
-    client._inner._http = httpx.AsyncClient(
+    client._http = httpx.AsyncClient(
         base_url=str(target.base_url).rstrip("/"),
         timeout=target.timeout_s,
         transport=httpx.MockTransport(handler),
