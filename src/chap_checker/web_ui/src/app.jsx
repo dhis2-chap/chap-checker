@@ -46,8 +46,8 @@ const THEMES = {
   // theme falls back to a transparent header strip through the Header
   // component's CSS fallback chain.
   dhis2: {
-    '--bg':'#e9ecf0','--bg-elev':'#f5f7f9',
-    '--green':'#2e6b32','--green-2':'#1f4a22','--green-dim':'#b8d5ba','--green-vdim':'#d6dadf',
+    '--bg':'#d8dce1','--bg-elev':'#e3e7eb',
+    '--green':'#2e6b32','--green-2':'#1f4a22','--green-dim':'#b8d5ba','--green-vdim':'#bfc4ca',
     '--ink-dim':'#4e5b66','--ink-vdim':'#8a929c',
     '--red':'#a8302f','--red-dim':'#e8c4c4',
     '--amber':'#b85b00','--amber-dim':'#e8d2a8',
