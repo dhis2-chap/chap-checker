@@ -10,6 +10,7 @@ def test_registry_has_builtin_checks() -> None:
         "dhis2_chap_ping",
         "dhis2_chap_system_info",
         "dhis2_chap_modeling_app",
+        "dhis2_chap_climate_app",
     } <= names
 
 
@@ -38,5 +39,6 @@ def test_builtin_checks_run_in_dependency_order() -> None:
         "dhis2_chap_ping",
         "dhis2_chap_system_info",
         "dhis2_chap_modeling_app",
+        "dhis2_chap_climate_app",
     ]
     assert names == expected

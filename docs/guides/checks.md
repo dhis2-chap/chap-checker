@@ -19,6 +19,7 @@ Two namespaces:
 | `dhis2_chap_ping`           | `/api/routes/chap/run/health`                     | `dhis2_chap_route`   |
 | `dhis2_chap_system_info`    | `/api/routes/chap/run/system/info` (parsed)       | `dhis2_chap_ping`    |
 | `dhis2_chap_modeling_app`   | `/api/apps` (matched by `app_hub_id`)             | `dhis2_ping`         |
+| `dhis2_chap_climate_app`    | `/api/apps` (matched by `app_hub_id`)             | `dhis2_ping`         |
 
 List them at runtime:
 
@@ -72,6 +73,14 @@ Lists `/api/apps` and matches by `app_hub_id`
 (`a29851f9-82a7-4ecd-8b2c-58e0f220bc75`). Accepts both `app_hub_id`
 (snake_case) and `appHubId` (camelCase) since DHIS2 versions disagree.
 Returns `OK` with the installed app's version.
+
+### `dhis2_chap_climate_app`
+
+Same shape as `dhis2_chap_modeling_app`, matched by App Hub UUID
+`effb986c-a3c7-485e-a2f6-5e54ff9df7c3`. Returns `OK` with the installed
+app's version. The climate app is only present on climate-data-themed
+deployments — opt this check out on instances where it isn't expected
+(set `checks = [...]` on the instance to exclude this name).
 
 ## Statuses
 

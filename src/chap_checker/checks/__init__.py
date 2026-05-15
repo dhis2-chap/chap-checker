@@ -5,6 +5,7 @@ via :func:`chap_checker.checks.base.register_check`.
 """
 
 from chap_checker.checks import (
+    dhis2_chap_climate_app,
     dhis2_chap_modeling_app,
     dhis2_chap_ping,
     dhis2_chap_route,
@@ -26,6 +27,7 @@ __all__ = [
     "CheckResult",
     "Status",
     "all_checks",
+    "dhis2_chap_climate_app",
     "dhis2_chap_modeling_app",
     "dhis2_chap_ping",
     "dhis2_chap_route",
