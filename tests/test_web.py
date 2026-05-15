@@ -9,6 +9,7 @@ manual + integration coverage.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import cast
 
 from fastapi.testclient import TestClient
@@ -174,11 +175,9 @@ password = "p"
 """
 
 
-def _server_with_config(tmp_path):  # type: ignore[no-untyped-def]
+def _server_with_config(tmp_path: Path) -> tuple[DashboardServer, Path]:
     """Build a DashboardServer pointed at ``tmp_path/chap-checker.toml``."""
-    from pathlib import Path  # local import keeps the helper close to the tests
-
-    cfg_path: Path = tmp_path / "chap-checker.toml"
+    cfg_path = tmp_path / "chap-checker.toml"
     cfg_path.write_text(_VALID_TOML)
     return DashboardServer(
         targets=[_target()],
@@ -190,9 +189,9 @@ def _server_with_config(tmp_path):  # type: ignore[no-untyped-def]
     ), cfg_path
 
 
-def test_reload_endpoint_swaps_targets(tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_reload_endpoint_swaps_targets(tmp_path: Path) -> None:
     """Editing the toml + POST /api/reload swaps the in-memory targets."""
-    server, cfg_path = _server_with_config(tmp_path)
+    server, _cfg_path = _server_with_config(tmp_path)
     # Server was built with the legacy _target() / _cfg(); first reload picks
     # up the on-disk toml and replaces the single "prod" with "alpha".
     app = make_app(server)
@@ -211,7 +210,7 @@ def test_reload_endpoint_swaps_targets(tmp_path) -> None:  # type: ignore[no-unt
         assert snap["tiles"][0]["name"] == "alpha"
 
 
-def test_reload_endpoint_adds_new_instance(tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_reload_endpoint_adds_new_instance(tmp_path: Path) -> None:
     """Adding an instance to the toml and reloading appends it without dropping the first."""
     server, cfg_path = _server_with_config(tmp_path)
     app = make_app(server)
@@ -227,7 +226,7 @@ def test_reload_endpoint_adds_new_instance(tmp_path) -> None:  # type: ignore[no
         assert sorted(t.name for t in server.targets) == ["alpha", "beta"]
 
 
-def test_reload_endpoint_returns_400_on_bad_toml(tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_reload_endpoint_returns_400_on_bad_toml(tmp_path: Path) -> None:
     """Malformed config returns 400 with the parse error and does not crash the server."""
     server, cfg_path = _server_with_config(tmp_path)
     cfg_path.write_text("this is = not [valid toml")
@@ -243,7 +242,7 @@ def test_reload_endpoint_returns_400_on_bad_toml(tmp_path) -> None:  # type: ign
         assert r2.status_code == 200
 
 
-def test_reload_endpoint_returns_404_when_config_missing(tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_reload_endpoint_returns_404_when_config_missing(tmp_path: Path) -> None:
     """Deleting the config file between reloads surfaces as a 404."""
     server, cfg_path = _server_with_config(tmp_path)
     cfg_path.unlink()
