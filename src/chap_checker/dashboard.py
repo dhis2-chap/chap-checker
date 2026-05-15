@@ -180,14 +180,21 @@ class DashboardHeader(Horizontal):
     }
     """
 
-    def __init__(self, n_instances: int, alerts_enabled: bool, interval_s: float) -> None:
+    def __init__(
+        self,
+        n_instances: int,
+        alerts_enabled: bool,
+        interval_s: float,
+        title: str,
+    ) -> None:
         super().__init__()
         self._n = n_instances
         self._alerts = alerts_enabled
         self._interval = interval_s
+        self._title = title
 
     def compose(self) -> ComposeResult:
-        yield Static("DHIS2 / Climate Instance Checker", classes="hdr-name")
+        yield Static(self._title, classes="hdr-name", id="hdr-name")
         yield Static("|", classes="hdr-pipe")
         yield Static(f"{self._n} instance(s)", classes="hdr-text")
         yield Static("|", classes="hdr-pipe")
@@ -639,6 +646,7 @@ class DashboardApp(App[None]):
             n_instances=len(self.targets),
             alerts_enabled=self.alerts_enabled,
             interval_s=self.interval_s,
+            title=self.cfg.ui.title,
         )
         cols = columns_for(len(self.targets))
         rows = math.ceil(len(self.targets) / cols) if self.targets else 1
@@ -693,8 +701,14 @@ class DashboardApp(App[None]):
         new_targets = [entry.to_target_entry(name) for name, entry in new_cfg.instances.items()]
         old_names = {t.name for t in self.targets}
         new_names = {t.name for t in new_targets}
+        old_title = self.cfg.ui.title
         self.targets = new_targets
         self.cfg = new_cfg
+        if new_cfg.ui.title != old_title:
+            try:
+                self.query_one("#hdr-name", Static).update(new_cfg.ui.title)
+            except Exception:  # noqa: BLE001 - header may not be mounted yet
+                pass
         if old_names != new_names:
             added = sorted(new_names - old_names)
             removed = sorted(old_names - new_names)

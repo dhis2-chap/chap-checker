@@ -107,6 +107,8 @@ class DashboardState(BaseModel):
     interval_s: float
     last_refresh: datetime | None = None
     tiles: list[TileModel] = []
+    ui_title: str
+    ui_theme: str
 
 
 @dataclass
@@ -220,6 +222,8 @@ class DashboardServer:
             interval_s=self.interval_s,
             last_refresh=self.last_refresh,
             tiles=[self._tile_model(e) for e in self.targets],
+            ui_title=self.cfg.ui.title,
+            ui_theme=self.cfg.ui.theme,
         )
 
     def _tile_model(self, entry: TargetEntry) -> TileModel:

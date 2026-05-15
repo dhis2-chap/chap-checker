@@ -129,6 +129,30 @@ def test_state_endpoint_returns_json() -> None:
         assert data["alerts_enabled"] is False
         assert data["interval_s"] == 30.0
         assert isinstance(data["tiles"], list)
+        # /api/state surfaces the [ui] config so the React client can render
+        # the configured title + bootstrap the theme on first load.
+        assert data["ui_title"] == "DHIS2 / Climate Instance Checker"
+        assert data["ui_theme"] == "phosphor"
+
+
+def test_state_endpoint_reflects_configured_ui() -> None:
+    """A custom [ui] block in the config shows up on /api/state."""
+    from chap_checker.config import UiConfig
+
+    cfg = _cfg()
+    cfg = cfg.model_copy(update={"ui": UiConfig(title="Operations", theme="amber")})
+    server = DashboardServer(
+        targets=[_target()],
+        cfg=cfg,
+        state_path=None,
+        interval_s=30.0,
+        alerts_enabled=False,
+    )
+    app = make_app(server)
+    with TestClient(app, raise_server_exceptions=False) as client:
+        data = client.get("/api/state").json()
+        assert data["ui_title"] == "Operations"
+        assert data["ui_theme"] == "amber"
 
 
 def test_index_serves_html() -> None:

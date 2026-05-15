@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from chap_checker.config import CheckerConfig, InstanceConfig, load_config
+from chap_checker.config import DEFAULT_UI_TITLE, CheckerConfig, InstanceConfig, UiConfig, load_config
 
 
 @pytest.fixture(autouse=True)
@@ -275,3 +275,79 @@ password_env = "X_PASS"
         load_config(path)
 
     assert not any("inline credentials" in r.message for r in caplog.records)
+
+
+# ---------- [ui] section ----------
+
+
+def test_ui_defaults_when_section_omitted(tmp_path: Path) -> None:
+    """Missing [ui] section yields the default title + phosphor theme."""
+    path = _write(
+        tmp_path,
+        """
+[instances.x]
+url = "https://x.test"
+username = "u"
+password = "p"
+""",
+    )
+    cfg = load_config(path)
+    assert cfg.ui.title == DEFAULT_UI_TITLE
+    assert cfg.ui.theme == "phosphor"
+
+
+def test_ui_title_and_theme_overridden(tmp_path: Path) -> None:
+    """Explicit [ui] keys override the defaults."""
+    path = _write(
+        tmp_path,
+        """
+[ui]
+title = "Operations"
+theme = "amber"
+
+[instances.x]
+url = "https://x.test"
+username = "u"
+password = "p"
+""",
+    )
+    cfg = load_config(path)
+    assert cfg.ui.title == "Operations"
+    assert cfg.ui.theme == "amber"
+
+
+def test_ui_unknown_theme_rejected(tmp_path: Path) -> None:
+    """A theme value outside the known set fails validation."""
+    path = _write(
+        tmp_path,
+        """
+[ui]
+theme = "magenta"
+
+[instances.x]
+url = "https://x.test"
+username = "u"
+password = "p"
+""",
+    )
+    with pytest.raises(ValueError, match="theme"):
+        load_config(path)
+
+
+def test_ui_empty_title_rejected() -> None:
+    """An empty title violates min_length=1."""
+    with pytest.raises(ValueError, match="at least 1"):
+        UiConfig(title="")
+
+
+def test_ui_unknown_field_rejected() -> None:
+    """The [ui] section is extra=forbid — surprise keys fail loud."""
+    with pytest.raises(ValueError, match="Extra inputs"):
+        UiConfig(**{"title": "x", "theme": "phosphor", "logo": "/x.png"})  # type: ignore[arg-type]
+
+
+def test_checker_config_ui_default_instance() -> None:
+    """CheckerConfig instantiates a default UiConfig when not provided."""
+    cfg = CheckerConfig(instances={})
+    assert isinstance(cfg.ui, UiConfig)
+    assert cfg.ui.title == DEFAULT_UI_TITLE
