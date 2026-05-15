@@ -316,6 +316,25 @@ password = "p"
     assert cfg.ui.theme == "amber"
 
 
+@pytest.mark.parametrize("theme", ["phosphor", "amber", "high", "tokyo", "dhis2"])
+def test_ui_theme_accepts_every_known_value(theme: str, tmp_path: Path) -> None:
+    """Every theme the web palette ships must validate from the config side."""
+    path = _write(
+        tmp_path,
+        f"""
+[ui]
+theme = "{theme}"
+
+[instances.x]
+url = "https://x.test"
+username = "u"
+password = "p"
+""",
+    )
+    cfg = load_config(path)
+    assert cfg.ui.theme == theme
+
+
 def test_ui_unknown_theme_rejected(tmp_path: Path) -> None:
     """A theme value outside the known set fails validation."""
     path = _write(

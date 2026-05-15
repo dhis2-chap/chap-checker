@@ -168,7 +168,7 @@ class AlertsConfig(BaseModel):
     slack: SlackAlertConfig | None = None
 
 
-UiTheme = Literal["phosphor", "amber", "high", "tokyo"]
+UiTheme = Literal["phosphor", "amber", "high", "tokyo", "dhis2"]
 DEFAULT_UI_TITLE = "DHIS2 / Climate Instance Checker"
 
 

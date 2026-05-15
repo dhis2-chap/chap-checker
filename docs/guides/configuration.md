@@ -114,7 +114,7 @@ CLI flag `--concurrency N` on `verify` overrides the config value for one run.
 ```toml
 [ui]
 title = "DHIS2 / Climate Instance Checker"  # default; 1-120 chars
-theme = "phosphor"                          # phosphor | amber | high | tokyo
+theme = "phosphor"                          # phosphor | amber | high | tokyo | dhis2
 ```
 
 `title` is the top-left header text shown in both the [Textual TUI](dashboard.md)
@@ -127,6 +127,17 @@ acts as the **starting default**, and a per-user palette pick (persisted in
 browser `localStorage`) wins over the config until cleared. The Textual TUI
 uses its own accent (Textual's built-in palette / theme is available via
 `Ctrl+P` system commands; config-driven TUI theming is not wired yet).
+
+Themes:
+
+- `phosphor` (default) — phosphor-green-on-near-black terminal look.
+- `amber` — amber-on-near-black terminal look.
+- `high` — high-contrast green-on-black for kiosks and impaired vision.
+- `tokyo` — deep navy with a cobalt accent (Tokyo Night).
+- `dhis2` — light-mode mimicking the DHIS2 admin chrome: white tile cards
+  on a pale grey body with a deep-blue header strip and white header
+  text. Status colours stay semantic (green/amber/red) but pick darker
+  shades for legibility on white.
 
 Both fields are optional; omit `[ui]` to take the defaults. `chap-checker
 reload` (Ctrl+R in the TUI, button in the web header) re-reads the section

@@ -37,6 +37,20 @@ const THEMES = {
     '--green':'#7aa2f7','--green-2':'#5d87ee','--green-dim':'#384a78','--green-vdim':'#1c2740',
     '--ink-dim':'#7a85a8','--ink-vdim':'#3a4567',
   },
+  // DHIS2-styled light mode: light grey body, white tile cards, dark
+  // header strip with the DHIS2 blue. Status colors keep their semantic
+  // meaning (green/amber/red) but pick darker shades so they read on
+  // white. `--header-bg` / `--header-ink` are dhis2-only — every other
+  // theme falls back to a transparent header strip through the Header
+  // component's CSS fallback chain.
+  dhis2: {
+    '--bg':'#f4f6f8','--bg-elev':'#ffffff',
+    '--green':'#2e7d32','--green-2':'#1b5e20','--green-dim':'#a5d6a7','--green-vdim':'#e0e3e7',
+    '--ink-dim':'#546e7a','--ink-vdim':'#90a4ae',
+    '--red':'#d32f2f','--red-dim':'#ffcdd2',
+    '--amber':'#ed6c02','--amber-dim':'#ffe0b2',
+    '--header-bg':'#1976d2','--header-ink':'#ffffff',
+  },
 };
 
 const DENSITY = {
@@ -105,9 +119,21 @@ function buildHistory(inst, downNow) {
   return arr;
 }
 
+// Theme keys that some themes set and others don't (e.g. dhis2's
+// dedicated header strip + light-mode red/amber overrides). They must
+// be reset on every theme swap so switching FROM dhis2 TO phosphor
+// doesn't leave the blue header bar in place. Keys present in every
+// theme dict (--bg, --green, ...) don't need this because setProperty
+// just overwrites them.
+const RESETTABLE_THEME_KEYS = [
+  '--header-bg', '--header-ink',
+  '--red', '--red-dim', '--amber', '--amber-dim',
+];
+
 function applyTheme(t) {
   const root = document.documentElement;
   // theme
+  RESETTABLE_THEME_KEYS.forEach(k => root.style.removeProperty(k));
   const theme = THEMES[t.theme] || THEMES.phosphor;
   Object.entries(theme).forEach(([k,v]) => root.style.setProperty(k, v));
   // density
@@ -130,30 +156,37 @@ function formatClock(d) {
 
 function Header({ instances, alertsOn, refreshSec, clock, reload, reloadState, title }) {
   const downCount = instances.filter(i => i.status === 'down').length;
+  // `--header-bg` / `--header-ink` are dhis2-theme-only; other themes
+  // fall through to a transparent strip with the body's accent text
+  // colour, matching the pre-existing dark-mode look.
+  const headerBg = 'var(--header-bg, transparent)';
+  const brandColor = 'var(--header-ink, var(--green))';
+  const metaColor = 'var(--header-ink, var(--ink-dim))';
   return (
     <header style={{
       display:'flex', justifyContent:'space-between', alignItems:'center',
       padding:'10px 18px', borderBottom:'1px solid var(--green-vdim)',
+      background: headerBg,
       fontSize:'var(--fs-head)', flexShrink:0,
     }}>
       <div style={{ display:'flex', alignItems:'center', gap:14 }}>
-        <span style={{ color:'var(--green)', fontWeight:700 }}>{title}</span>
+        <span style={{ color: brandColor, fontWeight:700 }}>{title}</span>
         <Sep />
-        <span style={{ color:'var(--ink-dim)' }}>
-          <span style={{ color: downCount > 0 ? 'var(--red)' : 'var(--green)' }}>{instances.length}</span>{' '}
+        <span style={{ color: metaColor, opacity: 0.85 }}>
+          <span style={{ color: downCount > 0 ? 'var(--red)' : brandColor }}>{instances.length}</span>{' '}
           instance(s){downCount > 0 && <span style={{ color:'var(--red)' }}> · {downCount} DOWN</span>}
         </span>
         <Sep />
-        <span style={{ color:'var(--ink-dim)' }}>
-          alerts <span style={{ color: alertsOn ? 'var(--green)' : 'var(--ink-dim)' }}>{alertsOn ? 'ON' : 'OFF'}</span>
+        <span style={{ color: metaColor, opacity: 0.85 }}>
+          alerts <span style={{ color: alertsOn ? brandColor : metaColor }}>{alertsOn ? 'ON' : 'OFF'}</span>
         </span>
         <Sep />
-        <span style={{ color:'var(--ink-dim)' }}>refresh every {refreshSec}s</span>
+        <span style={{ color: metaColor, opacity: 0.85 }}>refresh every {refreshSec}s</span>
       </div>
       <div style={{ display:'flex', alignItems:'center', gap:14 }}>
         <ReloadButton onClick={reload} state={reloadState} />
         <div style={{
-          color: 'var(--green)', fontVariantNumeric:'tabular-nums',
+          color: brandColor, fontVariantNumeric:'tabular-nums',
           fontSize: 'calc(var(--fs-head) * 1.1)',
         }}>
           {clock}
@@ -171,10 +204,14 @@ function ReloadButton({ onClick, state }) {
     state.status === 'error'   ? state.message :
                                  'reload config'
   );
+  // Idle/pending colours fall through to the header-ink so the button is
+  // legible on dhis2's dark blue header strip; dark themes still get the
+  // original --ink-dim grey via the CSS fallback.
+  const idleColor = 'var(--header-ink, var(--ink-dim))';
   const color = (
     state.status === 'error' ? 'var(--red)' :
-    state.status === 'ok'    ? 'var(--green)' :
-                               'var(--ink-dim)'
+    state.status === 'ok'    ? 'var(--header-ink, var(--green))' :
+                               idleColor
   );
   return (
     <button
@@ -183,7 +220,7 @@ function ReloadButton({ onClick, state }) {
       title="Re-read chap-checker.toml"
       style={{
         background:'transparent',
-        border:'1px solid var(--green-vdim)',
+        border:'1px solid var(--header-ink, var(--green-vdim))',
         color, padding:'2px 10px',
         fontFamily:'inherit', fontSize:'inherit',
         cursor: isPending ? 'default' : 'pointer',
@@ -361,6 +398,7 @@ function App() {
     { id:'theme-amber',    label:'Theme: amber', run:() => setTweak('theme','amber') },
     { id:'theme-high',     label:'Theme: high contrast', run:() => setTweak('theme','high') },
     { id:'theme-tokyo',    label:'Theme: tokyo night (blue)', run:() => setTweak('theme','tokyo') },
+    { id:'theme-dhis2',    label:'Theme: dhis2 (light)', run:() => setTweak('theme','dhis2') },
     // CK-WIRING: the artifact ships a demoDown toggle that swaps PLAY-41
     // into a FAIL state for design preview. With live data that's
     // misleading (real failures show real), so it's omitted from the
@@ -506,6 +544,7 @@ function App() {
                        {value:'amber',    label:'Amber'},
                        {value:'high',     label:'High contrast'},
                        {value:'tokyo',    label:'Tokyo night'},
+                       {value:'dhis2',    label:'DHIS2 (light)'},
                      ]}
                      onChange={v => setTweak('theme', v)} />
 
