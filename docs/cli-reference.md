@@ -20,11 +20,32 @@ $ chap-checker [OPTIONS] COMMAND [ARGS]...
 
 **Commands**:
 
+* `init`: Create a minimal chap-checker.toml in the...
 * `verify`: Run every registered check against one or...
 * `dashboard`: Launch the Textual TUI dashboard.
 * `web`: Launch the web dashboard.
 * `alerts`: Inspect or test configured alerters.
 * `checks`: Inspect available checks.
+
+## `chap-checker init`
+
+Create a minimal chap-checker.toml in the current directory.
+
+Drops a single working `` block pointed at the public
+DHIS2 demo instance (admin / district) so you can run
+`chap-checker verify` immediately and replace the values once it works.
+
+**Usage**:
+
+```console
+$ chap-checker init [OPTIONS]
+```
+
+**Options**:
+
+* `-o, --output PATH`: Where to write the new config (default: ./chap-checker.toml).  [default: chap-checker.toml]
+* `-f, --force`: Overwrite the file if it already exists.
+* `--help`: Show this message and exit.
 
 ## `chap-checker verify`
 
