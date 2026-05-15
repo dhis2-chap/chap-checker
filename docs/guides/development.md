@@ -47,7 +47,8 @@ src/chap_checker/
     ├── dhis2_chap_route.py
     ├── dhis2_chap_ping.py
     ├── dhis2_chap_system_info.py
-    └── dhis2_chap_modeling_app.py
+    ├── dhis2_chap_modeling_app.py
+    └── dhis2_chap_climate_app.py
 ```
 
 ## House rules
