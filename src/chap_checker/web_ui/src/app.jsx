@@ -46,14 +46,17 @@ const THEMES = {
   // theme falls back to a transparent header strip through the Header
   // component's CSS fallback chain.
   dhis2: {
-    '--bg':'#d8dce1','--bg-elev':'#e3e7eb',
+    // Body and "empty slot" share a single darker grey so the gaps
+    // between cards, the unused grid cells, and the padding around
+    // the grid all read as one continuous tray. The cards then sit
+    // visibly on top via the lighter --bg-elev.
+    '--bg':'#c5cad0','--bg-elev':'#e3e7eb',
     '--green':'#2e6b32','--green-2':'#1f4a22','--green-dim':'#b8d5ba','--green-vdim':'#bfc4ca',
     '--ink-dim':'#4e5b66','--ink-vdim':'#8a929c',
     '--red':'#a8302f','--red-dim':'#e8c4c4',
     '--amber':'#b85b00','--amber-dim':'#e8d2a8',
     '--header-bg':'#1f4d75','--header-ink':'#eef1f4',
     '--badge-ok-fg':'#ffffff','--badge-warn-fg':'#ffffff','--badge-down-fg':'#ffffff',
-    '--empty-bg':'#c5cad0',
   },
 };
 
@@ -133,7 +136,6 @@ const RESETTABLE_THEME_KEYS = [
   '--header-bg', '--header-ink',
   '--red', '--red-dim', '--amber', '--amber-dim',
   '--badge-ok-fg', '--badge-warn-fg', '--badge-down-fg',
-  '--empty-bg',
 ];
 
 function applyTheme(t) {
@@ -515,15 +517,9 @@ function App() {
             </div>
           );
         })}
-        {/* Empty grid cells (no instance) get a distinctly darker fill so
-            the operator can tell at a glance that the slot is unused
-            rather than just visually identical to a filled card. */}
-        {Array.from({ length: Math.max(0, gridGeom.cols * gridGeom.rows - instances.length) }, (_, i) => (
-          <div
-            key={`empty-${i}`}
-            style={{ background: 'var(--empty-bg, transparent)' }}
-          />
-        ))}
+        {/* Unfilled grid cells show the body bg directly (no placeholder
+            divs needed); on dhis2 that's the same darker grey as every
+            gap, so empty slots blend into the surrounding tray. */}
       </div>
 
       <Footer lastRefresh={lastRefresh} paletteOpen={paletteOpen} />
