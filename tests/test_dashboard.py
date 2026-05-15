@@ -12,9 +12,12 @@ from pydantic import HttpUrl
 from chap_checker.checks.base import CheckResult, Status
 from chap_checker.client import Dhis2Target
 from chap_checker.dashboard import (
+    _THEME_BUILDERS,
     InstanceTile,
+    _color_for,
     _extract_dhis2_version,
     _format_relative,
+    _textual_theme_name,
     _worst,
     columns_for,
 )
@@ -191,3 +194,58 @@ def test_tile_history_caps_at_max_len() -> None:
         )
     assert len(tile.history) == 30
     assert all(s is Status.OK for s in tile.history)
+
+
+# ---------- TUI theme mapping ----------
+
+
+def test_color_for_returns_textual_tokens() -> None:
+    """_color_for returns `$`-prefixed Textual markup tokens, not hex.
+
+    Static widgets render this inside Rich markup like `[bold {color}]…[/]`
+    and Textual resolves the token against the active theme; hex would
+    bypass the theme and lock the colour to one palette.
+    """
+    assert _color_for(Status.OK) == "$success"
+    assert _color_for(Status.WARN) == "$warning"
+    assert _color_for(Status.FAIL) == "$error"
+    assert _color_for(Status.ERROR) == "$error"
+    assert _color_for(Status.SKIPPED) == "$text-disabled"
+
+
+def test_every_ui_theme_has_a_builder() -> None:
+    """Every value in chap_checker.config.UiTheme must have a TUI theme builder.
+
+    Without this, a config like `[ui] theme = \"amber\"` would silently
+    fall back to phosphor in the TUI even though the web honours it.
+    """
+    from typing import get_args
+
+    from chap_checker.config import UiTheme
+
+    for value in get_args(UiTheme):
+        assert value in _THEME_BUILDERS, f"missing TUI theme builder for ui.theme={value!r}"
+
+
+def test_textual_theme_name_resolves_to_registered_theme() -> None:
+    """The Textual theme name returned for each ui.theme matches the registered theme."""
+    for ui_value, builder in _THEME_BUILDERS.items():
+        assert _textual_theme_name(ui_value) == builder().name
+
+
+def test_textual_theme_name_unknown_falls_back_to_phosphor() -> None:
+    """An unknown ui.theme value falls back to phosphor rather than raising."""
+    assert _textual_theme_name("nonsense") == _THEME_BUILDERS["phosphor"]().name
+
+
+def test_dhis2_theme_is_light_mode() -> None:
+    """The dhis2 theme must declare dark=False so Textual derives light-mode contrasts."""
+    assert _THEME_BUILDERS["dhis2"]().dark is False
+
+
+def test_all_other_themes_are_dark_mode() -> None:
+    """Every non-dhis2 theme stays dark — preserves the original TUI feel."""
+    for name, builder in _THEME_BUILDERS.items():
+        if name == "dhis2":
+            continue
+        assert builder().dark is True, f"{name} should be dark=True"

@@ -21,6 +21,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.command import DiscoveryHit, Hit, Hits, Provider
 from textual.containers import Container, Grid, Horizontal, Vertical
+from textual.theme import Theme
 from textual.widget import Widget
 from textual.widgets import Static
 
@@ -28,7 +29,124 @@ from chap_checker.checks.base import CheckResult, Status
 from chap_checker.config import CheckerConfig, load_config
 from chap_checker.runner import RunReport, TargetEntry, run_targets
 
-_ACCENT = "#7DD345"
+# Primary accent. Used inside Static-rendered Rich markup as `[bold $success]…[/]`;
+# Textual's markup parser resolves `$success` to the active theme's success
+# colour at render time, so swapping themes hot-swaps the colour.
+_ACCENT = "$success"
+
+# Theme tokens for the per-cell uptime strip. These names map onto the keys
+# of `app.theme_variables` so `_resolve_token(...)` can pull live colours
+# at render time (Rich's Style argument needs an actual colour, not a
+# `$-prefixed` token — only markup understands those).
+_STRIP_TOKEN_BY_STATUS: dict[Status, str] = {
+    Status.OK: "success",
+    Status.WARN: "warning",
+    Status.FAIL: "error",
+    Status.ERROR: "error",
+    Status.SKIPPED: "text-disabled",
+}
+_STRIP_TOKEN_EMPTY = "surface-lighten-2"
+
+
+# ---------- Theme definitions ----------
+#
+# Each [ui].theme value in chap-checker.toml maps to a Textual Theme that
+# the dashboard registers on mount and selects via App.theme. Tokens used
+# inside the dashboard's TCSS — `$background`, `$surface`, `$success`,
+# `$warning`, `$error`, `$text`, `$text-muted`, `$text-disabled` — pull
+# their values from the active theme, so changing the toml's [ui].theme
+# and reloading is enough to swap the look.
+
+
+def _phosphor_theme() -> Theme:
+    return Theme(
+        name="chap-phosphor",
+        primary="#7DD345",
+        success="#7DD345",
+        warning="#d4a017",
+        error="#d04040",
+        background="#0e0e0e",
+        surface="#161616",
+        panel="#161616",
+        foreground="#dddddd",
+        dark=True,
+    )
+
+
+def _amber_theme() -> Theme:
+    return Theme(
+        name="chap-amber",
+        primary="#ffb84d",
+        success="#7DD345",  # OK still reads as green even on an amber accent.
+        warning="#ffb84d",
+        error="#d04040",
+        background="#0a0705",
+        surface="#100b07",
+        panel="#100b07",
+        foreground="#e8d4a8",
+        dark=True,
+    )
+
+
+def _high_theme() -> Theme:
+    return Theme(
+        name="chap-high",
+        primary="#9eff9e",
+        success="#9eff9e",
+        warning="#ffd042",
+        error="#ff5a5a",
+        background="#000000",
+        surface="#0c0c0c",
+        panel="#0c0c0c",
+        foreground="#ffffff",
+        dark=True,
+    )
+
+
+def _tokyo_theme() -> Theme:
+    return Theme(
+        name="chap-tokyo",
+        primary="#7aa2f7",
+        success="#9ece6a",
+        warning="#e0af68",
+        error="#f7768e",
+        background="#11131a",
+        surface="#161922",
+        panel="#161922",
+        foreground="#c0caf5",
+        dark=True,
+    )
+
+
+def _dhis2_theme() -> Theme:
+    return Theme(
+        name="chap-dhis2",
+        primary="#1f4d75",  # DHIS2 blue (matches the web header strip).
+        success="#2e6b32",  # Darker green — readable on the light surface.
+        warning="#b85b00",
+        error="#a8302f",
+        background="#c5cad0",
+        surface="#e3e7eb",
+        panel="#e3e7eb",
+        foreground="#1e293b",
+        dark=False,
+    )
+
+
+_THEME_BUILDERS = {
+    "phosphor": _phosphor_theme,
+    "amber": _amber_theme,
+    "high": _high_theme,
+    "tokyo": _tokyo_theme,
+    "dhis2": _dhis2_theme,
+}
+
+
+def _textual_theme_name(ui_theme: str) -> str:
+    """Map a chap-checker [ui].theme value to the registered Textual theme name."""
+    builder = _THEME_BUILDERS.get(ui_theme, _phosphor_theme)
+    return builder().name
+
 
 _STATUS_RANK = [Status.ERROR, Status.FAIL, Status.WARN, Status.SKIPPED, Status.OK]
 
@@ -53,21 +171,10 @@ _SYMBOL_BY_STATUS = {
 # the same story about "the last N checks".
 _HISTORY_LEN = 30
 
-# Per-status colour used by the uptime strip. OK / WARN / FAIL share
-# colours with the existing pill palette so the strip stays consistent
-# with the rest of the tile.
-_STRIP_COLOR_BY_STATUS = {
-    Status.OK: "#7DD345",
-    Status.WARN: "#d4a017",
-    Status.FAIL: "#d04040",
-    Status.ERROR: "#c050c0",
-    Status.SKIPPED: "#444",
-}
-# Dim slot rendered before history has filled up - mirrors the web
-# dashboard's `{noData: true}` padding behaviour. Lifted slightly
-# above the tile background (#161616) so the placeholder cells stay
-# visible instead of melting into the surrounding panel.
-_STRIP_COLOR_EMPTY = "#3a3a3a"
+# `_STRIP_TOKEN_BY_STATUS` / `_STRIP_TOKEN_EMPTY` are defined near the top
+# of the module so the constants stay close to the other theme-token
+# names; both resolve to live colours via `_resolve_token` at render time
+# (Rich Style needs a real hex/colour string, not a `$-token`).
 
 
 class UptimeStrip(Widget):
@@ -92,22 +199,32 @@ class UptimeStrip(Widget):
         super().__init__()
         self._history = history
 
+    def _resolve(self, token: str) -> str:
+        """Pull a live colour from the active theme for the given token name."""
+        try:
+            return self.app.theme_variables.get(token, "#888888")
+        except Exception:  # noqa: BLE001 — fall back to a neutral grey if no app yet
+            return "#888888"
+
     def render(self) -> Text:
         # Padding eats one cell on each side (`padding: 0 1`).
         width = max(1, self.size.width - 2)
         slots = list(self._history)
         text = Text()
+        empty_color = self._resolve(_STRIP_TOKEN_EMPTY)
         if width <= len(slots):
             # Tile narrower than the buffer - show the most recent
             # `width` refreshes, one cell each.
             for status in slots[-width:]:
-                text.append("█", style=_STRIP_COLOR_BY_STATUS.get(status, _STRIP_COLOR_EMPTY))
+                tok = _STRIP_TOKEN_BY_STATUS.get(status, _STRIP_TOKEN_EMPTY)
+                text.append("█", style=self._resolve(tok))
             return text
         # Tile wider than (or equal to) the buffer - dim padding on
         # the left, real history on the right.
-        text.append("█" * (width - len(slots)), style=_STRIP_COLOR_EMPTY)
+        text.append("█" * (width - len(slots)), style=empty_color)
         for status in slots:
-            text.append("█", style=_STRIP_COLOR_BY_STATUS.get(status, _STRIP_COLOR_EMPTY))
+            tok = _STRIP_TOKEN_BY_STATUS.get(status, _STRIP_TOKEN_EMPTY)
+            text.append("█", style=self._resolve(tok))
         return text
 
 
@@ -160,21 +277,21 @@ class DashboardHeader(Horizontal):
         background: $background;
     }
     DashboardHeader .hdr-name {
-        color: #7DD345;
+        color: $success;
         text-style: bold;
         width: auto;
     }
     DashboardHeader .hdr-pipe {
-        color: #555;
+        color: $text-disabled;
         width: 3;
         content-align: center middle;
     }
     DashboardHeader .hdr-text {
-        color: #aaa;
+        color: $text-muted;
         width: auto;
     }
     DashboardHeader .hdr-clock {
-        color: #aaa;
+        color: $text-muted;
         width: 1fr;
         content-align: right middle;
     }
@@ -222,7 +339,7 @@ class DashboardFooter(Horizontal):
     }
     DashboardFooter Static {
         width: auto;
-        color: #aaa;
+        color: $text-muted;
     }
     """
 
@@ -239,7 +356,7 @@ class CheckRow(Horizontal):
     }
     CheckRow .check-name {
         width: 1fr;
-        color: #bbb;
+        color: $text-muted;
     }
     CheckRow .check-status {
         width: auto;
@@ -264,13 +381,14 @@ class CheckRow(Horizontal):
 
 
 def _color_for(status: Status) -> str:
+    """Return a Textual markup token for the given status (used inside ``[..]`` markup)."""
     return {
-        Status.OK: _ACCENT,
-        Status.WARN: "yellow",
-        Status.FAIL: "#d04040",
-        Status.ERROR: "#c050c0",
-        Status.SKIPPED: "#666",
-    }.get(status, "white")
+        Status.OK: "$success",
+        Status.WARN: "$warning",
+        Status.FAIL: "$error",
+        Status.ERROR: "$error",
+        Status.SKIPPED: "$text-disabled",
+    }.get(status, "$text")
 
 
 class InstanceTile(Container):
@@ -278,45 +396,45 @@ class InstanceTile(Container):
 
     DEFAULT_CSS = """
     InstanceTile {
-        background: #161616;
-        border-left: thick #555;
+        background: $surface;
+        border-left: thick $text-disabled;
         padding: 1 2;
         height: 100%;
         layout: vertical;
     }
     InstanceTile.tile-status-ok {
-        border-left: thick #7DD345;
+        border-left: thick $success;
     }
     InstanceTile.tile-status-warn {
-        border-left: thick #d4a017;
-        background: #1a1810;
+        border-left: thick $warning;
+        background: $warning-muted;
     }
     InstanceTile.tile-status-fail {
-        border-left: thick #d04040;
-        background: #1d1212;
+        border-left: thick $error;
+        background: $error-muted;
     }
     InstanceTile.tile-status-error {
-        border-left: thick #c050c0;
-        background: #1d1218;
+        border-left: thick $error;
+        background: $error-muted;
     }
     InstanceTile.tile-status-skipped {
-        border-left: thick #555;
+        border-left: thick $text-disabled;
     }
     InstanceTile .row {
         height: 1;
     }
     InstanceTile .tile-name {
-        color: #7DD345;
+        color: $success;
         text-style: bold;
         width: 1fr;
     }
     InstanceTile .tile-version {
-        color: #aaa;
+        color: $text-muted;
         width: auto;
         content-align: right middle;
     }
     InstanceTile .tile-url {
-        color: #888;
+        color: $text-muted;
         height: 1;
         margin-bottom: 1;
     }
@@ -326,41 +444,41 @@ class InstanceTile(Container):
         margin-right: 2;
     }
     InstanceTile .pill-ok {
-        background: #2da44e;
-        color: black;
+        background: $success;
+        color: auto;
         text-style: bold;
     }
     InstanceTile .pill-warn {
-        background: #d4a017;
-        color: black;
+        background: $warning;
+        color: auto;
         text-style: bold;
     }
     InstanceTile .pill-fail {
-        background: #d04040;
-        color: white;
+        background: $error;
+        color: auto;
         text-style: bold;
     }
     InstanceTile .pill-error {
-        background: #c050c0;
-        color: white;
+        background: $error;
+        color: auto;
         text-style: bold;
     }
     InstanceTile .pill-skipped {
-        background: #555;
-        color: #ccc;
+        background: $text-disabled;
+        color: auto;
     }
     InstanceTile .summary {
         width: auto;
-        color: #ddd;
+        color: $text;
         text-style: bold;
         margin-right: 3;
     }
     InstanceTile .ping {
         width: 1fr;
-        color: #888;
+        color: $text-muted;
     }
     InstanceTile .checks-header {
-        color: #555;
+        color: $text-disabled;
         text-style: bold;
         height: 1;
         padding-top: 1;
@@ -376,7 +494,7 @@ class InstanceTile(Container):
     }
     InstanceTile .uptime-header {
         height: 1;
-        color: #555;
+        color: $text-disabled;
         padding: 0 1;
     }
     InstanceTile UptimeStrip {
@@ -392,12 +510,12 @@ class InstanceTile(Container):
         height: 3;
     }
     InstanceTile .stat-label {
-        color: #555;
+        color: $text-disabled;
         content-align: center top;
         height: 1;
     }
     InstanceTile .stat-value {
-        color: #ddd;
+        color: $text;
         text-style: bold;
         content-align: center top;
         height: 1;
@@ -535,7 +653,7 @@ class InstanceTile(Container):
         if self.history:
             clean = sum(1 for s in self.history if s is Status.OK)
             pct = int(round(100 * clean / len(self.history)))
-            return f"{label}  [#888]{pct}%[/]"
+            return f"{label}  [$text-muted]{pct}%[/]"
         return label
 
     def _tick_updated(self) -> None:
@@ -605,7 +723,7 @@ class DashboardApp(App[None]):
 
     CSS = """
     Screen {
-        background: #0e0e0e;
+        background: $background;
     }
     #grid {
         grid-gutter: 1 1;
@@ -661,6 +779,9 @@ class DashboardApp(App[None]):
         yield DashboardFooter()
 
     def on_mount(self) -> None:
+        for builder in _THEME_BUILDERS.values():
+            self.register_theme(builder())
+        self.theme = _textual_theme_name(self.cfg.ui.theme)
         self.set_interval(self.interval_s, self.action_refresh)
         self.call_after_refresh(self.action_refresh)
 
@@ -702,6 +823,7 @@ class DashboardApp(App[None]):
         old_names = {t.name for t in self.targets}
         new_names = {t.name for t in new_targets}
         old_title = self.cfg.ui.title
+        old_theme = self.cfg.ui.theme
         self.targets = new_targets
         self.cfg = new_cfg
         if new_cfg.ui.title != old_title:
@@ -709,6 +831,11 @@ class DashboardApp(App[None]):
                 self.query_one("#hdr-name", Static).update(new_cfg.ui.title)
             except Exception:  # noqa: BLE001 - header may not be mounted yet
                 pass
+        if new_cfg.ui.theme != old_theme:
+            try:
+                self.theme = _textual_theme_name(new_cfg.ui.theme)
+            except Exception as exc:  # noqa: BLE001 - bad theme name shouldn't crash the loop
+                self.notify(f"Theme swap failed: {exc}", severity="warning")
         if old_names != new_names:
             added = sorted(new_names - old_names)
             removed = sorted(old_names - new_names)
