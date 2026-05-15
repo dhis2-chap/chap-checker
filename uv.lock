@@ -110,6 +110,7 @@ name = "chap-checker"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "dhis2w-client" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "pydantic" },
@@ -133,6 +134,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "dhis2w-client", specifier = ">=0.14.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "pydantic", specifier = ">=2.9.0" },
@@ -302,6 +304,20 @@ wheels = [
 ]
 
 [[package]]
+name = "dhis2w-client"
+version = "0.14.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "geojson-pydantic" },
+    { name = "httpx" },
+    { name = "pydantic" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/02/09/1661766fc0295eeebfc190f9c323917721dc7f1d5eae7ee5bb24983f4348/dhis2w_client-0.14.0.tar.gz", hash = "sha256:3db9afb7ede3925d39db68f6c84e1310540412422503ecd2926053edf2f4f16f", size = 2102627, upload-time = "2026-05-14T18:17:28.957Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/91/c1/13524b89a69cea77e6fc7fedc9f985770b5f7e9dabece4cb8c987c949cfb/dhis2w_client-0.14.0-py3-none-any.whl", hash = "sha256:52a434a31fcba1a0357037e1d17a71cbc1ec292eff4a9f45fd3bb62fed1a04b4", size = 3425007, upload-time = "2026-05-14T18:17:21.612Z" },
+]
+
+[[package]]
 name = "fastapi"
 version = "0.136.1"
 source = { registry = "https://pypi.org/simple" }
@@ -315,6 +331,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/5d/45/c130091c2dfa061bbfe3150f2a5091ef1adf149f2a8d2ae769ecaf6e99a2/fastapi-0.136.1.tar.gz", hash = "sha256:7af665ad7acfa0a3baf8983d393b6b471b9da10ede59c60045f49fbc89a0fa7f", size = 397448, upload-time = "2026-04-23T16:49:44.046Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/5a/ff/2e4eca3ade2c22fe1dea7043b8ee9dabe47753349eb1b56a202de8af6349/fastapi-0.136.1-py3-none-any.whl", hash = "sha256:a6e9d7eeada96c93a4d69cb03836b44fa34e2854accb7244a1ece36cd4781c3f", size = 117683, upload-time = "2026-04-23T16:49:42.437Z" },
+]
+
+[[package]]
+name = "geojson-pydantic"
+version = "2.1.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pydantic" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d9/76/77c6f2e608028a2885e4d9d9a28cb6801879972d4bb3106c1dca02201df6/geojson_pydantic-2.1.1.tar.gz", hash = "sha256:3b64fa2dcd98108ff8a19bfb01eee3dab41bc230be2481804aefd7c1659d1c23", size = 8156, upload-time = "2026-04-07T09:48:07.252Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/95/97/d59d999f00aec90fc7a4efb742fc11e6c160552aa1b313438d3497998644/geojson_pydantic-2.1.1-py3-none-any.whl", hash = "sha256:55354f22ededc3c070e3210fec6f518d784b65c4368c1763f2c6dc4bab79b898", size = 9456, upload-time = "2026-04-07T09:48:05.772Z" },
 ]
 
 [[package]]

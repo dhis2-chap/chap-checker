@@ -1,4 +1,18 @@
-"""Thin HTTP client for a DHIS2 server, used by checks."""
+"""Thin HTTP client for a DHIS2 server, used by checks.
+
+Wraps :class:`dhis2w_client.Dhis2Client` (the upstream async DHIS2 client)
+with ``skip_version_probe=True`` so no implicit ``/api/system/info``
+round-trip happens before the first check runs, and uses
+:meth:`dhis2w_client.Dhis2Client.get_response` so callers receive the raw
+:class:`httpx.Response` instead of having 4xx / 5xx surface as exceptions.
+That matches what a health checker needs: 401 on ``/api/me``, 502 from
+``/api/routes/<code>/run/...``, and non-JSON content-types are all
+*facts to report*, not errors to throw on.
+
+The wrapper preserves the same public surface (:class:`Dhis2Target`,
+:meth:`Dhis2Client.get`) the existing checks call, so the swap is
+transparent above this module.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +20,8 @@ from types import TracebackType
 from typing import Any, Self
 
 import httpx
+from dhis2w_client import AuthProvider, BasicAuth, PatAuth
+from dhis2w_client import Dhis2Client as _UpstreamClient
 from pydantic import BaseModel, Field, HttpUrl, model_validator
 
 from chap_checker.logging import get_logger
@@ -56,33 +72,34 @@ class Dhis2Target(BaseModel):
         path = path.lstrip("/")
         return f"{base}/api/{path}"
 
+    def auth_provider(self) -> AuthProvider:
+        """Build the dhis2w-client ``AuthProvider`` matching this target's mode."""
+        if self.token is not None:
+            return PatAuth(token=self.token)
+        assert self.username is not None and self.password is not None  # validator
+        return BasicAuth(username=self.username, password=self.password)
+
 
 class Dhis2Client:
-    """Async DHIS2 HTTP client.
+    """Async DHIS2 HTTP client used by checks.
 
-    Wraps :class:`httpx.AsyncClient` with basic auth, base-URL handling and
-    debug logging. Use as an async context manager.
+    Wraps :class:`dhis2w_client.Dhis2Client` configured for health-check
+    semantics: ``skip_version_probe=True`` so opening the connection
+    doesn't itself perform DHIS2 API calls (those are checks' jobs),
+    and every request goes through ``get_response`` so 4xx / 5xx come
+    back as :class:`httpx.Response` for the caller to inspect.
+    Use as an async context manager.
     """
 
     def __init__(self, target: Dhis2Target) -> None:
         self._target = target
-        kwargs: dict[str, Any] = {
-            "timeout": target.timeout_s,
-            "verify": target.verify_tls,
-            "follow_redirects": True,
-        }
-        if target.token is not None:
-            # DHIS2 Personal Access Tokens use the custom `ApiToken`
-            # scheme, NOT standard Bearer - the server only recognises
-            # this exact header value for PATs.
-            kwargs["headers"] = {"Authorization": f"ApiToken {target.token}"}
-        else:
-            # Validator guarantees username+password are both set when
-            # token is None.
-            assert target.username is not None
-            assert target.password is not None
-            kwargs["auth"] = (target.username, target.password)
-        self._client = httpx.AsyncClient(**kwargs)
+        self._inner = _UpstreamClient(
+            str(target.base_url).rstrip("/"),
+            auth=target.auth_provider(),
+            timeout=target.timeout_s,
+            verify=target.verify_tls,
+            skip_version_probe=True,
+        )
 
     @property
     def target(self) -> Dhis2Target:
@@ -90,6 +107,7 @@ class Dhis2Client:
         return self._target
 
     async def __aenter__(self) -> Self:
+        await self._inner.connect()
         return self
 
     async def __aexit__(
@@ -98,15 +116,25 @@ class Dhis2Client:
         exc: BaseException | None,
         tb: TracebackType | None,
     ) -> None:
-        await self._client.aclose()
+        await self._inner.close()
 
-    async def get(self, path: str, **kwargs: Any) -> httpx.Response:
+    async def get(
+        self,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> httpx.Response:
         """GET a DHIS2 API path.
 
         Args:
-            path: Path under ``/api`` (e.g. ``"system/info"``).
-            **kwargs: Forwarded to :meth:`httpx.AsyncClient.get`.
+            path: Path under ``/api`` (e.g. ``"system/info"``). A leading
+                slash is tolerated.
+            params: Query-string parameters forwarded to httpx.
+            headers: Extra headers merged into the request after the auth
+                header. Auth always wins on conflict — pass alternate
+                ``Accept`` / ``X-*`` values here without disturbing auth.
         """
-        url = self._target.api_url(path)
-        _log.debug("GET %s", url)
-        return await self._client.get(url, **kwargs)
+        api_path = "/api/" + path.lstrip("/")
+        _log.debug("GET %s%s", str(self._target.base_url).rstrip("/"), api_path)
+        return await self._inner.get_response(api_path, params=params, extra_headers=headers)
