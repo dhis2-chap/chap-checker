@@ -1,8 +1,11 @@
+from pathlib import Path
+
 from typer.main import get_command
 from typer.testing import CliRunner
 
 from chap_checker import __version__
 from chap_checker.cli import app
+from chap_checker.config import load_config
 
 runner = CliRunner()
 
@@ -65,3 +68,29 @@ def test_verify_declares_credential_and_config_flags() -> None:
         "--instance",
         "-i",
     } <= flags
+
+
+def test_init_writes_loadable_config(tmp_path: Path) -> None:
+    target = tmp_path / "chap-checker.toml"
+    result = runner.invoke(app, ["init", "--output", str(target)])
+    assert result.exit_code == 0, result.stdout
+    assert target.exists()
+    cfg = load_config(target)
+    assert "play" in cfg.instances
+
+
+def test_init_refuses_to_overwrite_existing(tmp_path: Path) -> None:
+    target = tmp_path / "chap-checker.toml"
+    target.write_text("# pre-existing\n", encoding="utf-8")
+    result = runner.invoke(app, ["init", "--output", str(target)])
+    assert result.exit_code != 0
+    assert target.read_text(encoding="utf-8") == "# pre-existing\n"
+
+
+def test_init_force_overwrites(tmp_path: Path) -> None:
+    target = tmp_path / "chap-checker.toml"
+    target.write_text("# pre-existing\n", encoding="utf-8")
+    result = runner.invoke(app, ["init", "--output", str(target), "--force"])
+    assert result.exit_code == 0, result.stdout
+    cfg = load_config(target)
+    assert "play" in cfg.instances

@@ -102,6 +102,49 @@ def root(
         typer.echo(ctx.get_help())
 
 
+DEFAULT_INIT_TEMPLATE = """\
+# chap-checker config. Run `chap-checker verify` to check every instance below.
+# `chap-checker --help` for all commands; `chap-checker checks list` for every available check.
+
+[instances.play]
+url = "https://play.im.dhis2.org/dev"
+username = "admin"
+password = "district"
+"""
+
+
+@app.command("init")
+def init_command(
+    ctx: typer.Context,
+    output: Path = typer.Option(
+        Path(DEFAULT_CONFIG_FILENAME),
+        "--output",
+        "-o",
+        help=f"Where to write the new config (default: ./{DEFAULT_CONFIG_FILENAME}).",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        "-f",
+        help="Overwrite the file if it already exists.",
+    ),
+) -> None:
+    """Create a minimal chap-checker.toml in the current directory.
+
+    Drops a single working `[instances.play]` block pointed at the public
+    DHIS2 demo instance (admin / district) so you can run
+    `chap-checker verify` immediately and replace the values once it works.
+    """
+    state_obj = _state(ctx)
+    if output.exists() and not force:
+        raise typer.BadParameter(
+            f"{output} already exists. Pass --force to overwrite.",
+        )
+    output.write_text(DEFAULT_INIT_TEMPLATE, encoding="utf-8")
+    if not state_obj.quiet:
+        typer.echo(f"Wrote {output}")
+
+
 @app.command("verify")
 def verify_command(
     ctx: typer.Context,
