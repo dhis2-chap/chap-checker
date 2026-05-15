@@ -151,7 +151,7 @@ def _format_relative(now: datetime, then: datetime) -> str:
 
 
 class DashboardHeader(Horizontal):
-    """Custom top bar: 'chap-checker | N instance(s) | alerts ... | refresh every Ns ... HH:MM:SS'."""
+    """Custom top bar: brand | N instance(s) | alerts ... | refresh every Ns ... HH:MM:SS."""
 
     DEFAULT_CSS = """
     DashboardHeader {
@@ -187,7 +187,7 @@ class DashboardHeader(Horizontal):
         self._interval = interval_s
 
     def compose(self) -> ComposeResult:
-        yield Static("chap-checker", classes="hdr-name")
+        yield Static("DHIS2 / Climate Instance Checker", classes="hdr-name")
         yield Static("|", classes="hdr-pipe")
         yield Static(f"{self._n} instance(s)", classes="hdr-text")
         yield Static("|", classes="hdr-pipe")
