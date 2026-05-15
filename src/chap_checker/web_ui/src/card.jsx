@@ -2,10 +2,15 @@
 const { useState, useEffect, useMemo } = React;
 
 function StatusBadge({ status, size = 'sm' }) {
+  // Badge text defaults to a near-black that reads on the bright
+  // status fills the dark themes use. The light-mode (dhis2) theme
+  // sets `--badge-{ok,warn,down}-fg` to white because its status
+  // backgrounds are dark green / dark amber / dark red, where
+  // near-black text disappears into the fill.
   const map = {
-    ok:   { label:'OK',   bg:'var(--green)', fg:'#001a00' },
-    warn: { label:'WARN', bg:'var(--amber)', fg:'#1a1000' },
-    down: { label:'DOWN', bg:'var(--red)',   fg:'#1a0000' },
+    ok:   { label:'OK',   bg:'var(--green)', fg:'var(--badge-ok-fg, #001a00)' },
+    warn: { label:'WARN', bg:'var(--amber)', fg:'var(--badge-warn-fg, #1a1000)' },
+    down: { label:'DOWN', bg:'var(--red)',   fg:'var(--badge-down-fg, #1a0000)' },
   };
   const s = map[status] || map.ok;
   const px = size === 'lg' ? '6px 14px' : size === 'md' ? '3px 9px' : '1px 7px';

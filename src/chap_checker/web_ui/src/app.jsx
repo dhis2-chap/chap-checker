@@ -52,6 +52,8 @@ const THEMES = {
     '--red':'#a8302f','--red-dim':'#e8c4c4',
     '--amber':'#b85b00','--amber-dim':'#e8d2a8',
     '--header-bg':'#1f4d75','--header-ink':'#eef1f4',
+    '--badge-ok-fg':'#ffffff','--badge-warn-fg':'#ffffff','--badge-down-fg':'#ffffff',
+    '--empty-bg':'#c5cad0',
   },
 };
 
@@ -130,6 +132,8 @@ function buildHistory(inst, downNow) {
 const RESETTABLE_THEME_KEYS = [
   '--header-bg', '--header-ink',
   '--red', '--red-dim', '--amber', '--amber-dim',
+  '--badge-ok-fg', '--badge-warn-fg', '--badge-down-fg',
+  '--empty-bg',
 ];
 
 function applyTheme(t) {
@@ -442,7 +446,8 @@ function App() {
   }, [paletteOpen, t.demoDown]);
 
   // layout grid: auto, 2x2, 3x2, 4x1
-  const gridStyle = React.useMemo(() => {
+  const isCardLayout = t.theme === 'dhis2';
+  const gridGeom = React.useMemo(() => {
     const n = instances.length;
     let cols = 2, rows = 2;
     if (t.layout === '2x2') { cols=2; rows=2; }
@@ -453,13 +458,18 @@ function App() {
       else cols = Math.min(n, n <= 4 ? 2 : 3);
       rows = Math.ceil(n/cols);
     }
-    return {
-      flex: 1, display:'grid', minHeight:0,
-      gridTemplateColumns: `repeat(${cols}, 1fr)`,
-      gridTemplateRows: `repeat(${rows}, 1fr)`,
-      gap: 0,
-    };
+    return { cols, rows };
   }, [t.layout, t.density, instances.length]);
+  const gridStyle = React.useMemo(() => ({
+    flex: 1, display:'grid', minHeight:0,
+    gridTemplateColumns: `repeat(${gridGeom.cols}, 1fr)`,
+    gridTemplateRows: `repeat(${gridGeom.rows}, 1fr)`,
+    // dhis2 (light) reads as a card-based dashboard; switch hairline
+    // dividers off and use a 4px gap so panels feel like seated tiles.
+    // Dark themes keep the original terminal-grid hairlines.
+    gap: isCardLayout ? 4 : 0,
+    padding: isCardLayout ? 4 : 0,
+  }), [gridGeom, isCardLayout]);
 
   return (
     <>
@@ -476,15 +486,23 @@ function App() {
       {/* grid */}
       <div style={gridStyle}>
         {instances.map((inst, i) => {
-          // hairline dividers between cells (terminal feel)
-          const cols = parseInt(gridStyle.gridTemplateColumns.match(/repeat\((\d+)/)[1], 10);
+          // hairline dividers between cells (terminal feel) — suppressed
+          // on card-layout themes where the gap itself separates panels.
+          const { cols } = gridGeom;
           const col = i % cols;
           const row = Math.floor(i / cols);
           const totalRows = Math.ceil(instances.length / cols);
-          const borderRight = col < cols - 1 ? '1px solid var(--green-vdim)' : 'none';
-          const borderBottom = row < totalRows - 1 ? '1px solid var(--green-vdim)' : 'none';
+          const borderRight = isCardLayout || col === cols - 1 ? 'none' : '1px solid var(--green-vdim)';
+          const borderBottom = isCardLayout || row === totalRows - 1 ? 'none' : '1px solid var(--green-vdim)';
           return (
-            <div key={inst.id} style={{ borderRight, borderBottom, minHeight:0, minWidth:0, overflow:'hidden', display:'flex' }}>
+            <div
+              key={inst.id}
+              style={{
+                borderRight, borderBottom,
+                background: isCardLayout ? 'var(--bg-elev)' : 'transparent',
+                minHeight:0, minWidth:0, overflow:'hidden', display:'flex',
+              }}
+            >
               <Card
                 inst={inst}
                 statusMode={t.statusMode}
@@ -497,6 +515,15 @@ function App() {
             </div>
           );
         })}
+        {/* Empty grid cells (no instance) get a distinctly darker fill so
+            the operator can tell at a glance that the slot is unused
+            rather than just visually identical to a filled card. */}
+        {Array.from({ length: Math.max(0, gridGeom.cols * gridGeom.rows - instances.length) }, (_, i) => (
+          <div
+            key={`empty-${i}`}
+            style={{ background: 'var(--empty-bg, transparent)' }}
+          />
+        ))}
       </div>
 
       <Footer lastRefresh={lastRefresh} paletteOpen={paletteOpen} />
