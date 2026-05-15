@@ -5,9 +5,8 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any, ClassVar, Protocol, TypeVar, cast, runtime_checkable
 
+from dhis2w_client import Dhis2Client
 from pydantic import BaseModel, Field
-
-from chap_checker.client import Dhis2Client
 
 
 class Status(StrEnum):

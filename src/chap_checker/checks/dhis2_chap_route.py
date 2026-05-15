@@ -5,13 +5,13 @@ from __future__ import annotations
 import time
 from typing import ClassVar
 
+from dhis2w_client import Dhis2Client
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from chap_checker.checks.base import CheckResult, Status, register_check
-from chap_checker.client import Dhis2Client
 
 CHAP_ROUTE_CODE = "chap"
-ROUTE_LIST_PATH = "routes"
+ROUTE_LIST_PATH = "/api/routes"
 
 
 class Dhis2Route(BaseModel):
@@ -46,7 +46,7 @@ class Dhis2ChapRouteCheck:
     async def run(self, client: Dhis2Client) -> CheckResult:
         start = time.perf_counter()
         try:
-            response = await client.get(
+            response = await client.get_response(
                 ROUTE_LIST_PATH,
                 params={
                     "fields": "id,code,name,url,disabled",
@@ -92,7 +92,7 @@ class Dhis2ChapRouteCheck:
             return CheckResult(
                 name=self.name,
                 status=Status.FAIL,
-                message=f"Unexpected shape from /api/{ROUTE_LIST_PATH}: {exc.error_count()} validation error(s).",
+                message=f"Unexpected shape from {ROUTE_LIST_PATH}: {exc.error_count()} validation error(s).",
                 duration_ms=duration_ms,
             )
         match = next((r for r in listing.routes if r.code == CHAP_ROUTE_CODE), None)

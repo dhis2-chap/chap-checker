@@ -5,10 +5,11 @@ from __future__ import annotations
 import time
 from typing import ClassVar
 
-from chap_checker.checks.base import CheckResult, Status, register_check
-from chap_checker.client import Dhis2Client
+from dhis2w_client import Dhis2Client
 
-PING_PATH = "routes/chap/run/health"
+from chap_checker.checks.base import CheckResult, Status, register_check
+
+PING_PATH = "/api/routes/chap/run/health"
 
 
 @register_check
@@ -23,7 +24,7 @@ class Dhis2ChapPingCheck:
     async def run(self, client: Dhis2Client) -> CheckResult:
         start = time.perf_counter()
         try:
-            response = await client.get(PING_PATH)
+            response = await client.get_response(PING_PATH)
         except Exception as exc:  # noqa: BLE001
             return CheckResult(
                 name=self.name,
@@ -44,7 +45,7 @@ class Dhis2ChapPingCheck:
             return CheckResult(
                 name=self.name,
                 status=Status.FAIL,
-                message=f"Unexpected status {response.status_code} from /api/{PING_PATH}.",
+                message=f"Unexpected status {response.status_code} from {PING_PATH}.",
                 duration_ms=duration_ms,
             )
 

@@ -13,11 +13,12 @@ from collections.abc import Callable
 from typing import cast
 
 import httpx
+from dhis2w_client import Dhis2Client
 from pydantic import HttpUrl
 
 from chap_checker.checks.base import Status
 from chap_checker.checks.dhis2_chap_route import Dhis2ChapRouteCheck
-from chap_checker.client import Dhis2Client, Dhis2Target
+from chap_checker.client import Dhis2Target
 
 
 def _client(handler: Callable[[httpx.Request], httpx.Response]) -> Dhis2Client:
@@ -26,8 +27,8 @@ def _client(handler: Callable[[httpx.Request], httpx.Response]) -> Dhis2Client:
         username="u",
         password="p",
     )
-    client = Dhis2Client(target)
-    client._inner._http = httpx.AsyncClient(
+    client = target.open()
+    client._http = httpx.AsyncClient(
         base_url=str(target.base_url).rstrip("/"),
         timeout=target.timeout_s,
         transport=httpx.MockTransport(handler),
