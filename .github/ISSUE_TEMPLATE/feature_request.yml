@@ -1,0 +1,55 @@
+name: Feature request
+description: Suggest a new check, alerter, surface, or behaviour.
+title: "[feat]: "
+labels: ["enhancement", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. We're a small project — the more specific the use case, the easier it is to triage.
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind of feature
+      options:
+        - New built-in check
+        - New alert transport
+        - New CLI command / flag
+        - Dashboard (TUI or browser) change
+        - API / state / config schema change
+        - Performance / operability
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do? What's blocking you today? Concrete scenarios beat abstract wishes — "I run chap-checker against five tenants and want X" lands better than "would be nice if it had X".
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Sketch the shape if you have one — CLI invocation, TOML snippet, JSON payload. Pseudo-code is fine.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What workarounds have you tried? What did you reject and why?
+
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Would you contribute this?
+      description: Pick any that apply.
+      options:
+        - label: I'd be willing to send the PR myself.
+        - label: I can help test on a real DHIS2 instance.
+        - label: I'd rather a maintainer pick this up.

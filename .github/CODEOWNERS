@@ -1,0 +1,8 @@
+# GitHub uses this file to auto-request review on PRs based on path patterns.
+# See https://docs.github.com/en/repositories/managing-your-repositories-settings-and-customization/customizing-your-repository/about-code-owners
+#
+# A single org-level team owns the whole repo today. Add path-specific lines
+# (e.g. `/src/chap_checker/web_ui/ @some-frontend-team`) if specific areas
+# grow distinct owners.
+
+* @dhis2-chap/maintainers

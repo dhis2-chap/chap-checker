@@ -1,0 +1,94 @@
+name: Bug report
+description: Something doesn't behave the way the docs say it should.
+title: "[bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. A few details up front save us a round-trip.
+
+  - type: input
+    id: version
+    attributes:
+      label: chap-checker version
+      description: Output of `chap-checker --version`.
+      placeholder: chap-checker 0.6.0
+    validations:
+      required: true
+
+  - type: input
+    id: dhis2
+    attributes:
+      label: DHIS2 server version
+      description: From the `dhis2_system_info` check, the DHIS2 admin UI, or your operator. If the bug doesn't involve a real DHIS2 instance, write "n/a".
+      placeholder: 2.42.3
+    validations:
+      required: true
+
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: OS + Python version. `uv run python -V` or `python -V`.
+      placeholder: macOS 14.6 / Python 3.13.1
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      description: Which chap-checker entry point is affected?
+      options:
+        - chap-checker verify
+        - chap-checker tui
+        - chap-checker serve (browser dashboard / /api/state)
+        - chap-checker tui --connect URL
+        - chap-checker init
+        - chap-checker alerts (list / test)
+        - chap-checker checks list
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, what did you get? Paste error messages and a stack trace if you have one.
+      placeholder: |
+        Ran `chap-checker verify --config /etc/chap-checker.toml` against a DHIS2 2.43 instance.
+        Expected dhis2_chap_route to be OK.
+        Got "DHIS2 route 'chap' is disabled." — but it's not, the route is enabled in the admin UI.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction steps
+      description: Minimal commands or a config snippet that reproduces the issue. Strip secrets before pasting.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: |
+        Run with `--debug` for verbose output (`chap-checker --debug verify ...`) and paste relevant lines here. **Strip credentials / URLs / hostnames before pasting if your config is private.**
+      render: shell
+
+  - type: checkboxes
+    id: checked
+    attributes:
+      label: Pre-flight
+      options:
+        - label: I've upgraded to the latest chap-checker release and reproduced.
+          required: true
+        - label: I've checked existing issues for duplicates.
+          required: true
+        - label: This report does not contain a vulnerability disclosure (those go through [SECURITY.md](../security/policy)).
+          required: true

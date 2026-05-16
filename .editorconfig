@@ -1,0 +1,28 @@
+# https://editorconfig.org — picked up by most editors out of the box.
+# Backstop for contributors who don't have ruff hooked into their editor.
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+# Match ruff's defaults / typical conventions per filetype.
+
+[*.{yml,yaml,toml,json,md}]
+indent_size = 2
+
+[Makefile]
+indent_style = tab
+
+[*.{js,jsx,ts,tsx,html,css}]
+indent_size = 2
+
+# Don't fight files that aren't ours.
+[{LICENSE,**/vendor/**}]
+trim_trailing_whitespace = false
+insert_final_newline = false
