@@ -6,6 +6,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-05-16
+
+### Added
+
+- **Bearer-token auth on `chap-checker serve`**. Optional `[auth]` block in the TOML (`token` / `token_env`) protects `/api/state` and `/api/reload`. Server-side comparison is constant-time (`hmac.compare_digest`). Off by default for backwards compatibility — without the block, the daemon behaves like 0.6.x.
+- **Login modal in the browser dashboard**. When auth is on, the SPA gets a 401 on first load, renders a token-entry modal, stores the value in `localStorage`, and retries. A new **Sign out** entry in the Ctrl+K / ⌘K command palette clears the stored token. Lives in `_auth.js` alongside `_state.js`, outside the designer-replaceable `src/` tree.
+- **`chap-checker tui --connect URL --token-env NAME` / `--token VALUE`**. Sends the bearer header on every fetch. A 401 paints a distinct `"auth rejected by ..."` banner instead of a generic disconnect message.
+- **`GET /api/auth`** — unprotected probe returning `{"required": true|false}` so clients (the SPA, scrapers) can detect whether to attach a header without parsing 401 responses.
+- **Startup warning** when `serve --host 0.0.0.0` is launched without `[auth]` configured. Non-fatal — operators on hardened LANs or behind reverse proxies can ignore it.
+
+### Changed
+
+- README: dropped the **PyPI downloads** badge (upstream rate-limits it on shields.io) and the **Conventional Commits** badge (a contributor convention; lives in CONTRIBUTING.md). Five badges down from seven.
+- `config.py`: extracted a single `_resolve_value_or_env()` helper for the "literal or env-var" pattern; new alerters / auth blocks use it instead of reimplementing the dance.
+
 ## [0.6.0] — 2026-05-16
 
 ### Added
@@ -87,7 +102,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 For 0.1.x / 0.2.x release notes, see the [GitHub Releases page](https://github.com/dhis2-chap/chap-checker/releases).
 
-[Unreleased]: https://github.com/dhis2-chap/chap-checker/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/dhis2-chap/chap-checker/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.7.0
 [0.6.0]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.6.0
 [0.5.1]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.5.1
 [0.5.0]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.5.0

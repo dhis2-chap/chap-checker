@@ -780,9 +780,11 @@ class DashboardApp(App[None]):
         interval_s: float = 30.0,
         alerts_enabled: bool = False,
         connect_url: str | None = None,
+        connect_token: str | None = None,
     ) -> None:
         super().__init__()
         self.connect_url = connect_url
+        self.connect_token = connect_token
         self.interval_s = interval_s
         self.alerts_enabled = alerts_enabled
         self.config_path = config_path
@@ -847,7 +849,11 @@ class DashboardApp(App[None]):
 
     async def on_mount(self) -> None:
         if self.connect_url is not None:
-            self._http_client = httpx.AsyncClient(timeout=httpx.Timeout(10.0))
+            headers = {"Authorization": f"Bearer {self.connect_token}"} if self.connect_token else None
+            self._http_client = httpx.AsyncClient(
+                timeout=httpx.Timeout(10.0),
+                headers=headers,
+            )
         self.set_interval(self.interval_s, self.action_refresh)
         self.call_after_refresh(self.action_refresh)
 
@@ -870,6 +876,13 @@ class DashboardApp(App[None]):
         url = self.connect_url.rstrip("/") + "/api/state"
         try:
             response = await self._http_client.get(url)
+            # Distinct banner for auth failure - the receiver is up but the
+            # token is wrong / missing, which is a different fix from
+            # "server is down". Don't raise_for_status before checking.
+            if response.status_code == 401:
+                hint = "set --token-env" if self.connect_token is None else "check the token value"
+                self._set_disconnect_banner(f"auth rejected by {self.connect_url}: {hint}")
+                return None
             response.raise_for_status()
             return DashboardState.model_validate_json(response.content)
         except Exception as exc:  # noqa: BLE001 - banner-paint covers any transport / parse error
@@ -996,6 +1009,7 @@ def run(
     interval_s: float = 30.0,
     alerts_enabled: bool = False,
     connect_url: str | None = None,
+    connect_token: str | None = None,
 ) -> None:
     """Launch the TUI dashboard (local or `--connect` mode)."""
     DashboardApp(
@@ -1006,6 +1020,7 @@ def run(
         interval_s=interval_s,
         alerts_enabled=alerts_enabled,
         connect_url=connect_url,
+        connect_token=connect_token,
     ).run()
 
 

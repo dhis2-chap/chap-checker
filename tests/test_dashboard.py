@@ -396,3 +396,62 @@ def test_local_mode_requires_targets_and_cfg() -> None:
 
     with pytest.raises(ValueError, match="Local mode"):
         DashboardApp(interval_s=300.0)
+
+
+def test_connect_mode_sends_bearer_token_header() -> None:
+    """When connect_token is set, every /api/state fetch carries Authorization: Bearer <token>."""
+    from chap_checker.dashboard import DashboardApp
+
+    canned = _canned_state()
+    request = httpx.Request("GET", "http://remote.example:8765/api/state")
+    mock_get = AsyncMock(
+        return_value=httpx.Response(200, content=canned.model_dump_json().encode(), request=request),
+    )
+
+    async def _run() -> None:
+        with patch.object(httpx.AsyncClient, "get", new=mock_get):
+            app = DashboardApp(
+                interval_s=300.0,
+                connect_url="http://remote.example:8765",
+                connect_token="s3cret-token",
+            )
+            async with app.run_test(headless=True) as pilot:
+                await pilot.pause()
+                await app.action_refresh()
+                await pilot.pause()
+                # The bearer header is set once on the AsyncClient at
+                # construction time, so it ships on every call. The mock
+                # patches `httpx.AsyncClient.get` directly so we can't
+                # capture the per-request headers, but the persistent
+                # client's `headers` attribute reflects what every call
+                # will carry.
+                assert app._http_client is not None
+                assert app._http_client.headers.get("Authorization") == "Bearer s3cret-token"
+
+    asyncio.run(_run())
+
+
+def test_connect_mode_401_paints_auth_banner_not_generic_disconnect() -> None:
+    """A 401 from the daemon means token is wrong/missing - distinct from a transport error."""
+    from chap_checker.dashboard import DashboardApp, DisconnectBanner
+
+    request = httpx.Request("GET", "http://remote.example:8765/api/state")
+    mock_get = AsyncMock(return_value=httpx.Response(401, text="bad token", request=request))
+
+    async def _run() -> None:
+        with patch.object(httpx.AsyncClient, "get", new=mock_get):
+            app = DashboardApp(
+                interval_s=300.0,
+                connect_url="http://remote.example:8765",
+                connect_token="wrong",
+            )
+            async with app.run_test(headless=True) as pilot:
+                await app.action_refresh()
+                await pilot.pause()
+                banner = app.query_one("#banner", DisconnectBanner)
+                assert banner.has_class("visible")
+                rendered = str(banner.render())
+                assert "auth rejected" in rendered.lower()
+                assert "check the token value" in rendered
+
+    asyncio.run(_run())

@@ -294,3 +294,110 @@ def test_reload_without_config_path_returns_400() -> None:
         r = client.post("/api/reload")
         assert r.status_code == 400
         assert "config_path" in r.json()["message"]
+
+
+# ---------- Bearer-token auth (0.7+) ----------
+
+
+def _server_for_auth() -> DashboardServer:
+    return DashboardServer(
+        targets=[_target()],
+        cfg=_cfg(),
+        state_path=None,
+        interval_s=30.0,
+        alerts_enabled=False,
+    )
+
+
+def test_auth_disabled_regression_no_header_required() -> None:
+    """Without `auth_token`, /api/state is still 200 with no Authorization header.
+
+    Regression guard: the auth wiring must not break the unauthenticated
+    default path that 0.6.x and earlier operators rely on.
+    """
+    app = make_app(_server_for_auth(), auth_token=None)
+    with TestClient(app, raise_server_exceptions=False) as client:
+        r = client.get("/api/state")
+        assert r.status_code == 200, r.text
+
+
+def test_auth_enabled_returns_401_without_header() -> None:
+    app = make_app(_server_for_auth(), auth_token="s3cret")
+    with TestClient(app, raise_server_exceptions=False) as client:
+        r = client.get("/api/state")
+        assert r.status_code == 401
+        assert r.headers.get("www-authenticate") == "Bearer"
+        assert "missing bearer token" in r.text.lower()
+
+
+def test_auth_enabled_returns_401_with_wrong_token() -> None:
+    app = make_app(_server_for_auth(), auth_token="s3cret")
+    with TestClient(app, raise_server_exceptions=False) as client:
+        r = client.get("/api/state", headers={"Authorization": "Bearer wrong"})
+        assert r.status_code == 401
+        assert "bad token" in r.text.lower()
+
+
+def test_auth_enabled_returns_200_with_correct_token() -> None:
+    app = make_app(_server_for_auth(), auth_token="s3cret")
+    with TestClient(app, raise_server_exceptions=False) as client:
+        r = client.get("/api/state", headers={"Authorization": "Bearer s3cret"})
+        assert r.status_code == 200
+        assert r.json()["instance_count"] == 1
+
+
+def test_auth_enabled_reload_is_also_protected() -> None:
+    """`/api/reload` is a state-mutating endpoint; must also require auth."""
+    app = make_app(_server_for_auth(), auth_token="s3cret")
+    with TestClient(app, raise_server_exceptions=False) as client:
+        r = client.post("/api/reload")
+        assert r.status_code == 401
+
+
+def test_auth_status_endpoint_reports_required_when_token_set() -> None:
+    """The /api/auth probe is unprotected and reports auth + ui hints."""
+    auth_on = make_app(_server_for_auth(), auth_token="s3cret")
+    with TestClient(auth_on, raise_server_exceptions=False) as c:
+        body = c.get("/api/auth").json()
+        # `required` is the gate; `ui_theme` / `ui_title` let the login
+        # modal honour the operator's [ui] config on first paint.
+        assert body["required"] is True
+        assert body["ui_theme"] == "phosphor"  # default
+        assert body["ui_title"] == "DHIS2 / Climate Instance Checker"
+    auth_off = make_app(_server_for_auth(), auth_token=None)
+    with TestClient(auth_off, raise_server_exceptions=False) as c:
+        assert c.get("/api/auth").json()["required"] is False
+
+
+def test_auth_status_endpoint_surfaces_configured_theme() -> None:
+    """`/api/auth` returns whatever theme the operator put under [ui]."""
+    from chap_checker.config import UiConfig
+
+    cfg = _cfg()
+    cfg = cfg.model_copy(update={"ui": UiConfig(title="Operations", theme="dhis2")})
+    server = DashboardServer(
+        targets=[_target()],
+        cfg=cfg,
+        state_path=None,
+        interval_s=30.0,
+        alerts_enabled=False,
+    )
+    app = make_app(server, auth_token="s3cret")
+    with TestClient(app, raise_server_exceptions=False) as c:
+        body = c.get("/api/auth").json()
+        assert body["ui_theme"] == "dhis2"
+        assert body["ui_title"] == "Operations"
+
+
+def test_auth_static_files_remain_public_for_login_modal() -> None:
+    """The SPA shell + static assets must stay reachable so the login modal can render."""
+    app = make_app(_server_for_auth(), auth_token="s3cret")
+    with TestClient(app, raise_server_exceptions=False) as client:
+        # GET / serves index.html with no Authorization header.
+        r = client.get("/")
+        assert r.status_code == 200
+        assert "text/html" in r.headers["content-type"]
+        # Static assets stay public too (the survival _state.js / _auth.js
+        # are part of the shell).
+        r2 = client.get("/_state.js")
+        assert r2.status_code == 200

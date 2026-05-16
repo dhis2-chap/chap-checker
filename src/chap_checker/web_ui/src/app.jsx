@@ -432,6 +432,13 @@ function App() {
       run:() => window.open('https://github.com/dhis2-chap/chap-checker', '_blank', 'noopener') },
     { id:'docs', label:'Open documentation',
       run:() => window.open('https://dhis2-chap.github.io/chap-checker/', '_blank', 'noopener') },
+    // CK-WIRING: bearer-token auth (0.7+). When the daemon's [auth] block
+    // is set, /api/state returns 401, the survival _auth.js renders a
+    // login modal, and the token gets stored in localStorage. This entry
+    // lets the operator sign out from the same surface they use for
+    // every other command.
+    { id:'signout', label:'Sign out', hint:'clear stored token',
+      run:() => { if (window.CK_AUTH) window.CK_AUTH.signOut(); } },
   ], [t.demoDown, reload]);
 
   // global keybindings

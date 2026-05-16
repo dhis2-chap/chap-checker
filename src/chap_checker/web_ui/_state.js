@@ -15,10 +15,91 @@
  * The mapping from the server's ``DashboardState`` schema to the
  * artifact's ``INSTANCES_BASE`` shape lives at the bottom of this file
  * so updating either side stays a one-file edit.
+ *
+ * Bearer-token auth (0.7+): when the server's `[auth]` block is set,
+ * `/api/state` returns 401 without an Authorization header. The SPA
+ * stores the operator-typed token in localStorage (key
+ * ``CK_TOKEN_KEY``) and attaches it on every fetch. ``CK_AUTH_STATE``
+ * (a tiny event-emitter) lets the artifact's login modal cooperate
+ * with this hook without prop-drilling.
  */
 
 (function () {
   "use strict";
+
+  const CK_TOKEN_KEY = "chap_checker_token";
+
+  /**
+   * Read the stored bearer token (or "" if none). Falls back to "" if
+   * localStorage is unavailable (private-mode iOS, file:// origins).
+   */
+  function readToken() {
+    try {
+      return window.localStorage.getItem(CK_TOKEN_KEY) || "";
+    } catch (_e) {
+      return "";
+    }
+  }
+
+  function writeToken(value) {
+    try {
+      if (value) {
+        window.localStorage.setItem(CK_TOKEN_KEY, value);
+      } else {
+        window.localStorage.removeItem(CK_TOKEN_KEY);
+      }
+    } catch (_e) {
+      // ignore - the modal handles empty-token failures via the 401 retry
+    }
+  }
+
+  /**
+   * Build an Authorization header dict if a token exists, else `{}`.
+   * Always pass `cache: 'no-store'` alongside.
+   */
+  function authHeaders() {
+    const t = readToken();
+    return t ? { Authorization: "Bearer " + t } : {};
+  }
+
+  /**
+   * Tiny event-emitter the artifact's app.jsx subscribes to. Two events:
+   *
+   *  - "needs-token" - fired when /api/state returns 401. The login modal
+   *    listens and renders itself.
+   *  - "token-set"   - fired when the modal stores a new token. The hook
+   *    listens and triggers an immediate refetch instead of waiting for
+   *    the next poll tick.
+   */
+  const listeners = { "needs-token": [], "token-set": [] };
+  function on(evt, fn) {
+    if (!listeners[evt]) return () => {};
+    listeners[evt].push(fn);
+    return () => {
+      listeners[evt] = listeners[evt].filter((f) => f !== fn);
+    };
+  }
+  function emit(evt) {
+    (listeners[evt] || []).forEach((f) => {
+      try {
+        f();
+      } catch (_e) {
+        // swallow; one bad subscriber doesn't blow up the bus
+      }
+    });
+  }
+
+  window.CK_AUTH = {
+    TOKEN_KEY: CK_TOKEN_KEY,
+    readToken,
+    writeToken,
+    on,
+    signOut() {
+      writeToken("");
+      // Reload so cached React state goes away.
+      window.location.reload();
+    },
+  };
 
   /**
    * Map server "worst_status" (Status enum value) onto the artifact's
@@ -46,13 +127,6 @@
     return h || 1;
   }
 
-  /**
-   * Map one server tile -> one artifact instance.
-   * Designer artifact expects: id, name, platform, version, url, status,
-   * checksPassed/Total, pingPassed/Total/Pct, latency, updated, uptime,
-   * checks:[{name,ok,down?}], seed, baseLat (seed/baseLat feed the
-   * sparkline RNG inside ``buildHistory``).
-   */
   function mapTile(tile) {
     const status = mapStatus(tile.worst_status);
     const checks = (tile.checks || []).map((c) => ({
@@ -61,11 +135,6 @@
       down: status === "down",
     }));
     const latency = typeof tile.latency_ms === "number" ? tile.latency_ms : 0;
-    // Real per-refresh history from the server. Each entry carries the
-    // worst check status across that refresh; the artifact's UptimeBars
-    // colors the bar from it (ok=green / warn=amber / down=red). We
-    // also pass through `ok` and `latency` so the artifact's other
-    // viz modes (LatencySpark) keep working unmodified.
     const history = (tile.history || []).map((p) => {
       const s = mapStatus(p.status);
       return {
@@ -89,13 +158,10 @@
         ? Math.round((100 * tile.ping_ok) / tile.ping_total)
         : 100,
       latency,
-      updated: "—", // app.jsx recomputes this from lastRefreshAt
+      updated: "—",
       uptime: typeof tile.uptime_pct === "number" ? tile.uptime_pct : 100,
       checks,
       history,
-      // Sparkline RNG inputs - kept so the artifact's buildHistory() is
-      // still safe to call as a fallback when the server hasn't yet
-      // accumulated any history entries (first /api/state response).
       seed: hashSeed(tile.name),
       baseLat: latency || 150,
     };
@@ -107,9 +173,12 @@
    * first response lands so the artifact can fall back to its mock data
    * during the initial mount paint.
    *
-   * @param {number} pollSec How often to fetch /api/state.
-   * @returns {{instances: Array, lastRefreshAt: number, alertsOn: boolean,
-   *           refreshSec: number, uiTitle: string, uiTheme: string} | null}
+   * Auth: every fetch carries the stored bearer token as
+   * ``Authorization: Bearer <token>``. A 401 response fires the
+   * ``needs-token`` event so the login modal can render; the hook
+   * doesn't update state on 401 (keeps the last good snapshot). When a
+   * fresh token is stored via the modal, the hook listens for
+   * ``token-set`` and refetches immediately.
    */
   function useLiveState(pollSec) {
     const [state, setState] = React.useState(null);
@@ -119,7 +188,14 @@
 
       async function pull() {
         try {
-          const r = await fetch("/api/state", { cache: "no-store" });
+          const r = await fetch("/api/state", {
+            cache: "no-store",
+            headers: authHeaders(),
+          });
+          if (r.status === 401) {
+            emit("needs-token");
+            return;
+          }
           if (!r.ok) return;
           const data = await r.json();
           if (cancelled) return;
@@ -133,16 +209,18 @@
             uiTitle: data.ui_title || "DHIS2 / Climate Instance Checker",
             uiTheme: data.ui_theme || "phosphor",
           });
-        } catch (e) {
+        } catch (_e) {
           // Transient network blip - try again on the next tick.
         }
       }
 
+      const unsub = on("token-set", pull);
       pull();
       const id = setInterval(pull, pollSec * 1000);
       return () => {
         cancelled = true;
         clearInterval(id);
+        unsub();
       };
     }, [pollSec]);
 
