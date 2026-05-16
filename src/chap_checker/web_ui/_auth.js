@@ -34,6 +34,31 @@
     const [error, setError] = React.useState("");
     const inputRef = React.useRef(null);
 
+    // Probe /api/auth eagerly on mount. If the daemon requires a token
+    // AND we don't have one stored, show the modal immediately - before
+    // the artifact's first paint with INSTANCES_BASE mock data flashes
+    // through. The polling hook will still drive subsequent re-prompts
+    // via the "needs-token" event when a stored token is rejected.
+    React.useEffect(() => {
+      let cancelled = false;
+      (async () => {
+        try {
+          const r = await fetch("/api/auth", { cache: "no-store" });
+          if (!r.ok || cancelled) return;
+          const data = await r.json();
+          if (data && data.required && !window.CK_AUTH.readToken()) {
+            setVisible(true);
+          }
+        } catch (_e) {
+          // If the probe fails we just wait for the polling hook's 401
+          // to fire "needs-token" instead. No worse than today.
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }, []);
+
     React.useEffect(() => {
       const off = window.CK_AUTH.on("needs-token", () => {
         // Clear the previous-attempt token from the input but keep
@@ -71,9 +96,14 @@
     return (
       <div
         style={{
+          // Fully opaque overlay. The artifact ships a designer-time
+          // INSTANCES_BASE mock so the dashboard has something to paint
+          // before the first live /api/state response - which means the
+          // operator-facing tiles would leak through a translucent
+          // backdrop until auth resolves. Solid var(--bg) hides it.
           position: "fixed",
           inset: 0,
-          background: "rgba(0,0,0,0.78)",
+          background: "var(--bg, #050805)",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",

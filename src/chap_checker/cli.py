@@ -174,6 +174,11 @@ checks = ["dhis2_ping", "dhis2_system_info"]
 # modal; TUI accepts --token-env. See docs/guides/serve.md#authentication.
 # [auth]
 # token_env = "CHAP_CHECKER_TOKEN"
+
+# Optional UI branding + theme (shared by the TUI and the browser).
+# [ui]
+# title = "DHIS2 / Climate Instance Checker"
+# theme = "phosphor"   # phosphor | amber | high | tokyo | dhis2
 """
 
 

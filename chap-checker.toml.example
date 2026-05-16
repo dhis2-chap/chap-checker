@@ -84,3 +84,12 @@ webhook_url_env = "SLACK_WEBHOOK_URL"
 # `openssl rand -hex 32`. Rotation = update the env var, restart serve.
 # [auth]
 # token_env = "CHAP_CHECKER_TOKEN"
+
+# Optional UI branding + theme, shown in both the Textual TUI header and
+# the browser dashboard. The browser's command palette (Ctrl+K / Cmd+K)
+# also exposes the theme at runtime; the config value here is the
+# *starting default* - a per-user pick (persisted in browser localStorage)
+# wins until cleared.
+# [ui]
+# title = "DHIS2 / Climate Instance Checker"   # default; 1-120 chars
+# theme = "phosphor"                           # phosphor | amber | high | tokyo | dhis2
