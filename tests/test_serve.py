@@ -355,13 +355,38 @@ def test_auth_enabled_reload_is_also_protected() -> None:
 
 
 def test_auth_status_endpoint_reports_required_when_token_set() -> None:
-    """The /api/auth probe is unprotected and reports `{required: true|false}`."""
+    """The /api/auth probe is unprotected and reports auth + ui hints."""
     auth_on = make_app(_server_for_auth(), auth_token="s3cret")
     with TestClient(auth_on, raise_server_exceptions=False) as c:
-        assert c.get("/api/auth").json() == {"required": True}
+        body = c.get("/api/auth").json()
+        # `required` is the gate; `ui_theme` / `ui_title` let the login
+        # modal honour the operator's [ui] config on first paint.
+        assert body["required"] is True
+        assert body["ui_theme"] == "phosphor"  # default
+        assert body["ui_title"] == "DHIS2 / Climate Instance Checker"
     auth_off = make_app(_server_for_auth(), auth_token=None)
     with TestClient(auth_off, raise_server_exceptions=False) as c:
-        assert c.get("/api/auth").json() == {"required": False}
+        assert c.get("/api/auth").json()["required"] is False
+
+
+def test_auth_status_endpoint_surfaces_configured_theme() -> None:
+    """`/api/auth` returns whatever theme the operator put under [ui]."""
+    from chap_checker.config import UiConfig
+
+    cfg = _cfg()
+    cfg = cfg.model_copy(update={"ui": UiConfig(title="Operations", theme="dhis2")})
+    server = DashboardServer(
+        targets=[_target()],
+        cfg=cfg,
+        state_path=None,
+        interval_s=30.0,
+        alerts_enabled=False,
+    )
+    app = make_app(server, auth_token="s3cret")
+    with TestClient(app, raise_server_exceptions=False) as c:
+        body = c.get("/api/auth").json()
+        assert body["ui_theme"] == "dhis2"
+        assert body["ui_title"] == "Operations"
 
 
 def test_auth_static_files_remain_public_for_login_modal() -> None:

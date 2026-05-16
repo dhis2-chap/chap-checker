@@ -28,6 +28,64 @@
     return el;
   }
 
+  // Theme subsets used by the login modal. Embedded here (not imported
+  // from app.jsx) because:
+  //   1. The artifact in src/ is designer-replaceable; depending on its
+  //      THEMES export would break on the next drop.
+  //   2. Only the CSS variables the modal actually touches need to be
+  //      here. The artifact applies its full dict via `applyTheme()`
+  //      once `/api/state` returns; this is just the pre-paint subset.
+  // Keep in sync with the matching entries in src/app.jsx::THEMES if
+  // colours change there.
+  const MODAL_THEMES = {
+    phosphor: {
+      "--bg": "#050805", "--bg-elev": "#0a0f0a",
+      "--green": "#6ee06e", "--green-2": "#4fbf4f", "--green-dim": "#2f5f2f",
+      "--ink-dim": "#6a7a6a", "--ink-vdim": "#3a4a3a",
+      "--red": "#ff5a5a",
+    },
+    amber: {
+      "--bg": "#0a0705", "--bg-elev": "#100b07",
+      "--green": "#ffb84d", "--green-2": "#d9933a", "--green-dim": "#7a5a1f",
+      "--ink-dim": "#8a7a5a", "--ink-vdim": "#4a3a2a",
+      "--red": "#ff5a5a",
+    },
+    high: {
+      "--bg": "#000000", "--bg-elev": "#0c0c0c",
+      "--green": "#9eff9e", "--green-2": "#7fff7f", "--green-dim": "#4a8a4a",
+      "--ink-dim": "#a0a0a0", "--ink-vdim": "#606060",
+      "--red": "#ff5a5a",
+    },
+    tokyo: {
+      "--bg": "#11131a", "--bg-elev": "#161922",
+      "--green": "#7aa2f7", "--green-2": "#5d87ee", "--green-dim": "#384a78",
+      "--ink-dim": "#7a85a8", "--ink-vdim": "#3a4567",
+      "--red": "#f7768e",
+    },
+    dhis2: {
+      "--bg": "#c5cad0", "--bg-elev": "#e3e7eb",
+      "--green": "#2e6b32", "--green-2": "#1f4a22", "--green-dim": "#b8d5ba",
+      "--ink-dim": "#4e5b66", "--ink-vdim": "#8a929c",
+      "--red": "#a8302f",
+    },
+  };
+
+  /**
+   * Apply the named theme's CSS variables to `:root`. Idempotent and
+   * cheap. Called before the login modal becomes visible so it inherits
+   * the configured `[ui].theme` instead of the phosphor defaults baked
+   * into index.html's <style> block.
+   *
+   * When the artifact (`app.jsx`) later renders and calls its own
+   * applyTheme(), it writes the same (or a superset of) variables, so
+   * this pre-paint apply is a no-op from the artifact's perspective.
+   */
+  function applyModalTheme(themeName) {
+    const dict = MODAL_THEMES[themeName] || MODAL_THEMES.phosphor;
+    const root = document.documentElement;
+    Object.entries(dict).forEach(([k, v]) => root.style.setProperty(k, v));
+  }
+
   function LoginModal() {
     const [visible, setVisible] = React.useState(false);
     const [token, setToken] = React.useState("");
@@ -39,6 +97,11 @@
     // the artifact's first paint with INSTANCES_BASE mock data flashes
     // through. The polling hook will still drive subsequent re-prompts
     // via the "needs-token" event when a stored token is rejected.
+    //
+    // The same probe also returns the configured `[ui].theme`. Applying
+    // it here means the login modal honours the operator's theme on
+    // first paint instead of flashing phosphor-green until the artifact
+    // gets data from /api/state (which it can't, when auth blocks).
     React.useEffect(() => {
       let cancelled = false;
       (async () => {
@@ -46,6 +109,9 @@
           const r = await fetch("/api/auth", { cache: "no-store" });
           if (!r.ok || cancelled) return;
           const data = await r.json();
+          if (data && data.ui_theme) {
+            applyModalTheme(data.ui_theme);
+          }
           if (data && data.required && !window.CK_AUTH.readToken()) {
             setVisible(true);
           }

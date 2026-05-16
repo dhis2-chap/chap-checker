@@ -176,11 +176,21 @@ def make_app(
     async def api_auth_status() -> JSONResponse:
         """Lightweight unprotected hint so the SPA can show / hide the login modal.
 
-        Returns `{"required": true|false}` based on whether `auth_token`
-        is set. No token leaks — just a boolean. The SPA checks this on
-        load before deciding whether to attach an Authorization header.
+        Returns `{"required": bool, "ui_theme": str, "ui_title": str}`.
+        - `required`: whether `/api/*` routes need a bearer token.
+        - `ui_theme` + `ui_title`: the `[ui]` config the SPA otherwise
+          only sees in the protected `/api/state` payload. Surfacing
+          them here lets the login modal apply the configured theme on
+          first paint instead of flashing phosphor-green before the
+          artifact has data. No secrets leak - just CSS preferences.
         """
-        return JSONResponse({"required": auth_token is not None})
+        return JSONResponse(
+            {
+                "required": auth_token is not None,
+                "ui_theme": server.cfg.ui.theme,
+                "ui_title": server.cfg.ui.title,
+            }
+        )
 
     if ui_enabled:
         # The React SPA + Babel-standalone wiring lives next to this module
