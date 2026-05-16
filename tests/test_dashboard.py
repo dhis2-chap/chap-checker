@@ -485,9 +485,12 @@ def test_token_prompt_submit_updates_http_client_and_refetches() -> None:
     from chap_checker.dashboard import DashboardApp, TokenPromptScreen
 
     request = httpx.Request("GET", "http://remote.example:8765/api/state")
+    probe_request = httpx.Request("GET", "http://remote.example:8765/api/auth")
     canned = _canned_state()
-    # First call: 401 (no token yet). Second call (after token submit): 200.
+    # First call is the on_mount theme probe (`/api/auth`); then the 401 from
+    # the initial refresh; then the 200 after the operator submits a token.
     responses = [
+        httpx.Response(200, content=b'{"required":true,"ui_theme":null,"ui_title":null}', request=probe_request),
         httpx.Response(401, text="bad token", request=request),
         httpx.Response(200, content=canned.model_dump_json().encode(), request=request),
     ]
@@ -510,8 +513,9 @@ def test_token_prompt_submit_updates_http_client_and_refetches() -> None:
                 # `_http_client` was rebuilt with the bearer header.
                 assert app._http_client is not None
                 assert app._http_client.headers.get("Authorization") == "Bearer operator-typed-token"
-                # Both fetches happened: the initial 401 and the post-submit retry.
-                assert mock_get.await_count >= 2
+                # Both fetches happened: the initial 401 and the post-submit retry
+                # (plus the on_mount theme probe).
+                assert mock_get.await_count >= 3
 
     asyncio.run(_run())
 

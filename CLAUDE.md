@@ -18,7 +18,17 @@
 
    If a PR adds a new "thing operators discover at runtime" (a check, an alerter, a CLI flag, a config option), the rule of thumb is: it shows up in **at least three** places — code, CHANGELOG entry, docs/guide section. Verify all three before requesting review.
 
-6. **Releasing — bump → tag → push.** Releases ship to PyPI + a GitHub Release via `.github/workflows/release.yml` on every `v*` tag push. The workflow only fires for tags; merging to `main` never publishes by itself.
+6. **Visual testing for UI changes.** Any change that affects what the user *sees* in the TUI or browser dashboard must be visually verified against a rendered artifact before review. Type-checks and unit tests verify code correctness, not visual correctness — they happily pass on a TUI that flashes the wrong theme for 4 seconds or a browser modal whose colours leak through translucent overlays. Capture an artifact instead:
+
+   - **TUI changes** — use Textual's built-in SVG screenshot. Two committed scripts cover the common flows; extend them or add a sibling rather than writing one-shot scripts in `/tmp`:
+     - `scripts/capture_dashboard.py` — full dashboard rendering against a live config.
+     - `scripts/capture_token_modal.py --connect URL` — the auth-token modal against a live daemon (catches theme races on the modal screen).
+   - **Browser changes** — use the Playwright Python async API. Don't reach for the Playwright MCP for repeatable captures; it's fine for one-off debugging but the committed script is what survives:
+     - `scripts/capture_browser.py --url URL --token TOKEN` — drives the login modal, signed-in dashboard, and sign-out flow into three PNGs.
+
+   Run the relevant script after the code change, look at the artifact (open the SVG/PNG, don't just check that the file exists), and only then call the work done. If the artifact disagrees with the unit tests, trust the artifact.
+
+7. **Releasing — bump → tag → push.** Releases ship to PyPI + a GitHub Release via `.github/workflows/release.yml` on every `v*` tag push. The workflow only fires for tags; merging to `main` never publishes by itself.
 
    To cut a release:
 
