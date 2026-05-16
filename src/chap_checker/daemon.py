@@ -182,7 +182,9 @@ class DashboardServer(BaseModel):
         if self.config_path is None:
             raise RuntimeError("No config_path set - server was launched without one.")
         new_cfg = load_config(self.config_path)
-        new_targets = [entry.to_target_entry(name) for name, entry in new_cfg.instances.items()]
+        new_targets = [
+            entry.to_target_entry(name, default_retry_policy=new_cfg.retry) for name, entry in new_cfg.instances.items()
+        ]
         old_names = {t.name for t in self.targets}
         new_names = {t.name for t in new_targets}
         self.targets = new_targets

@@ -1,7 +1,8 @@
 import httpx
+from dhis2w_client import Dhis2
 
 from chap_checker.checks import all_checks
-from chap_checker.checks.base import format_request_error
+from chap_checker.checks.base import format_request_error, parse_dhis2_version
 
 
 def test_registry_has_builtin_checks() -> None:
@@ -69,3 +70,17 @@ def test_format_request_error_carries_type_and_path() -> None:
 def test_format_request_error_falls_back_without_path() -> None:
     msg = format_request_error(httpx.ConnectError("nodename nor servname provided"))
     assert msg == "ConnectError: nodename nor servname provided"
+
+
+def test_parse_dhis2_version_maps_supported_minors() -> None:
+    """`/api/system/info`-style version strings round-trip to Dhis2 enum members."""
+    assert parse_dhis2_version("2.41.0") is Dhis2.V41
+    assert parse_dhis2_version("2.42.4-1") is Dhis2.V42
+    assert parse_dhis2_version("2.43.0") is Dhis2.V43
+
+
+def test_parse_dhis2_version_returns_none_for_unsupported_or_garbage() -> None:
+    """An out-of-range minor or non-version string returns None, no crash."""
+    assert parse_dhis2_version("2.44-SNAPSHOT") is None  # past the generated v43 ceiling
+    assert parse_dhis2_version("garbage") is None
+    assert parse_dhis2_version("") is None

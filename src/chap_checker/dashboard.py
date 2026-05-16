@@ -960,7 +960,9 @@ class DashboardApp(App[None]):
             return
         # Apply the new config to the embedded server. The next tick will
         # pick up the new tiles via reconciliation.
-        new_targets = [entry.to_target_entry(name) for name, entry in new_cfg.instances.items()]
+        new_targets = [
+            entry.to_target_entry(name, default_retry_policy=new_cfg.retry) for name, entry in new_cfg.instances.items()
+        ]
         old_names = {t.name for t in self.server.targets}
         new_names = {t.name for t in new_targets}
         old_theme = self.server.cfg.ui.theme

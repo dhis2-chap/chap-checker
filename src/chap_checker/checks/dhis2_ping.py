@@ -7,7 +7,7 @@ from typing import ClassVar
 
 from dhis2w_client import Dhis2Client
 
-from chap_checker.checks.base import CheckResult, Status, format_request_error, register_check
+from chap_checker.checks.base import CheckContext, CheckResult, Status, format_request_error, register_check
 
 
 @register_check
@@ -19,7 +19,7 @@ class Dhis2PingCheck:
     order: ClassVar[int] = 10
     requires: ClassVar[list[str]] = []
 
-    async def run(self, client: Dhis2Client) -> CheckResult:
+    async def run(self, client: Dhis2Client, ctx: CheckContext) -> CheckResult:  # noqa: ARG002
         start = time.perf_counter()
         try:
             response = await client.get_response("/api/me")

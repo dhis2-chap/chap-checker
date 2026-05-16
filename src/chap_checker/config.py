@@ -8,6 +8,7 @@ import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
+from dhis2w_client import RetryPolicy
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
 from chap_checker.checks.base import Status
@@ -36,7 +37,7 @@ class InstanceConfig(BaseModel):
     on the wire in token mode.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
     url: HttpUrl
     username: str | None = None
@@ -48,6 +49,7 @@ class InstanceConfig(BaseModel):
     verify_tls: bool = True
     checks: list[str] | None = Field(default=None, min_length=1)
     alerts: list[str] = Field(default_factory=list)
+    retry_policy: RetryPolicy | None = None
 
     @model_validator(mode="after")
     def _exactly_one_auth_mode(self) -> "InstanceConfig":
@@ -104,14 +106,21 @@ class InstanceConfig(BaseModel):
             raise RuntimeError(f"Environment variable '{self.token_env}' is not set.")
         return value
 
-    def to_target(self) -> Dhis2Target:
-        """Build a runtime :class:`Dhis2Target` from this entry."""
+    def to_target(self, *, default_retry_policy: RetryPolicy | None = None) -> Dhis2Target:
+        """Build a runtime :class:`Dhis2Target` from this entry.
+
+        `default_retry_policy` is the top-level `[retry]` block, applied
+        when the per-instance config doesn't override it. The
+        per-instance `retry_policy` always wins when set.
+        """
+        retry_policy = self.retry_policy if self.retry_policy is not None else default_retry_policy
         if self.token is not None or self.token_env is not None:
             return Dhis2Target(
                 base_url=self.url,
                 token=self.resolve_token(),
                 timeout_s=self.timeout_s,
                 verify_tls=self.verify_tls,
+                retry_policy=retry_policy,
             )
         return Dhis2Target(
             base_url=self.url,
@@ -119,15 +128,21 @@ class InstanceConfig(BaseModel):
             password=self.resolve_password(),
             timeout_s=self.timeout_s,
             verify_tls=self.verify_tls,
+            retry_policy=retry_policy,
         )
 
-    def to_target_entry(self, name: str) -> "TargetEntry":
+    def to_target_entry(
+        self,
+        name: str,
+        *,
+        default_retry_policy: RetryPolicy | None = None,
+    ) -> "TargetEntry":
         """Build a runtime :class:`TargetEntry` (with optional check filter and opt-in alerters)."""
         from chap_checker.runner import TargetEntry
 
         return TargetEntry(
             name=name,
-            target=self.to_target(),
+            target=self.to_target(default_retry_policy=default_retry_policy),
             check_names=self.checks,
             alerts=list(self.alerts),
         )
@@ -195,12 +210,16 @@ DEFAULT_CONCURRENCY = 5
 class CheckerConfig(BaseModel):
     """Top-level ``chap-checker.toml`` document."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
     instances: dict[str, InstanceConfig] = Field(default_factory=dict)
     alerts: AlertsConfig | None = None
     ui: UiConfig = Field(default_factory=UiConfig)
     concurrency: int = Field(default=DEFAULT_CONCURRENCY, gt=0, le=100)
+    # `[retry]` block in the TOML, applied to every instance that doesn't
+    # set its own. Off by default - health checks generally want to
+    # observe flakes rather than mask them.
+    retry: RetryPolicy | None = None
 
     def get(self, name: str) -> InstanceConfig:
         """Return one instance by name or raise :class:`KeyError`."""

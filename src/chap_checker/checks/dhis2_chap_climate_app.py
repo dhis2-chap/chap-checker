@@ -7,7 +7,7 @@ from typing import Any, ClassVar
 
 from dhis2w_client import Dhis2Client
 
-from chap_checker.checks.base import CheckResult, Status, format_request_error, register_check
+from chap_checker.checks.base import CheckContext, CheckResult, Status, format_request_error, register_check
 from chap_checker.checks.dhis2_chap_modeling_app import Dhis2App
 
 CLIMATE_APP_HUB_ID = "effb986c-a3c7-485e-a2f6-5e54ff9df7c3"
@@ -26,7 +26,7 @@ class Dhis2ChapClimateAppCheck:
     # cleanly instead of FAIL-ing on every poll.
     requires: ClassVar[list[str]] = ["dhis2_chap_route"]
 
-    async def run(self, client: Dhis2Client) -> CheckResult:
+    async def run(self, client: Dhis2Client, ctx: CheckContext) -> CheckResult:  # noqa: ARG002
         start = time.perf_counter()
         try:
             response = await client.get_response(APPS_PATH)

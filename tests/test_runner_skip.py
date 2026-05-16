@@ -3,7 +3,7 @@ from typing import Any, cast
 import pytest
 from dhis2w_client import Dhis2Client
 
-from chap_checker.checks.base import Check, CheckResult, Status
+from chap_checker.checks.base import Check, CheckContext, CheckResult, Status
 from chap_checker.client import Dhis2Target
 from chap_checker.runner import run_checks
 
@@ -21,7 +21,7 @@ class _FakeCheck:
         self._status = status
         self.calls = 0
 
-    async def run(self, client: Dhis2Client) -> CheckResult:
+    async def run(self, client: Dhis2Client, ctx: CheckContext) -> CheckResult:  # noqa: ARG002
         self.calls += 1
         return CheckResult(name=self.name, status=self._status, message="ran", duration_ms=1.0)
 
@@ -98,3 +98,40 @@ async def test_unrelated_check_runs_even_when_sibling_fails(monkeypatch: pytest.
     assert by_name["chap-route"].status is Status.FAIL
     assert by_name["modeling-app"].status is Status.OK
     assert independent.calls == 1
+
+
+class _CtxRecordingCheck:
+    """Fake that captures the CheckContext it was handed on each call."""
+
+    def __init__(self, name: str, status: Status, requires: list[str] | None = None) -> None:
+        self.name = name
+        self.description = f"{name} (test)"
+        self.order = 10
+        self.requires: list[str] = requires or []
+        self._status = status
+        self.last_ctx: CheckContext | None = None
+
+    async def run(self, client: Dhis2Client, ctx: CheckContext) -> CheckResult:  # noqa: ARG002
+        # Snapshot the prior_results dict at call time - the runner
+        # mutates it after this returns.
+        self.last_ctx = ctx.model_copy(update={"prior_results": dict(ctx.prior_results)})
+        return CheckResult(name=self.name, status=self._status, message="ran", duration_ms=1.0)
+
+
+@pytest.mark.asyncio
+async def test_context_threaded_with_accumulating_prior_results(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The runner builds one CheckContext per target and updates `prior_results` between checks."""
+    first = _CtxRecordingCheck("ping", Status.OK)
+    second = _CtxRecordingCheck("system-info", Status.OK)
+
+    _stub_upstream(monkeypatch)
+
+    await run_checks(_target(), checks=[cast(Check, first), cast(Check, second)])
+
+    assert first.last_ctx is not None
+    assert first.last_ctx.prior_results == {}  # nothing finished before the first check
+    assert first.last_ctx.dhis2_version is None  # no system-info OK yet
+
+    assert second.last_ctx is not None
+    assert set(second.last_ctx.prior_results.keys()) == {"ping"}
+    assert second.last_ctx.prior_results["ping"].status is Status.OK

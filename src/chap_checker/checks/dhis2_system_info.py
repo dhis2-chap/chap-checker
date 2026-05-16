@@ -8,7 +8,14 @@ from typing import Any, ClassVar
 from dhis2w_client import Dhis2Client
 from pydantic import BaseModel, ConfigDict, Field
 
-from chap_checker.checks.base import CheckResult, Status, format_request_error, register_check
+from chap_checker.checks.base import (
+    CheckContext,
+    CheckResult,
+    Status,
+    format_request_error,
+    parse_dhis2_version,
+    register_check,
+)
 
 
 class Dhis2SystemInfo(BaseModel):
@@ -33,7 +40,7 @@ class Dhis2SystemInfoCheck:
     order: ClassVar[int] = 20
     requires: ClassVar[list[str]] = ["dhis2_ping"]
 
-    async def run(self, client: Dhis2Client) -> CheckResult:
+    async def run(self, client: Dhis2Client, ctx: CheckContext) -> CheckResult:
         start = time.perf_counter()
         try:
             response = await client.get_response("/api/system/info")
@@ -80,6 +87,12 @@ class Dhis2SystemInfoCheck:
                 details=info.model_dump(exclude_none=True, by_alias=True),
                 duration_ms=duration_ms,
             )
+        # Stash the detected version on the shared run context so later
+        # checks can pick a v41/v42/v43-typed payload parser. None when
+        # the version string doesn't map to a supported generated module
+        # (e.g. a pre-release "2.44-SNAPSHOT" on dhis2w-client 0.14, which
+        # only ships v41-v43).
+        ctx.dhis2_version = parse_dhis2_version(info.version)
         return CheckResult(
             name=self.name,
             status=Status.OK,

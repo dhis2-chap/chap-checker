@@ -2,11 +2,38 @@
 
 from __future__ import annotations
 
+import re
 from enum import StrEnum
 from typing import Any, ClassVar, Protocol, TypeVar, cast, runtime_checkable
 
-from dhis2w_client import Dhis2Client
-from pydantic import BaseModel, Field
+from dhis2w_client import Dhis2, Dhis2Client
+from pydantic import BaseModel, ConfigDict, Field
+
+from chap_checker.client import Dhis2Target
+
+_VERSION_RE = re.compile(r"^(\d+)\.(\d+)")
+
+
+def parse_dhis2_version(version_str: str) -> Dhis2 | None:
+    """Map a DHIS2 `/api/system/info` `version` field to a `Dhis2` enum.
+
+    DHIS2 reports its version as e.g. `"2.42.3"` or `"2.44-SNAPSHOT"`. We
+    pull the minor number and map it to `Dhis2.V41`, `Dhis2.V42`, or
+    `Dhis2.V43` (the versions dhis2w-client 0.14 ships generated modules
+    for). Unrecognised or out-of-range versions return None so the caller
+    can skip version-typed work without crashing the run.
+
+    Mirrors dhis2w-client's internal `_pick_version_key` semantics without
+    relying on a private API.
+    """
+    match = _VERSION_RE.match(version_str or "")
+    if not match:
+        return None
+    key = f"v{int(match.group(2))}"
+    try:
+        return Dhis2(key)
+    except ValueError:
+        return None
 
 
 def format_request_error(exc: BaseException, *, path: str | None = None) -> str:
@@ -54,6 +81,32 @@ class CheckResult(BaseModel):
     duration_ms: float = 0.0
 
 
+class CheckContext(BaseModel):
+    """Per-target run context handed to every `Check.run` call.
+
+    Built incrementally by the runner: starts empty for the first check
+    and accumulates as checks complete. A check can read
+    `ctx.dhis2_version` once `dhis2_system_info` has run to decide which
+    typed resources or version-specific payload parsers to use; the
+    field is `None` whenever the probe hasn't happened yet, failed, or
+    reported an unrecognised version string.
+
+    `prior_results` is a name->result dict of every check that has
+    completed (in any status) before this one. The runner mutates the
+    context in place between checks, so a check should treat its
+    contents as a snapshot at the moment `run()` was called.
+
+    Custom checks that don't need any of this can ignore the `ctx`
+    argument entirely - it's there for the checks that do.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    target: Dhis2Target
+    dhis2_version: Dhis2 | None = None
+    prior_results: dict[str, CheckResult] = Field(default_factory=dict)
+
+
 @runtime_checkable
 class Check(Protocol):
     """Protocol all checks implement.
@@ -66,6 +119,16 @@ class Check(Protocol):
     before this one runs. If any prerequisite is not ``OK`` the runner skips
     this check and records :attr:`Status.SKIPPED`, suppressing cascade noise
     when a foundational check fails.
+
+    The runner passes both an opened ``Dhis2Client`` and a
+    :class:`CheckContext`. Most checks only need ``client``; the context
+    is there for checks that want to:
+
+    - read the detected DHIS2 version (`ctx.dhis2_version`) to pick a
+      version-typed payload parser from `dhis2w_client.generated.v4*`,
+    - peek at an earlier check's `details` via `ctx.prior_results[name]`,
+    - open their own typed client when needed via
+      `ctx.target.open(version=ctx.dhis2_version)`.
     """
 
     name: ClassVar[str]
@@ -73,8 +136,14 @@ class Check(Protocol):
     order: ClassVar[int]
     requires: ClassVar[list[str]]
 
-    async def run(self, client: Dhis2Client) -> CheckResult:
-        """Execute the check against ``client`` and return a result."""
+    async def run(self, client: Dhis2Client, ctx: CheckContext) -> CheckResult:
+        """Execute the check against `client` and return a result.
+
+        `ctx` is mutable shared state for the target's run. Reading
+        `ctx.dhis2_version` / `ctx.prior_results` is the common case;
+        writing fields (e.g. populating `ctx.dhis2_version` from
+        `/api/system/info`) is a deliberate signal to later checks.
+        """
         ...
 
 

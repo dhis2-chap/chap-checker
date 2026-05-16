@@ -9,7 +9,7 @@ import pytest
 from dhis2w_client import Dhis2Client
 from pydantic import HttpUrl
 
-from chap_checker.checks.base import Status
+from chap_checker.checks.base import CheckContext, Status
 from chap_checker.checks.dhis2_chap_modeling_app import Dhis2ChapModelingAppCheck
 from chap_checker.checks.dhis2_chap_system_info import Dhis2ChapSystemInfoCheck
 from chap_checker.checks.dhis2_ping import Dhis2PingCheck
@@ -17,12 +17,20 @@ from chap_checker.checks.dhis2_system_info import Dhis2SystemInfoCheck
 from chap_checker.client import Dhis2Target
 
 
-def _client(handler: Callable[[httpx.Request], httpx.Response]) -> Dhis2Client:
-    target = Dhis2Target(
+def _target() -> Dhis2Target:
+    return Dhis2Target(
         base_url=cast(HttpUrl, "https://x.example"),
         username="u",
         password="p",
     )
+
+
+def _ctx() -> CheckContext:
+    return CheckContext(target=_target())
+
+
+def _client(handler: Callable[[httpx.Request], httpx.Response]) -> Dhis2Client:
+    target = _target()
     client = target.open()
     # Preset the upstream client's HTTP pool with a MockTransport-backed
     # AsyncClient. The upstream `connect()` only constructs a fresh pool
@@ -50,7 +58,7 @@ def test_ping_fails_on_non_json_2xx(content_type: str, body: bytes) -> None:
         return httpx.Response(200, content=body, headers={"content-type": content_type})
 
     client = _client(handler)
-    result = asyncio.run(Dhis2PingCheck().run(client))
+    result = asyncio.run(Dhis2PingCheck().run(client, _ctx()))
     assert result.status is Status.FAIL
     assert "non-JSON" in result.message or "SSO" in result.message
 
@@ -60,7 +68,7 @@ def test_ping_fails_on_json_without_username_or_id() -> None:
         return httpx.Response(200, json={"something_else": "x"})
 
     client = _client(handler)
-    result = asyncio.run(Dhis2PingCheck().run(client))
+    result = asyncio.run(Dhis2PingCheck().run(client, _ctx()))
     assert result.status is Status.FAIL
     assert "username" in result.message and "id" in result.message
 
@@ -70,7 +78,7 @@ def test_ping_ok_on_json_with_username() -> None:
         return httpx.Response(200, json={"username": "admin", "id": "abc"})
 
     client = _client(handler)
-    result = asyncio.run(Dhis2PingCheck().run(client))
+    result = asyncio.run(Dhis2PingCheck().run(client, _ctx()))
     assert result.status is Status.OK
     assert "admin" in result.message
 
@@ -80,7 +88,7 @@ def test_system_info_fails_on_non_dict_body() -> None:
         return httpx.Response(200, json=["a", "b", "c"])
 
     client = _client(handler)
-    result = asyncio.run(Dhis2SystemInfoCheck().run(client))
+    result = asyncio.run(Dhis2SystemInfoCheck().run(client, _ctx()))
     assert result.status is Status.FAIL
     assert "shape" in result.message
 
@@ -90,7 +98,7 @@ def test_chap_system_info_fails_on_non_dict_body() -> None:
         return httpx.Response(200, json="not an object")
 
     client = _client(handler)
-    result = asyncio.run(Dhis2ChapSystemInfoCheck().run(client))
+    result = asyncio.run(Dhis2ChapSystemInfoCheck().run(client, _ctx()))
     assert result.status is Status.FAIL
     assert "shape" in result.message
 
@@ -100,7 +108,7 @@ def test_modeling_app_fails_on_string_body() -> None:
         return httpx.Response(200, json="not a list or object")
 
     client = _client(handler)
-    result = asyncio.run(Dhis2ChapModelingAppCheck().run(client))
+    result = asyncio.run(Dhis2ChapModelingAppCheck().run(client, _ctx()))
     assert result.status is Status.FAIL
     assert "shape" in result.message
 
@@ -110,6 +118,6 @@ def test_modeling_app_fails_on_non_dict_entries() -> None:
         return httpx.Response(200, json=["this", "is", "a", "list of strings"])
 
     client = _client(handler)
-    result = asyncio.run(Dhis2ChapModelingAppCheck().run(client))
+    result = asyncio.run(Dhis2ChapModelingAppCheck().run(client, _ctx()))
     assert result.status is Status.FAIL
     assert "entry" in result.message or "shape" in result.message

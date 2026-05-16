@@ -8,7 +8,7 @@ from typing import Any, ClassVar
 from dhis2w_client import Dhis2Client
 from pydantic import BaseModel, ConfigDict, Field
 
-from chap_checker.checks.base import CheckResult, Status, format_request_error, register_check
+from chap_checker.checks.base import CheckContext, CheckResult, Status, format_request_error, register_check
 
 ROUTE_PROXY_PATH = "/api/routes/chap/run/system/info"
 
@@ -35,7 +35,7 @@ class Dhis2ChapSystemInfoCheck:
     order: ClassVar[int] = 50
     requires: ClassVar[list[str]] = ["dhis2_chap_ping"]
 
-    async def run(self, client: Dhis2Client) -> CheckResult:
+    async def run(self, client: Dhis2Client, ctx: CheckContext) -> CheckResult:  # noqa: ARG002
         start = time.perf_counter()
         try:
             response = await client.get_response(ROUTE_PROXY_PATH)
