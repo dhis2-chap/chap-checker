@@ -6,6 +6,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.7.3] — 2026-05-16
+
+### Fixed
+
+- **TUI theme race on `tui --connect URL`.** `TokenPromptScreen` was painting in the default phosphor theme before the daemon's `[ui].theme` was known, briefly flashing green-on-black before snapping to the right palette once `/api/state` returned. `DashboardApp.on_mount` now `awaits` a one-shot `_probe_remote_theme()` call against `/api/auth` and sets `self.theme` *before* anything paints. Same fix shape as the browser modal's pre-paint apply, just on the TUI side.
+
+### Added
+
+- **`scripts/capture_token_modal.py`** — committed Textual capture script that drives `DashboardApp(connect_url=URL)` through to the auth-token modal and saves an SVG via `app.save_screenshot()`. Used to verify the theme-race fix and any future modal change.
+- **`scripts/capture_browser.py`** — committed Playwright async-API capture script that drives the browser dashboard end-to-end (login modal → signed-in dashboard → sign-out) and writes three PNGs. Replaces ad-hoc Playwright MCP runs for repeatable visual checks.
+- **`playwright`** added to the `dev` dependency group (chromium binary installed via `uv run playwright install chromium`).
+- **CLAUDE.md rule 6**: any UI-affecting change (TUI or browser) must be visually verified against a rendered artifact before review — `scripts/` covers the common flows.
+
 ## [0.7.2] — 2026-05-16
 
 ### Changed
@@ -138,7 +151,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 For 0.1.x / 0.2.x release notes, see the [GitHub Releases page](https://github.com/dhis2-chap/chap-checker/releases).
 
-[Unreleased]: https://github.com/dhis2-chap/chap-checker/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/dhis2-chap/chap-checker/compare/v0.7.3...HEAD
+[0.7.3]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.7.3
 [0.7.2]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.7.2
 [0.7.1]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.7.1
 [0.7.0]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.7.0

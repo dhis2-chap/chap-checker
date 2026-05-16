@@ -964,8 +964,40 @@ class DashboardApp(App[None]):
                 timeout=httpx.Timeout(10.0),
                 headers=headers,
             )
+            # Probe `/api/auth` synchronously before the first refresh so
+            # the configured `[ui].theme` is applied before any modal
+            # paints. Without this the TokenPromptScreen would render in
+            # the default Textual theme (phosphor green) and snap to the
+            # real theme only after sign-in. Same idea as the browser
+            # SPA's eager /api/auth probe.
+            await self._probe_remote_theme()
         self.set_interval(self.interval_s, self.action_refresh)
         self.call_after_refresh(self.action_refresh)
+
+    async def _probe_remote_theme(self) -> None:
+        """Best-effort fetch of `/api/auth` to learn the daemon's `[ui].theme`.
+
+        Failures are swallowed - if the probe can't reach the daemon the
+        TUI just stays on phosphor until `/api/state` returns. The
+        endpoint is unauthenticated so this works whether or not
+        `[auth]` is configured.
+        """
+        if self.connect_url is None:
+            return
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(5.0)) as probe:
+                response = await probe.get(self.connect_url.rstrip("/") + "/api/auth")
+            if response.status_code != 200:
+                return
+            data = response.json()
+        except Exception:  # noqa: BLE001 - any failure falls through silently
+            return
+        remote_theme = data.get("ui_theme") if isinstance(data, dict) else None
+        if isinstance(remote_theme, str):
+            try:
+                self.theme = _textual_theme_name(remote_theme)
+            except Exception:  # noqa: BLE001 - unknown theme value just stays on phosphor
+                pass
 
     async def on_unmount(self) -> None:
         if self._http_client is not None:

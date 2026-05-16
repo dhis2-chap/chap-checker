@@ -1,6 +1,6 @@
 [project]
 name = "chap-checker"
-version = "0.7.2"
+version = "0.7.3"
 description = "Health-check CLI for DHIS2 instances integrated with chap-core; cron-friendly with Slack alerts on status transitions."
 readme = "README.md"
 authors = [{ name = "Morten Hansen", email = "morten@dhis2.org" }]
@@ -41,6 +41,7 @@ dev = [
   "mkdocs>=1.6.0",
   "mkdocs-material>=9.5.0",
   "mypy>=1.13.0",
+  "playwright>=1.59.0",
   "pyright>=1.1.400",
   "pytest>=8.3.0",
   "pytest-asyncio>=0.24.0",
