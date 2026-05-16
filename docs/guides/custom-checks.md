@@ -15,7 +15,7 @@ add one:
 from typing import ClassVar
 import time
 
-from chap_checker.checks.base import CheckResult, Status, register_check
+from chap_checker.checks.base import CheckResult, Status, format_request_error, register_check
 from chap_checker.client import Dhis2Client
 
 
@@ -31,12 +31,16 @@ class Dhis2ChapMyCustomCheck:
     async def run(self, client: Dhis2Client) -> CheckResult:
         start = time.perf_counter()
         try:
-            response = await client.get("routes/chap/run/some/endpoint")
+            # `client.get_response(path)` returns the raw `httpx.Response`
+            # without raising on 4xx/5xx, so the check can report status
+            # codes itself. `client.get(path, model=...)` is the typed
+            # alternative for happy-path GETs; not what we want here.
+            response = await client.get_response("/api/routes/chap/run/some/endpoint")
         except Exception as exc:  # noqa: BLE001
             return CheckResult(
                 name=self.name,
                 status=Status.ERROR,
-                message=f"Request failed: {exc}",
+                message=format_request_error(exc, path="/api/routes/chap/run/some/endpoint"),
                 duration_ms=(time.perf_counter() - start) * 1000,
             )
         duration_ms = (time.perf_counter() - start) * 1000
@@ -66,7 +70,11 @@ class Dhis2ChapMyCustomCheck:
 
 ## Conventions
 
-- **HTTP errors return `Status.ERROR`** with a `Request failed: ...` message.
+- **HTTP errors return `Status.ERROR`** built via `format_request_error(exc, path=...)`.
+  Plain `str(exc)` is empty for `httpx.TimeoutException`, which leaves the
+  operator-facing message as just `"Request failed: "` - the helper always
+  carries the exception type name and falls back to `"(no message)"` so the
+  failure mode is visible at a glance.
   Bad status codes (`>= 400`) return `Status.FAIL`. Unexpected response shapes
   return `Status.FAIL`. `Status.WARN` is for "responded but with anomalies"
   (e.g. missing version field).
@@ -78,8 +86,12 @@ class Dhis2ChapMyCustomCheck:
 - **Use pydantic models** for response shapes you care about (see
   `Dhis2SystemInfo`, `ChapCoreSystemInfo`, `Dhis2App` for examples). Avoid
   `dict[str, Any]` for anything that flows further than the immediate check.
-- **Use `httpx`** for any HTTP, via the provided `client.get(path)`. Don't
-  reach for `requests` / `urllib`.
+- **Use `client.get_response(path)`** for status-aware checks. It returns
+  the raw `httpx.Response` without raising on 4xx/5xx, so the check can
+  treat status codes as facts to report. Reserve `client.get(path, model=...)`
+  for the typed happy path - it raises on 4xx/5xx and parses the body into
+  a pydantic model, which is great for ingest code but the wrong shape for
+  health checks. Either way, don't reach for `requests` / `urllib`.
 
 ## Registration mechanics
 

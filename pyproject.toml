@@ -1,6 +1,6 @@
 [project]
 name = "chap-checker"
-version = "0.4.0"
+version = "0.4.1"
 description = "Health-check CLI for DHIS2 instances integrated with chap-core; cron-friendly with Slack alerts on status transitions."
 readme = "README.md"
 authors = [{ name = "Morten Hansen", email = "morten@dhis2.org" }]

@@ -102,6 +102,7 @@ chap-core through the DHIS2 route. Each tile in the dashboard, each row in
 - `dhis2_chap_ping` — `/api/routes/chap/run/health`
 - `dhis2_chap_system_info` — `/api/routes/chap/run/system/info`
 - `dhis2_chap_modeling_app` — `/api/apps` (matched by `app_hub_id`)
+- `dhis2_chap_climate_app` — `/api/apps` (matched by `app_hub_id`)
 
 Full reference + endpoint details: [Built-in checks](https://dhis2-chap.github.io/chap-checker/guides/checks/).
 

@@ -9,6 +9,25 @@ from dhis2w_client import Dhis2Client
 from pydantic import BaseModel, Field
 
 
+def format_request_error(exc: BaseException, *, path: str | None = None) -> str:
+    """Render a transport exception into a useful operator-facing message.
+
+    `str(httpx.TimeoutException)` is often empty - "Request failed: " on its
+    own tells the operator nothing. This helper always carries the exception
+    type and falls back to "(no message)" when `str(exc)` is empty. Pass the
+    request `path` when known so an operator can tell which endpoint failed
+    without grepping the check source.
+
+    Example outputs:
+
+        ReadTimeout (/api/me): (no message)
+        ConnectError (/api/system/info): [Errno 8] nodename nor servname provided
+    """
+    base = str(exc).strip() or "(no message)"
+    where = f" ({path})" if path else ""
+    return f"{type(exc).__name__}{where}: {base}"
+
+
 class Status(StrEnum):
     """Outcome of a single check.
 

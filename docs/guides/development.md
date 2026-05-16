@@ -38,7 +38,7 @@ src/chap_checker/
 ├── logging.py             # stderr-only logger config
 ├── daemon.py              # DashboardServer (refresh loop + per-tile trackers + DashboardState)
 ├── dashboard.py           # Textual TUI; embeds DashboardServer in local mode, httpx-polls in --connect mode
-├── web.py                 # FastAPI app exposing the daemon's /api/state + browser bundle
+├── serve.py               # FastAPI app exposing the daemon's /api/state + browser bundle (chap-checker serve)
 ├── alerts/
 │   ├── base.py            # Alerter protocol + Transition + register_alerter
 │   └── slack.py           # SlackAlerter
