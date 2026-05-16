@@ -23,6 +23,27 @@ DEFAULT_CONFIG_FILENAME = "chap-checker.toml"
 _log = get_logger("config")
 
 
+def _resolve_value_or_env(value: str | None, env_var: str | None, *, source_label: str) -> str:
+    """Return `value` if set, otherwise read `env_var` from the environment.
+
+    The "one of literal or env var" pattern repeats across `InstanceConfig`,
+    `SlackAlertConfig`, `WebhookAlertConfig`, and `AuthConfig`. Centralising
+    it here keeps the error message shape consistent and avoids the
+    pre-condition `assert` dance each caller used to do.
+
+    `source_label` names the field for error messages
+    (e.g. `"password_env"`, `"auth.token_env"`).
+    """
+    if value is not None:
+        return value
+    if env_var is None:
+        raise RuntimeError(f"{source_label}: neither a literal value nor an env-var name was set.")
+    resolved = os.environ.get(env_var)
+    if resolved is None:
+        raise RuntimeError(f"Environment variable '{env_var}' is not set (referenced by {source_label}).")
+    return resolved
+
+
 class InstanceConfig(BaseModel):
     """One DHIS2 instance to check.
 
@@ -224,6 +245,37 @@ class AlertsConfig(BaseModel):
     webhook: WebhookAlertConfig | None = None
 
 
+class AuthConfig(BaseModel):
+    """`[auth]` section — protects `chap-checker serve`'s `/api/*` routes.
+
+    Presence of the block in the TOML opts the daemon into requiring an
+    `Authorization: Bearer <token>` header on every protected request.
+    Absent means auth is disabled (today's behaviour).
+
+    Comparison uses `hmac.compare_digest` server-side so a wrong token
+    leaks no length / prefix information. Rotation is "update the env
+    var, restart serve".
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    token: str | None = Field(default=None, repr=False)
+    token_env: str | None = None
+
+    @model_validator(mode="after")
+    def _exactly_one_token_source(self) -> "AuthConfig":
+        if (self.token is None) == (self.token_env is None):
+            raise ValueError(
+                "set exactly one of 'token' or 'token_env' in [auth] "
+                "(or omit the [auth] block entirely to disable auth).",
+            )
+        return self
+
+    def resolve_token(self) -> str:
+        """Return the bearer token, reading from env if `token_env` is set."""
+        return _resolve_value_or_env(self.token, self.token_env, source_label="auth.token_env")
+
+
 UiTheme = Literal["phosphor", "amber", "high", "tokyo", "dhis2"]
 DEFAULT_UI_TITLE = "DHIS2 / Climate Instance Checker"
 
@@ -255,6 +307,7 @@ class CheckerConfig(BaseModel):
 
     instances: dict[str, InstanceConfig] = Field(default_factory=dict)
     alerts: AlertsConfig | None = None
+    auth: AuthConfig | None = None
     ui: UiConfig = Field(default_factory=UiConfig)
     concurrency: int = Field(default=DEFAULT_CONCURRENCY, gt=0, le=100)
     # `[retry]` block in the TOML, applied to every instance that doesn't

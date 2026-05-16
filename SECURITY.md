@@ -28,7 +28,7 @@ chap-checker is a CLI / daemon for monitoring DHIS2 instances. In scope:
 
 - Any vulnerability in the chap-checker code (the Python package, the bundled web UI, the daemon's HTTP surface).
 - Credential or secret leakage in logs, error messages, or persisted state files.
-- Authentication / authorization issues in the `chap-checker serve` HTTP surface — note that today the daemon is unauthenticated by design (operators put it behind a reverse proxy / VPN; see `docs/guides/serve.md#security`). A report of "no auth on /api/state" is therefore not a vulnerability, but a missing-default in a deployment would be.
+- Authentication / authorization issues in the `chap-checker serve` HTTP surface. As of 0.7, the daemon supports optional bearer-token auth via the `[auth]` block (see `docs/guides/serve.md#authentication`); auth is **off by default for backwards compatibility**, so a report of "no auth on /api/state on a deployment without `[auth]` configured" is not a vulnerability. Any way to bypass the token when `[auth]` *is* set, or to read the token from a non-protected response, is in scope.
 
 Out of scope:
 
@@ -41,5 +41,5 @@ We patch the latest `0.x` release. Pre-1.0 alpha releases below the current one 
 
 | Version | Supported |
 |---------|-----------|
-| 0.6.x   | Yes       |
-| < 0.6.0 | No        |
+| 0.7.x   | Yes       |
+| < 0.7.0 | No        |

@@ -167,6 +167,13 @@ checks = ["dhis2_ping", "dhis2_system_info"]
 # url_env = "MY_WEBHOOK_URL"
 # notify_on = ["fail", "error", "warn"]
 # headers = { "Authorization" = "Bearer ..." }
+
+# Optional bearer-token auth for `chap-checker serve`. Presence of this
+# block requires every /api/state and /api/reload request to carry
+# `Authorization: Bearer <token>`. Browser dashboard gets a built-in login
+# modal; TUI accepts --token-env. See docs/guides/serve.md#authentication.
+# [auth]
+# token_env = "CHAP_CHECKER_TOKEN"
 """
 
 
@@ -403,6 +410,23 @@ def tui_command(
             "--state / --alerts."
         ),
     ),
+    token: str | None = typer.Option(
+        None,
+        "--token",
+        help=(
+            "Bearer token for an authenticated remote `chap-checker serve` (--connect mode only). "
+            "Discouraged inline - the value lands in shell history and `ps` output; prefer --token-env."
+        ),
+        envvar="CHAP_CHECKER_TOKEN",
+    ),
+    token_env: str | None = typer.Option(
+        None,
+        "--token-env",
+        help=(
+            "Name of the env var holding the bearer token for --connect. Recommended over --token. "
+            "Only meaningful with --connect; ignored otherwise."
+        ),
+    ),
 ) -> None:
     """Launch the Textual TUI dashboard (local or `--connect` mode).
 
@@ -442,11 +466,33 @@ def tui_command(
                 f"--connect is mutually exclusive with {', '.join(conflicts)}. "
                 "Those settings live on the remote daemon you're connecting to.",
             )
+        # `--token` and `--token-env` are also mutually exclusive (same
+        # rationale as `verify`'s password / password_env pair).
+        if token is not None and token_env is not None:
+            raise typer.BadParameter("Pass either --token or --token-env, not both.")
+        connect_token: str | None = None
+        if token_env is not None:
+            connect_token = os.environ.get(token_env)
+            if not connect_token:
+                raise typer.BadParameter(f"--token-env {token_env}: env var is not set or empty.")
+        elif token is not None:
+            connect_token = token
         run_dashboard(
             interval_s=interval,
             connect_url=connect,
+            connect_token=connect_token,
         )
         return
+
+    # `--token` / `--token-env` only make sense with --connect; flag the
+    # combination early instead of silently dropping the credential.
+    if (
+        ctx.get_parameter_source("token") == click.core.ParameterSource.COMMANDLINE
+        or ctx.get_parameter_source("token_env") == click.core.ParameterSource.COMMANDLINE
+    ):
+        raise typer.BadParameter(
+            "--token / --token-env only apply with --connect URL. Drop the flag for local-mode runs.",
+        )
 
     config_path = config if config is not None else default_config_path()
     if not config_path.exists():
@@ -774,6 +820,16 @@ def serve_command(
 
     targets = [entry.to_target_entry(name, default_retry_policy=cfg.retry) for name, entry in cfg.instances.items()]
     state_path = state if state is not None else config_path.parent / DEFAULT_STATE_FILENAME
+    # `[auth]` block in the TOML opts the daemon into bearer-token auth on
+    # /api/*. Resolved here so an env-var lookup failure is surfaced as a
+    # clean CLI error (BadParameter) rather than a 500 from inside the
+    # daemon on the first request.
+    auth_token: str | None = None
+    if cfg.auth is not None:
+        try:
+            auth_token = cfg.auth.resolve_token()
+        except RuntimeError as exc:
+            raise typer.BadParameter(str(exc)) from exc
 
     # Late import so the FastAPI / uvicorn deps only load when serve runs.
     # The startup banner + per-request access lines are emitted via the
@@ -790,6 +846,7 @@ def serve_command(
         host=host,
         port=port,
         ui_enabled=ui_enabled,
+        auth_token=auth_token,
     )
 
 

@@ -278,18 +278,64 @@ behind strict CSP without any third-party trust dependency.
 The browser does *not* drive the actual probes — they happen on the
 server on its own schedule. The browser is just a view.
 
-## Security
+## Authentication
 
-The server has **no authentication**. The credentials in your config are
-never sent to the browser, but anyone who can reach the bind address can
-see which DHIS2 instances are configured and their current status.
+Off by default for backwards compatibility, but trivial to opt in: add an `[auth]` block to your TOML and `chap-checker serve` will require an `Authorization: Bearer <token>` header on every request to `/api/state` and `/api/reload`. The browser dashboard's SPA shell stays unauthenticated so the built-in login modal can render before a token exists; static assets stay public for the same reason.
 
-- Default `--host 127.0.0.1` keeps it on the loopback interface (most
-  conservative).
-- For a single TV on the LAN, `--host 0.0.0.0` is fine if the network is
-  trusted.
-- For anything more exposed, put it behind a reverse proxy (nginx /
-  caddy) with HTTP basic auth, SSO, or VPN-gated access.
+### Generate and configure a token
+
+```bash
+openssl rand -hex 32        # one-time: pick a 64-char hex token
+```
+
+In `chap-checker.toml`:
+
+```toml
+[auth]
+# Inline (NOT recommended for shared configs):
+# token = "REPLACE_ME"
+
+# Recommended - export the env var via your secrets manager / systemd
+# EnvironmentFile / .envrc / whatever:
+token_env = "CHAP_CHECKER_TOKEN"
+```
+
+Restart the daemon. Every call to `/api/state` now needs the header:
+
+```bash
+curl http://127.0.0.1:8765/api/state                              # 401
+curl -H 'Authorization: Bearer <token>' http://127.0.0.1:8765/api/state   # 200
+```
+
+### TUI clients
+
+```bash
+export CHAP_CHECKER_TOKEN=<the same token>
+chap-checker tui --connect http://daemon-host:8765 --token-env CHAP_CHECKER_TOKEN
+```
+
+A wrong / missing token paints the disconnect banner with `"auth rejected by ..."` (distinct from a generic "disconnected", so you know the receiver is up but the credential is bad).
+
+### Browser
+
+Open the dashboard URL in a browser. First load gets a 401, the SPA renders a login modal, you paste the token, and it's stored in `localStorage` for the session. The Ctrl+K / ⌘K command palette has a **Sign out** entry that clears the stored token and reloads.
+
+### Rotation
+
+There's no rotation API. Update the env var (or the inline `token`) and restart `chap-checker serve`. Every existing browser session will pop the login modal on its next poll; every TUI client gets the auth-rejected banner until you update its `--token-env`.
+
+### Threat model
+
+Single shared token; no per-user accounts, no audit log per identity, no scope-of-access. Anyone with the token has the same view of the same instances. For stronger isolation — different views for different operators, audit trails, federated SSO — front the daemon with a reverse proxy that does its own auth (nginx + OAuth2-Proxy, Caddy + JWT, Cloudflare Access, ...). Built-in auth and a proxy aren't mutually exclusive.
+
+### What's *not* protected
+
+- `GET /` and the static SPA assets stay public so the login modal can render. The SPA carries no DHIS2 data; it just paints whatever `/api/state` returns.
+- `GET /api/auth` is unprotected and returns `{"required": true|false}`. The SPA reads this on first load to decide whether to attach an Authorization header at all. The endpoint leaks no token material.
+
+### Non-loopback warning
+
+If you run `serve --host 0.0.0.0` (or any non-loopback bind) *without* an `[auth]` block configured, the daemon logs a startup WARNING — the listen socket is reachable from outside loopback and `/api/state` would be unauthenticated. The bind isn't refused (some operators are behind a reverse proxy / VPN and don't want the warning to be fatal); the nudge is just visible in the logs.
 
 ## Layout
 

@@ -132,6 +132,8 @@ $ chap-checker tui [OPTIONS]
 * `--alerts / --no-alerts`: Dispatch Slack/etc. alerts from refresh cycles. Off by default - the TUI is usually all you need; flip this on if you want it to also page.  [default: no-alerts]
 * `--state PATH`: State file path (default: ./chap-checker.state.json next to the config).  [env var: CHAP_CHECKER_STATE]
 * `--connect TEXT`: Render a remote `chap-checker serve` daemon instead of running checks locally. Pass the base URL (e.g. http://tv-host:8765). Mutually exclusive with --config / --state / --alerts.
+* `--token TEXT`: Bearer token for an authenticated remote `chap-checker serve` (--connect mode only). Discouraged inline - the value lands in shell history and `ps` output; prefer --token-env.  [env var: CHAP_CHECKER_TOKEN]
+* `--token-env TEXT`: Name of the env var holding the bearer token for --connect. Recommended over --token. Only meaningful with --connect; ignored otherwise.
 * `--help`: Show this message and exit.
 
 ## `chap-checker serve`

@@ -2,11 +2,9 @@
 
 [![CI](https://github.com/dhis2-chap/chap-checker/actions/workflows/ci.yml/badge.svg)](https://github.com/dhis2-chap/chap-checker/actions/workflows/ci.yml)
 [![PyPI version](https://img.shields.io/pypi/v/chap-checker)](https://pypi.org/project/chap-checker/)
-[![PyPI downloads](https://img.shields.io/pypi/dm/chap-checker)](https://pypi.org/project/chap-checker/)
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Documentation](https://img.shields.io/badge/docs-mkdocs-blue.svg)](https://dhis2-chap.github.io/chap-checker/)
-[![Conventional Commits](https://img.shields.io/badge/Conventional%20Commits-1.0.0-yellow.svg)](https://conventionalcommits.org)
 
 A small command-line health-check and alerting tool for DHIS2 instances that
 integrate with `chap-core` via a DHIS2 route. Cron-friendly, with optional

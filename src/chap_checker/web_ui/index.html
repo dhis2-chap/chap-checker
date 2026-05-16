@@ -87,6 +87,11 @@
        filename marks "not from the design zip - survives drop-in updates". -->
   <script src="_state.js"></script>
 
+  <!-- Login modal for bearer-token auth (0.7+). JSX, but lives outside
+       src/ so it survives the next design-zip drop. Mounts into its own
+       DOM root (#ck-auth-root) so the artifact's root is undisturbed. -->
+  <script type="text/babel" src="_auth.js"></script>
+
   <!-- Designer artifact. Dependency order: tweaks-panel -> card -> palette -> app.
        Files in src/ get replaced wholesale on every Claude Designer
        drop; app.jsx contains one well-commented edit to consume live

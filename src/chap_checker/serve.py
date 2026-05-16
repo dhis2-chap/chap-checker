@@ -23,14 +23,15 @@ Architecture:
 from __future__ import annotations
 
 import asyncio
+import hmac
 import logging
 import time
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import FastAPI, Request, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -42,6 +43,37 @@ from chap_checker.runner import TargetEntry
 
 _log = get_logger("serve")
 _access_log = get_logger("serve.access")
+
+
+def _make_auth_dependency(token: str | None) -> Callable[..., Awaitable[None]]:
+    """Return a FastAPI dependency that gates protected routes on a bearer token.
+
+    `token=None` means auth is disabled (dependency is a no-op). When a token
+    is configured, every protected route receives a `require_auth` call that
+    parses `Authorization: Bearer <token>` and compares the value with
+    `hmac.compare_digest` so a wrong token can't be brute-forced by timing.
+    """
+
+    async def require_auth(
+        authorization: Annotated[str | None, Header(include_in_schema=False)] = None,
+    ) -> None:
+        if token is None:
+            return
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="missing bearer token",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        provided = authorization.removeprefix("Bearer ").strip()
+        if not hmac.compare_digest(provided, token):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="bad token",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+    return require_auth
 
 
 class AccessLogMiddleware(BaseHTTPMiddleware):
@@ -75,13 +107,24 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
         return response
 
 
-def make_app(server: DashboardServer, ui_enabled: bool = True) -> FastAPI:
+def make_app(
+    server: DashboardServer,
+    ui_enabled: bool = True,
+    auth_token: str | None = None,
+) -> FastAPI:
     """Build the FastAPI app, wiring the background refresh task into its lifespan.
 
     With `ui_enabled=False` the browser dashboard is skipped — `GET /` returns
     404 and the static-file mount is not registered. The JSON API at
     `/api/*` is unaffected; use this for headless deployments where only
     the TUI `--connect` clients or external scrapers consume the state.
+
+    `auth_token`, when set, protects `/api/state` and `/api/reload` with
+    a bearer-token check. The browser SPA + static assets stay
+    unauthenticated so the login modal can render before a token exists
+    (the SPA fetches `/api/state`, gets 401, prompts for the token,
+    stores it in localStorage, retries). `auth_token=None` keeps the
+    routes unauthenticated, matching 0.6.x behaviour.
     """
 
     @asynccontextmanager
@@ -99,11 +142,14 @@ def make_app(server: DashboardServer, ui_enabled: bool = True) -> FastAPI:
     app = FastAPI(title="chap-checker", lifespan=lifespan)
     app.add_middleware(AccessLogMiddleware)
 
-    @app.get("/api/state")
+    require_auth = _make_auth_dependency(auth_token)
+    protected: list[Any] = [Depends(require_auth)]
+
+    @app.get("/api/state", dependencies=protected)
     async def api_state() -> JSONResponse:
         return JSONResponse(server.snapshot().model_dump(mode="json"))
 
-    @app.post("/api/reload")
+    @app.post("/api/reload", dependencies=protected)
     async def api_reload() -> JSONResponse:
         """Re-read the config file and apply targets / cfg in place.
 
@@ -125,6 +171,16 @@ def make_app(server: DashboardServer, ui_enabled: bool = True) -> FastAPI:
                 "removed": sorted(removed),
             }
         )
+
+    @app.get("/api/auth", include_in_schema=False)
+    async def api_auth_status() -> JSONResponse:
+        """Lightweight unprotected hint so the SPA can show / hide the login modal.
+
+        Returns `{"required": true|false}` based on whether `auth_token`
+        is set. No token leaks — just a boolean. The SPA checks this on
+        load before deciding whether to attach an Authorization header.
+        """
+        return JSONResponse({"required": auth_token is not None})
 
     if ui_enabled:
         # The React SPA + Babel-standalone wiring lives next to this module
@@ -170,6 +226,7 @@ def run(
     port: int = 8765,
     config_path: Path | None = None,
     ui_enabled: bool = True,
+    auth_token: str | None = None,
 ) -> None:
     """Launch the chap-checker server on `host:port`.
 
@@ -178,11 +235,12 @@ def run(
     default serves a browser dashboard at `/`. Pass `ui_enabled=False`
     (or `--no-ui` on the CLI) for a headless API-only deployment.
 
-    Use `host="0.0.0.0"` to expose on the local network (e.g. for a TV
-    in the office, or so a remote `chap-checker tui --connect URL` can
-    point at it). The server has no authentication; either keep it on
-    the loopback interface or put it behind a reverse proxy with
-    network-level access controls.
+    `auth_token` (resolved from the TOML's `[auth]` block by the CLI)
+    protects `/api/*` with a bearer-token check. `None` (the default)
+    leaves the daemon unauthenticated, matching 0.6.x behaviour. When
+    `host` is non-loopback (`0.0.0.0`, a LAN address, ...) AND auth is
+    off, a startup WARNING is emitted - "the daemon is reachable but
+    has no credentials gating /api/state".
     """
     server = DashboardServer(
         targets=targets,
@@ -192,7 +250,7 @@ def run(
         alerts_enabled=alerts_enabled,
         config_path=config_path,
     )
-    app = make_app(server, ui_enabled=ui_enabled)
+    app = make_app(server, ui_enabled=ui_enabled, auth_token=auth_token)
     # Late import - uvicorn is heavyish and only needed when serving.
     import uvicorn
 
@@ -219,7 +277,24 @@ def run(
     _log.info("serving %s on http://%s:%d", surface, host, port)
     if config_path is not None:
         _log.info("config: %s", config_path)
-    _log.info("interval: %.1fs; alerts: %s", interval_s, "on" if alerts_enabled else "off")
+    _log.info(
+        "interval: %.1fs; alerts: %s; auth: %s",
+        interval_s,
+        "on" if alerts_enabled else "off",
+        "bearer-token" if auth_token else "off",
+    )
+
+    # Non-loopback bind without auth is the textbook "anyone on the LAN can
+    # see your DHIS2 status" footgun. Don't refuse the bind (some operators
+    # are behind a reverse proxy / VPN and don't want this fatal), but
+    # nudge hard at startup.
+    if auth_token is None and host not in {"127.0.0.1", "localhost", "::1"}:
+        _log.warning(
+            "serving on %s without [auth] - the daemon is reachable from outside loopback "
+            "and /api/state is unauthenticated. Add an [auth] block to chap-checker.toml "
+            "(see `chap-checker.toml.example`) or front the daemon with a reverse proxy.",
+            host,
+        )
     # `access_log=False` disables uvicorn's built-in per-request log so
     # AccessLogMiddleware is the single source of those lines.
     # `log_config=None` tells uvicorn not to re-configure logging on
