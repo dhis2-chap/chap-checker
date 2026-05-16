@@ -89,11 +89,18 @@
     });
   }
 
+  // Expose both `on` (subscribe) and `emit` (fire) on the public bus so
+  // _auth.js can drive an immediate refetch when the user signs in,
+  // instead of relying on a wrapper-around-on hack that recorded
+  // subscribers in a separate dict (which left useLiveState's `pull`
+  // unreachable because it was registered via the closure-captured `on`
+  // before any wrapper could intercept it).
   window.CK_AUTH = {
     TOKEN_KEY: CK_TOKEN_KEY,
     readToken,
     writeToken,
     on,
+    emit,
     signOut() {
       writeToken("");
       // Reload so cached React state goes away.

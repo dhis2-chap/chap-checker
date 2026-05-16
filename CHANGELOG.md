@@ -6,6 +6,27 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.7.1] — 2026-05-16
+
+### Fixed
+
+- **Browser theme race after sign-in.** The login modal's pre-paint apply wrote CSS variables to `:root` and raced with the artifact's `applyTheme()`, leaving `--header-bg` unset on first sign-in (the DHIS2 blue header bar was missing until a manual reload). The modal now renders with literal inline colours pulled from its own self-contained palette — no `:root` writes — and the artifact owns theme variables end-to-end.
+- **Immediate refetch on sign-in.** The auth-bus wrapper hack in `_auth.js` recorded subscribers in a separate dict that `_state.js`'s polling `pull` never reached, so the dashboard waited a full poll tick (~5s) after sign-in before appearing. `_state.js` now exposes `emit` on the public bus; `_auth.js` calls it directly. Dashboard renders in the next render cycle.
+
+### Added
+
+- **Sign-out button in the top-right header** of the browser dashboard (visible when a token is stored). Replaces the previous "reload config" pill — reload still available via Ctrl+K → "Reload config".
+- **DHIS2 blue accent on the dhis2 theme's login modal** — title heading + Sign in button now use `#1f4d75`, matching the signed-in dashboard's header strip.
+- **Theme-aware modal palette**: each theme (phosphor / amber / high / tokyo / dhis2) has its own `titleInk` / `inputBorder` / `btnBg` / `btnInk` / `btnBorder` so the modal feels native everywhere.
+- **`tui --connect URL` interactive token prompt**: if neither `--token` nor `--token-env` is given on a TTY, the TUI probes `/api/auth` and prompts for the token interactively (hidden input). Same UX as `verify --url --token`. Non-TTY runs silently fall through to the "auth rejected" banner.
+- **Heads-up for `tui` local mode** when `[auth]` is configured: prints a one-line note explaining that `[auth]` only gates `chap-checker serve` (the HTTP daemon), not local TUI mode which runs in the terminal and isn't network-reachable.
+- **Login modal screenshot** in the Server guide (`web-dashboard-login-dhis2.png`).
+
+### Changed
+
+- **All browser screenshots regenerated** to include the new sign-out button + auth-enabled deployment.
+- **Docs**: `chap-checker.toml.example` + `DEFAULT_INIT_TEMPLATE` clarify that `[auth]` is `serve`-only.
+
 ## [0.7.0] — 2026-05-16
 
 ### Added
@@ -102,7 +123,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 For 0.1.x / 0.2.x release notes, see the [GitHub Releases page](https://github.com/dhis2-chap/chap-checker/releases).
 
-[Unreleased]: https://github.com/dhis2-chap/chap-checker/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/dhis2-chap/chap-checker/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.7.1
 [0.7.0]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.7.0
 [0.6.0]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.6.0
 [0.5.1]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.5.1
