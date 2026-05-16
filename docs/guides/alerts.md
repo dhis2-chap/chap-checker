@@ -190,12 +190,22 @@ Two instances flipping in the same refresh tick share one envelope:
 
 ### Trying it locally
 
-Spin up a one-shot receiver and point chap-checker at it:
+Spin up a one-shot receiver and point chap-checker at it. Python's
+stdlib `http.server` doesn't accept POST requests (you'd get back a
+501 `Unsupported method ('POST')`), so use a tiny dedicated handler:
 
 ```bash
-# Terminal A: tiny receiver that prints headers + body and replies 204.
-python -m http.server 9999 --bind 127.0.0.1
-# (or use https://webhook.site for a shareable URL)
+# Terminal A: prints the body to stdout, replies 204. Ctrl+C to stop.
+python3 -c "
+from http.server import BaseHTTPRequestHandler, HTTPServer
+class H(BaseHTTPRequestHandler):
+    def do_POST(self):
+        n = int(self.headers.get('content-length', 0))
+        print(self.path, self.rfile.read(n).decode(), flush=True)
+        self.send_response(204); self.end_headers()
+HTTPServer(('127.0.0.1', 9999), H).serve_forever()
+"
+# (or use https://webhook.site for a shareable URL.)
 
 # Terminal B: minimal config
 cat > /tmp/wh.toml <<'EOF'

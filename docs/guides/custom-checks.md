@@ -5,7 +5,8 @@ add one:
 
 1. Drop a new file under `src/chap_checker/checks/`.
 2. Define a class with `name`, `description`, `order`, `requires`, and an
-   `async def run(self, client)` method.
+   `async def run(self, client, ctx)` method (`ctx: CheckContext` carries
+   per-target state like `target_name`).
 3. Decorate the class with `@register_check` — the decorator instantiates it
    once and adds it to the registry.
 4. Import the new module from `src/chap_checker/checks/__init__.py` so the
