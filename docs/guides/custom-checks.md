@@ -15,7 +15,13 @@ add one:
 from typing import ClassVar
 import time
 
-from chap_checker.checks.base import CheckResult, Status, format_request_error, register_check
+from chap_checker.checks.base import (
+    CheckContext,
+    CheckResult,
+    Status,
+    format_request_error,
+    register_check,
+)
 from chap_checker.client import Dhis2Client
 
 
@@ -28,7 +34,7 @@ class Dhis2ChapMyCustomCheck:
     order: ClassVar[int] = 70
     requires: ClassVar[list[str]] = ["dhis2_chap_ping"]
 
-    async def run(self, client: Dhis2Client) -> CheckResult:
+    async def run(self, client: Dhis2Client, ctx: CheckContext) -> CheckResult:  # noqa: ARG002
         start = time.perf_counter()
         try:
             # `client.get_response(path)` returns the raw `httpx.Response`
@@ -58,6 +64,44 @@ class Dhis2ChapMyCustomCheck:
             duration_ms=duration_ms,
         )
 ```
+
+## Using the version context (optional)
+
+`CheckContext` carries the detected DHIS2 version after `dhis2_system_info`
+runs (`None` before that, or when the server reports a version outside the
+v41/v42/v43 range dhis2w-client 0.14 ships generated modules for). Use it
+when a check needs to pick a version-specific payload parser or open a
+version-pinned typed client:
+
+```python
+from dhis2w_client import Dhis2
+
+async def run(self, client: Dhis2Client, ctx: CheckContext) -> CheckResult:
+    # Status-aware fast path: works on any DHIS2 version.
+    response = await client.get_response("/api/some/endpoint")
+    if response.status_code >= 400:
+        return CheckResult(name=self.name, status=Status.FAIL, ...)
+
+    # Version-typed deep parse: only when we know which generated module
+    # to import. ctx.dhis2_version is `Dhis2.V41 | V42 | V43 | None`.
+    if ctx.dhis2_version is Dhis2.V43:
+        from dhis2w_client.generated.v43.schemas.foo import FooSchema  # type: ignore[import]
+        parsed = FooSchema.model_validate(response.json())
+        ...
+
+    # Or open a brand-new client pinned to the detected version, e.g. so
+    # `typed.system.info()` returns the right shape. The status-aware
+    # path above already uses the runner's shared client; this is for
+    # checks that want typed accessors specifically.
+    async with ctx.target.open(version=ctx.dhis2_version) as typed:
+        info = await typed.system.info()
+        ...
+```
+
+`ctx.prior_results` is a name->`CheckResult` snapshot of every check
+that completed before this one, useful when a check wants to read an
+earlier check's `details` (e.g. the parsed `dhis2_system_info` body) without
+re-issuing the request.
 
 ## Field reference
 

@@ -109,6 +109,46 @@ execution. Hard upper bound 100.
 
 CLI flag `--concurrency N` on `verify` overrides the config value for one run.
 
+## Retries
+
+Optional `[retry]` block — installs a `dhis2w_client.RetryPolicy` on every
+target's upstream client so transient transport failures and the configured
+`retry_statuses` (default 429 / 502 / 503 / 504) are retried with
+exponential backoff. **Off by default**: a health checker generally wants
+to see flakes, not paper over them. Opt in when you specifically want a
+brief blip not to count as a failed check.
+
+```toml
+[retry]
+max_attempts = 3            # total attempts including the first call (1-10)
+base_delay = 0.5            # initial backoff seconds before the second attempt
+max_delay = 30.0            # hard cap per sleep
+backoff_factor = 2.0        # multiplier per attempt (exponential)
+jitter = 0.1                # +/- 10% random jitter on each delay
+retry_statuses = [429, 502, 503, 504]
+```
+
+For a per-instance override, set `retry_policy = { ... }` inside an
+`[instances.<name>]` block — it wins over the top-level default.
+
+```toml
+[retry]
+max_attempts = 3
+
+[instances.flaky]
+url = "https://flaky.example"
+username = "u"
+password_env = "FLAKY_PASS"
+retry_policy = { max_attempts = 5, base_delay = 1.0 }
+
+[instances.strict]
+url = "https://strict.example"
+username = "u"
+password_env = "STRICT_PASS"
+# disable retries on this one specifically while keeping the global default
+retry_policy = { max_attempts = 1 }
+```
+
 ## UI branding and theme
 
 ```toml

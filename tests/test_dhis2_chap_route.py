@@ -16,7 +16,7 @@ import httpx
 from dhis2w_client import Dhis2Client
 from pydantic import HttpUrl
 
-from chap_checker.checks.base import Status
+from chap_checker.checks.base import CheckContext, Status
 from chap_checker.checks.dhis2_chap_route import Dhis2ChapRouteCheck
 from chap_checker.client import Dhis2Target
 
@@ -39,7 +39,12 @@ def _client(handler: Callable[[httpx.Request], httpx.Response]) -> Dhis2Client:
 def _run(handler: Callable[[httpx.Request], httpx.Response]) -> "object":
     async def go() -> "object":
         async with _client(handler) as c:
-            return await Dhis2ChapRouteCheck().run(c)
+            target = Dhis2Target(
+                base_url=cast(HttpUrl, "https://x.example"),
+                username="u",
+                password="p",
+            )
+            return await Dhis2ChapRouteCheck().run(c, CheckContext(target=target))
 
     return asyncio.run(go())
 

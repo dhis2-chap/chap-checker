@@ -8,7 +8,7 @@ from typing import Any, ClassVar
 from dhis2w_client import Dhis2Client
 from pydantic import BaseModel, ConfigDict, Field
 
-from chap_checker.checks.base import CheckResult, Status, format_request_error, register_check
+from chap_checker.checks.base import CheckContext, CheckResult, Status, format_request_error, register_check
 
 MODELING_APP_HUB_ID = "a29851f9-82a7-4ecd-8b2c-58e0f220bc75"
 APPS_PATH = "/api/apps"
@@ -42,7 +42,7 @@ class Dhis2ChapModelingAppCheck:
     # own prereq chain still pulls in dhis2_ping transitively.
     requires: ClassVar[list[str]] = ["dhis2_chap_route"]
 
-    async def run(self, client: Dhis2Client) -> CheckResult:
+    async def run(self, client: Dhis2Client, ctx: CheckContext) -> CheckResult:  # noqa: ARG002
         start = time.perf_counter()
         try:
             response = await client.get_response(APPS_PATH)

@@ -107,7 +107,7 @@ DEFAULT_INIT_TEMPLATE = """\
 #
 # `chap-checker verify`             - check every instance below
 # `chap-checker verify -i <name>`   - check just one
-# `chap-checker dashboard`          - Textual TUI
+# `chap-checker tui`                - Textual TUI
 # `chap-checker serve`              - long-running daemon + browser dashboard (loopback by default)
 # `chap-checker checks list`        - every available check name
 #
@@ -141,6 +141,14 @@ checks = ["dhis2_ping", "dhis2_system_info"]
 # Optional per-instance overrides (shown with their defaults):
 # timeout_s = 10.0
 # verify_tls = true
+
+# Optional retries on transient transport failures + 429/502/503/504. Off by
+# default - a health checker usually wants to see flakes, not mask them. Opt
+# in here for the whole config, or per instance via `retry_policy = { ... }`
+# inside an [instances.<name>] block. See guides/configuration.md#retries.
+# [retry]
+# max_attempts = 3
+# base_delay = 0.5
 
 # Optional: alert to Slack when a check's status flips between OK and a non-OK
 # status. State is persisted to ./chap-checker.state.json (override with
@@ -440,7 +448,7 @@ def tui_command(
     if not cfg.instances:
         raise typer.BadParameter(f"{config_path} contains no [instances.<name>] entries.")
 
-    targets = [entry.to_target_entry(name) for name, entry in cfg.instances.items()]
+    targets = [entry.to_target_entry(name, default_retry_policy=cfg.retry) for name, entry in cfg.instances.items()]
     state_path = state if state is not None else config_path.parent / DEFAULT_STATE_FILENAME
 
     run_dashboard(
@@ -679,7 +687,7 @@ def serve_command(
     if not cfg.instances:
         raise typer.BadParameter(f"{config_path} contains no [instances.<name>] entries.")
 
-    targets = [entry.to_target_entry(name) for name, entry in cfg.instances.items()]
+    targets = [entry.to_target_entry(name, default_retry_policy=cfg.retry) for name, entry in cfg.instances.items()]
     state_path = state if state is not None else config_path.parent / DEFAULT_STATE_FILENAME
 
     # Late import so the FastAPI / uvicorn deps only load when serve runs.
@@ -954,12 +962,12 @@ def _resolve_run_context(
             entry = cfg.get(instance)
         except KeyError as exc:
             raise typer.BadParameter(str(exc)) from exc
-        target_entry = entry.to_target_entry(instance)
+        target_entry = entry.to_target_entry(instance, default_retry_policy=cfg.retry)
         if check_names:
             target_entry = target_entry.model_copy(update={"check_names": check_names})
         return [target_entry], cfg, config_path
 
-    targets = [entry.to_target_entry(name) for name, entry in cfg.instances.items()]
+    targets = [entry.to_target_entry(name, default_retry_policy=cfg.retry) for name, entry in cfg.instances.items()]
     if check_names:
         targets = [t.model_copy(update={"check_names": check_names}) for t in targets]
     return targets, cfg, config_path

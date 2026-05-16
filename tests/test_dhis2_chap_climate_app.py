@@ -16,7 +16,7 @@ import httpx
 from dhis2w_client import Dhis2Client
 from pydantic import HttpUrl
 
-from chap_checker.checks.base import Status
+from chap_checker.checks.base import CheckContext, Status
 from chap_checker.checks.dhis2_chap_climate_app import (
     CLIMATE_APP_HUB_ID,
     Dhis2ChapClimateAppCheck,
@@ -44,7 +44,12 @@ def _client(handler: Callable[[httpx.Request], httpx.Response]) -> Dhis2Client:
 def _run(handler: Callable[[httpx.Request], httpx.Response]) -> object:
     async def go() -> object:
         async with _client(handler) as c:
-            return await Dhis2ChapClimateAppCheck().run(c)
+            target = Dhis2Target(
+                base_url=cast(HttpUrl, "https://x.example"),
+                username="u",
+                password="p",
+            )
+            return await Dhis2ChapClimateAppCheck().run(c, CheckContext(target=target))
 
     return asyncio.run(go())
 

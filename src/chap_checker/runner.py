@@ -7,7 +7,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, computed_field
 
-from chap_checker.checks.base import Check, CheckResult, Status, all_checks, resolve_checks
+from chap_checker.checks.base import Check, CheckContext, CheckResult, Status, all_checks, resolve_checks
 from chap_checker.client import Dhis2Target
 from chap_checker.logging import get_logger
 
@@ -92,6 +92,7 @@ async def run_checks(target: Dhis2Target, checks: list[Check] | None = None) -> 
     selected = checks if checks is not None else all_checks()
     results: list[CheckResult] = []
     results_by_name: dict[str, CheckResult] = {}
+    ctx = CheckContext(target=target)
     async with target.open() as client:
         for check in selected:
             failed_prereqs = [
@@ -108,12 +109,13 @@ async def run_checks(target: Dhis2Target, checks: list[Check] | None = None) -> 
             else:
                 _log.debug("running check %s", check.name)
                 try:
-                    result = await check.run(client)
+                    result = await check.run(client, ctx)
                 except Exception as exc:  # noqa: BLE001 - never let one check break the run
                     _log.exception("check %s crashed", check.name)
                     result = CheckResult(name=check.name, status=Status.ERROR, message=f"Crashed: {exc}")
             results.append(result)
             results_by_name[check.name] = result
+            ctx.prior_results[check.name] = result
     return results
 
 
