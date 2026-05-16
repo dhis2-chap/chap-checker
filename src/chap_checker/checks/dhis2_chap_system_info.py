@@ -8,7 +8,7 @@ from typing import Any, ClassVar
 from dhis2w_client import Dhis2Client
 from pydantic import BaseModel, ConfigDict, Field
 
-from chap_checker.checks.base import CheckResult, Status, register_check
+from chap_checker.checks.base import CheckResult, Status, format_request_error, register_check
 
 ROUTE_PROXY_PATH = "/api/routes/chap/run/system/info"
 
@@ -43,7 +43,7 @@ class Dhis2ChapSystemInfoCheck:
             return CheckResult(
                 name=self.name,
                 status=Status.ERROR,
-                message=f"Request failed: {exc}",
+                message=format_request_error(exc, path=ROUTE_PROXY_PATH),
                 duration_ms=(time.perf_counter() - start) * 1000,
             )
 

@@ -7,7 +7,7 @@ from typing import Any, ClassVar
 
 from dhis2w_client import Dhis2Client
 
-from chap_checker.checks.base import CheckResult, Status, register_check
+from chap_checker.checks.base import CheckResult, Status, format_request_error, register_check
 from chap_checker.checks.dhis2_chap_modeling_app import Dhis2App
 
 CLIMATE_APP_HUB_ID = "effb986c-a3c7-485e-a2f6-5e54ff9df7c3"
@@ -21,7 +21,10 @@ class Dhis2ChapClimateAppCheck:
     name: ClassVar[str] = "dhis2_chap_climate_app"
     description: ClassVar[str] = "DHIS2 app with app_hub_id of the climate app is installed and reports a version."
     order: ClassVar[int] = 70
-    requires: ClassVar[list[str]] = ["dhis2_ping"]
+    # See `dhis2_chap_modeling_app.requires` for the rationale: depending
+    # on the chap route gates this check so plain DHIS2 instances skip it
+    # cleanly instead of FAIL-ing on every poll.
+    requires: ClassVar[list[str]] = ["dhis2_chap_route"]
 
     async def run(self, client: Dhis2Client) -> CheckResult:
         start = time.perf_counter()
@@ -31,7 +34,7 @@ class Dhis2ChapClimateAppCheck:
             return CheckResult(
                 name=self.name,
                 status=Status.ERROR,
-                message=f"Request failed: {exc}",
+                message=format_request_error(exc, path=APPS_PATH),
                 duration_ms=(time.perf_counter() - start) * 1000,
             )
 

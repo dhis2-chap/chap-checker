@@ -8,7 +8,7 @@ from typing import Any, ClassVar
 from dhis2w_client import Dhis2Client
 from pydantic import BaseModel, ConfigDict, Field
 
-from chap_checker.checks.base import CheckResult, Status, register_check
+from chap_checker.checks.base import CheckResult, Status, format_request_error, register_check
 
 MODELING_APP_HUB_ID = "a29851f9-82a7-4ecd-8b2c-58e0f220bc75"
 APPS_PATH = "/api/apps"
@@ -36,7 +36,11 @@ class Dhis2ChapModelingAppCheck:
     name: ClassVar[str] = "dhis2_chap_modeling_app"
     description: ClassVar[str] = "DHIS2 app with app_hub_id of the modeling app is installed and reports a version."
     order: ClassVar[int] = 60
-    requires: ClassVar[list[str]] = ["dhis2_ping"]
+    # Depends on the chap route, not just dhis2_ping: on a plain DHIS2 instance
+    # without chap-core integration the modeling app is never installed, so
+    # skipping is more honest than reporting FAIL on every poll. The route's
+    # own prereq chain still pulls in dhis2_ping transitively.
+    requires: ClassVar[list[str]] = ["dhis2_chap_route"]
 
     async def run(self, client: Dhis2Client) -> CheckResult:
         start = time.perf_counter()
@@ -46,7 +50,7 @@ class Dhis2ChapModelingAppCheck:
             return CheckResult(
                 name=self.name,
                 status=Status.ERROR,
-                message=f"Request failed: {exc}",
+                message=format_request_error(exc, path=APPS_PATH),
                 duration_ms=(time.perf_counter() - start) * 1000,
             )
 
