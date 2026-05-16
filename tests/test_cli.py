@@ -1,5 +1,8 @@
+import os
+import stat
 from pathlib import Path
 
+import pytest
 from typer.main import get_command
 from typer.testing import CliRunner
 
@@ -76,7 +79,19 @@ def test_init_writes_loadable_config(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.stdout
     assert target.exists()
     cfg = load_config(target)
-    assert "play" in cfg.instances
+    play = cfg.instances["play"]
+    # Default template scopes to vanilla-DHIS2 checks so the public play
+    # demo (which doesn't ship the chap-core integration) doesn't FAIL.
+    assert play.checks == ["dhis2_ping", "dhis2_system_info"]
+
+
+@pytest.mark.skipif(os.name != "posix", reason="chmod semantics are POSIX-only")
+def test_init_writes_file_with_0600_perms(tmp_path: Path) -> None:
+    target = tmp_path / "chap-checker.toml"
+    result = runner.invoke(app, ["init", "--output", str(target)])
+    assert result.exit_code == 0, result.stdout
+    mode = stat.S_IMODE(target.stat().st_mode)
+    assert mode == 0o600, f"expected 0600, got {mode:o}"
 
 
 def test_init_refuses_to_overwrite_existing(tmp_path: Path) -> None:
