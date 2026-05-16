@@ -28,6 +28,8 @@
 
    Run the relevant script after the code change, look at the artifact (open the SVG/PNG, don't just check that the file exists), and only then call the work done. If the artifact disagrees with the unit tests, trust the artifact.
 
+   **Refresh the committed screenshots in the same PR.** Any UI / TUI change ships with a regenerated `docs/assets/*` for every surface the change touches (both `phosphor` and `dhis2` flavours when applicable — `dashboard.svg` + `dashboard-dhis2.svg` for the TUI, `web-dashboard.png` + `web-dashboard-dhis2.png` + the login-modal pair for the browser). Skipping the refresh leaves the docs site showing the previous look; reviewers can't tell whether the diff matches the artifact.
+
 7. **Releasing — bump → tag → push.** Releases ship to PyPI + a GitHub Release via `.github/workflows/release.yml` on every `v*` tag push. The workflow only fires for tags; merging to `main` never publishes by itself.
 
    To cut a release:

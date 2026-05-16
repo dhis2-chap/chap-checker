@@ -377,8 +377,18 @@ function App() {
     if (live && live.lastRefreshAt) setLastRefreshAt(live.lastRefreshAt);
   }, [live && live.lastRefreshAt]);
 
-  // apply theme/density vars when tweaks change
-  React.useEffect(() => { applyTheme(t); }, [t.theme, t.density, t.statusMode, t.crt]);
+  // apply theme/density vars when tweaks change. After the first
+  // post-bootstrap paint, set `window.CK_THEME_BOOTSTRAPPED` so the
+  // committed Playwright capture script (scripts/capture_browser.py)
+  // can `wait_for_function` on it before screenshotting - otherwise
+  // the page can be captured mid-reflow between the initial phosphor
+  // paint and the [ui].theme-driven re-paint.
+  React.useEffect(() => {
+    applyTheme(t);
+    if (typeof window !== 'undefined' && themeBootstrappedRef.current) {
+      window.CK_THEME_BOOTSTRAPPED = true;
+    }
+  }, [t.theme, t.density, t.statusMode, t.crt]);
 
   // Bootstrap the theme from chap-checker.toml's [ui].theme on first
   // /api/state response, but only if the user hasn't already overridden
@@ -391,6 +401,14 @@ function App() {
     if (!live || !live.uiTheme) return;
     if (t.theme === TWEAK_DEFAULTS.theme && live.uiTheme !== t.theme) {
       setTweak('theme', live.uiTheme);
+      // setTweak will trigger the applyTheme useEffect above, which
+      // sets CK_THEME_BOOTSTRAPPED once it runs. Mark the ref now so
+      // that re-run keys off it.
+    } else if (typeof window !== 'undefined') {
+      // No theme change needed (daemon's ui_theme matches the default,
+      // or the operator already picked a theme via the palette). The
+      // applyTheme effect won't re-run, so set the flag here.
+      window.CK_THEME_BOOTSTRAPPED = true;
     }
     themeBootstrappedRef.current = true;
   }, [live, t.theme]);
