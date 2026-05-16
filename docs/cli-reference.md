@@ -116,8 +116,8 @@ Two modes:
   enough, do not page anyone&quot; case).
 - **Connect** (`--connect URL`): polls a remote `chap-checker serve`
   daemon&#x27;s `/api/state` endpoint. No local config or check loop;
-  the laptop becomes a thin client of the TV (or wherever `web` is
-  running). Alerts stay where the daemon is.
+  the laptop becomes a thin client of the TV (or wherever `serve`
+  is running). Alerts stay where the daemon is.
 
 **Usage**:
 

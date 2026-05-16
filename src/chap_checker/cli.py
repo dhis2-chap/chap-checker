@@ -451,8 +451,8 @@ def tui_command(
       enough, do not page anyone" case).
     - **Connect** (`--connect URL`): polls a remote `chap-checker serve`
       daemon's `/api/state` endpoint. No local config or check loop;
-      the laptop becomes a thin client of the TV (or wherever `web` is
-      running). Alerts stay where the daemon is.
+      the laptop becomes a thin client of the TV (or wherever `serve`
+      is running). Alerts stay where the daemon is.
     """
     # Late import so the textual dependency only loads when the TUI runs.
     from chap_checker.dashboard import run as run_dashboard
