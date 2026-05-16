@@ -123,6 +123,38 @@ def test_modeling_app_fails_on_non_dict_entries() -> None:
     assert "entry" in result.message or "shape" in result.message
 
 
+def test_modeling_app_fails_cleanly_on_malformed_dict_entry() -> None:
+    """A dict that pydantic refuses (wrong types) becomes FAIL, not ERROR.
+
+    Pre-0.8 the `Dhis2App.model_validate(...)` call could bubble a
+    `pydantic.ValidationError` to the runner, which surfaced as a
+    generic "Crashed" ERROR tile instead of a check-specific FAIL.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        # Each entry is a dict (passes the isinstance guard above) but
+        # has fields whose types Dhis2App won't coerce.
+        return httpx.Response(200, json=[{"name": ["not", "a", "string"]}])
+
+    client = _client(handler)
+    result = asyncio.run(Dhis2ChapModelingAppCheck().run(client, _ctx()))
+    assert result.status is Status.FAIL
+    assert "shape" in result.message
+
+
+def test_climate_app_fails_cleanly_on_malformed_dict_entry() -> None:
+    """Same guard on the climate-app check."""
+    from chap_checker.checks.dhis2_chap_climate_app import Dhis2ChapClimateAppCheck
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[{"version": {"nested": "object"}}])
+
+    client = _client(handler)
+    result = asyncio.run(Dhis2ChapClimateAppCheck().run(client, _ctx()))
+    assert result.status is Status.FAIL
+    assert "shape" in result.message
+
+
 # ---------- Endpoint permission diagnostics (401/403/404) ----------
 
 

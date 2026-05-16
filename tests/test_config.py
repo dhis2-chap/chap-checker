@@ -163,6 +163,53 @@ password = "p"
     assert not any("inline credentials" in r.message for r in caplog.records)
 
 
+@pytest.mark.skipif(os.name != "posix", reason="POSIX permission bits only")
+@pytest.mark.parametrize(
+    ("name", "block"),
+    [
+        (
+            "webhook_url",
+            '[alerts.webhook]\nurl = "https://hooks.example/x"\n',
+        ),
+        (
+            "webhook_headers",
+            '[alerts.webhook]\nurl_env = "OK_ENV"\nheaders = { Authorization = "Bearer s3cret" }\n',
+        ),
+        (
+            "auth_token",
+            '[auth]\ntoken = "dev-secret-12345"\n',
+        ),
+    ],
+)
+def test_warns_on_world_readable_with_other_inline_secrets(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    name: str,
+    block: str,
+) -> None:
+    """Inline secrets beyond instance passwords also trigger the chmod-600 advisory."""
+    monkeypatch.setenv("OK_ENV", "https://hooks.example/x")
+    path = _write(
+        tmp_path,
+        f"""
+[instances.x]
+url = "https://x.test"
+username = "u"
+password_env = "X_PASS"
+
+{block}
+""",
+    )
+    monkeypatch.setenv("X_PASS", "p")
+    os.chmod(path, 0o644)
+
+    with caplog.at_level(logging.WARNING, logger="chap_checker.config"):
+        load_config(path)
+
+    assert any("inline credentials" in r.message for r in caplog.records), name
+
+
 def test_unknown_check_name_rejected(tmp_path: Path) -> None:
     path = _write(
         tmp_path,

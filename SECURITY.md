@@ -41,5 +41,5 @@ We patch the latest `0.x` release. Pre-1.0 alpha releases below the current one 
 
 | Version | Supported |
 |---------|-----------|
-| 0.7.x   | Yes       |
-| < 0.7.0 | No        |
+| 0.8.x   | Yes       |
+| < 0.8.0 | No        |

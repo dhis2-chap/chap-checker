@@ -25,7 +25,7 @@ password = "REPLACE_ME"            # OR set password_env, not both
 # checks = ["dhis2_ping", ...]     # subset; omit to run every registered check
 # alerts = ["slack"]               # opt-in per alerter; omit / [] = no alerts
 
-# One [alerts.<name>] block per transport (only slack today).
+# One [alerts.<name>] block per transport. Built-in: `slack`, `webhook`.
 [alerts.slack]
 webhook_url_env = "SLACK_WEBHOOK_URL"
 # webhook_url = "https://hooks.slack.com/services/..."   # alternative

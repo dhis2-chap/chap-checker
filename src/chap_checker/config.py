@@ -362,9 +362,27 @@ def load_config(path: Path) -> CheckerConfig:
 
 
 def _has_inline_secret(cfg: CheckerConfig) -> bool:
+    """Return True if any inline credential lives in the TOML.
+
+    Drives the mode-0600 advisory. We deliberately consider *anything* an
+    operator would not want world-readable a secret: instance creds,
+    every alerter's webhook URL (Slack incoming hooks and generic
+    webhooks are both effectively bearer tokens in the URL), any
+    webhook auth headers (Authorization / X-API-Key / etc), and the
+    server `[auth]` token. Env-var indirections are skipped - they
+    don't make the file itself sensitive.
+    """
     if any(i.password is not None or i.token is not None for i in cfg.instances.values()):
         return True
-    if cfg.alerts is not None and cfg.alerts.slack is not None and cfg.alerts.slack.webhook_url is not None:
+    if cfg.alerts is not None:
+        if cfg.alerts.slack is not None and cfg.alerts.slack.webhook_url is not None:
+            return True
+        if cfg.alerts.webhook is not None:
+            if cfg.alerts.webhook.url is not None:
+                return True
+            if cfg.alerts.webhook.headers:
+                return True
+    if cfg.auth is not None and cfg.auth.token is not None:
         return True
     return False
 

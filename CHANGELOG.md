@@ -6,6 +6,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-05-16
+
+### Fixed
+
+- **Permission advisory now catches every inline secret in the TOML.** Before, the `mode 0644` warning only fired for instance `password` / `token` and `[alerts.slack].webhook_url`. It now also covers `[alerts.webhook].url`, any `[alerts.webhook].headers` (typical home for `Authorization: Bearer ...` / API keys), and `[auth].token`. Env-var indirections (`*_env`) are still skipped — they don't make the file itself sensitive. New parametrised regression test in `tests/test_config.py`.
+- **`dhis2_chap_modeling_app` / `dhis2_chap_climate_app` now FAIL cleanly on malformed `/api/apps` entries.** Previously, a dict entry whose values pydantic couldn't coerce raised an uncaught `ValidationError` out of the check, surfacing as a generic `ERROR / Crashed` tile in the runner. Both checks now wrap `Dhis2App.model_validate(...)` and convert the failure to a check-specific `FAIL` with the pydantic message attached. Two new regression tests.
+
+### Changed
+
+- **Docs**: `docs/guides/checks.md` no longer claims the modeling- and climate-app checks depend on `dhis2_ping` — they require `dhis2_chap_route` (which transitively pulls `dhis2_ping`). Matches the code at `src/chap_checker/checks/dhis2_chap_modeling_app.py:50` and `src/chap_checker/checks/dhis2_chap_climate_app.py:34`.
+- **Docs**: `docs/guides/configuration.md` no longer says `[alerts.*]` is "only slack today" — `webhook` has shipped since 0.5.
+- **Docs**: `docs/guides/alerts.md`'s "alerts test" section now mentions the `--kind` flag and the actual default (`failure`, an OK→FAIL transition; the previous text said FAIL→OK which is the `recovery` kind).
+- **Docs**: regenerated `docs/cli-reference.md` after rephrasing two CLI docstrings whose `[instances.NAME]` text was being eaten by the typer doc generator (the rendered file had `Drops a single working \`\` block ...` and `Every \`\` block runs ...`).
+
 ## [0.7.4] — 2026-05-16
 
 ### Fixed
@@ -161,7 +175,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 For 0.1.x / 0.2.x release notes, see the [GitHub Releases page](https://github.com/dhis2-chap/chap-checker/releases).
 
-[Unreleased]: https://github.com/dhis2-chap/chap-checker/compare/v0.7.4...HEAD
+[Unreleased]: https://github.com/dhis2-chap/chap-checker/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.8.0
 [0.7.4]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.7.4
 [0.7.3]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.7.3
 [0.7.2]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.7.2

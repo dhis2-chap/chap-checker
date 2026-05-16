@@ -282,8 +282,10 @@ chap-checker alerts test --name slack          # send through one
 chap-checker --json alerts test                # parseable AlertTestReport JSON
 ```
 
-The command posts a synthetic FAIL→OK transition to each configured alerter.
-Exit code reflects per-alerter delivery success.
+The command posts a synthetic transition to each configured alerter. The
+default `--kind failure` posts an OK→FAIL; `--kind recovery` posts a
+FAIL→OK; `--kind both` sends both transitions. Exit code reflects
+per-alerter delivery success.
 
 !!! warning
     `alerts test` posts a **real** message to the configured channel.
