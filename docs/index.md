@@ -98,7 +98,8 @@ status transitions.
   per-instance opt-in, transition semantics.
 - **[CLI reference](guides/cli.md)** — every command and flag.
 - **[Cron deployment](guides/cron.md)** — production deployment recipes.
-- **[TUI dashboard](guides/dashboard.md)** — the at-a-glance Textual UI.
+- **[TUI dashboard](guides/dashboard.md)** — the at-a-glance Textual UI (with `--connect` for cross-machine consistency).
+- **[Server (chap-checker serve)](guides/serve.md)** — long-running daemon, browser dashboard, JSON state API, systemd autostart.
 - **[Adding a custom check](guides/custom-checks.md)** — the `@register_check`
   decorator and Protocol contract.
 

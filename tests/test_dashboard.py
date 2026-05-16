@@ -1,20 +1,29 @@
-"""Unit tests for the dashboard helpers.
+"""Unit tests for the dashboard helpers and the daemon's tile bookkeeping.
 
 The Textual app itself is integration territory (snapshot tests, pilot mode);
-here we cover the pure-logic helpers and the tile's update-from-report
-behaviour, which don't need a running event loop.
+here we cover the pure-logic helpers, the daemon's per-tile counter / history
+semantics (refresh_once + TileTracker), and the connect-mode HTTP plumbing.
 """
 
+import asyncio
 from typing import cast
+from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 from pydantic import HttpUrl
 
 from chap_checker.checks.base import CheckResult, Status
 from chap_checker.client import Dhis2Target
+from chap_checker.config import CheckerConfig, InstanceConfig
+from chap_checker.daemon import (
+    DashboardServer,
+    DashboardState,
+    TileModel,
+    TileTracker,
+)
 from chap_checker.dashboard import (
     _THEME_BUILDERS,
-    InstanceTile,
     _color_for,
     _extract_dhis2_version,
     _format_relative,
@@ -36,6 +45,57 @@ def _entry(name: str = "test") -> TargetEntry:
     )
 
 
+def _server(name: str = "test") -> DashboardServer:
+    """Build a DashboardServer with one target, no real config dependencies."""
+    cfg = CheckerConfig(
+        instances={
+            name: InstanceConfig(
+                url=cast(HttpUrl, f"https://{name}.example"),
+                username="u",
+                password="p",
+            ),
+        },
+    )
+    return DashboardServer(
+        targets=[_entry(name)],
+        cfg=cfg,
+        state_path=None,
+        interval_s=30.0,
+        alerts_enabled=False,
+    )
+
+
+def _feed_report(server: DashboardServer, name: str, results: list[CheckResult]) -> None:
+    """Push a synthetic RunReport into the server's tracker without hitting the network.
+
+    The previous test suite called `InstanceTile.update_from(report)` directly.
+    The new state lives on `TileTracker`, so we reproduce the tracker-update
+    half of `DashboardServer.refresh_once` here.
+    """
+    from datetime import datetime
+
+    from chap_checker.daemon import worst
+
+    report = RunReport(
+        target_name=name,
+        target_url=f"https://{name}.example",
+        results=results,
+    )
+    tracker = server.trackers.setdefault(name, TileTracker())
+    tracker.last_report = report
+    tracker.last_refresh = datetime.now()
+    ping = next((c for c in results if c.name == "dhis2_ping"), None)
+    if ping is not None and ping.status is not Status.SKIPPED:
+        tracker.ping_total += 1
+        if ping.status is Status.OK:
+            tracker.ping_ok += 1
+    ran: list[Status] = [c.status for c in results if c.status is not Status.SKIPPED]
+    if ran:
+        durations = [c.duration_ms for c in results if c.status is not Status.SKIPPED]
+        avg_latency = int(sum(durations) / len(durations)) if durations else None
+        tracker.history.append((worst(ran), avg_latency))
+
+
 def test_columns_for_adapts_to_count() -> None:
     assert columns_for(1) == 1
     assert columns_for(2) == 2
@@ -55,54 +115,35 @@ def test_worst_returns_highest_severity_present() -> None:
     assert _worst([]) is Status.OK
 
 
-def test_tile_ping_ratio_tracks_successes() -> None:
-    tile = InstanceTile(_entry())
-    # Three OK pings.
+def test_tracker_ping_ratio_tracks_successes() -> None:
+    server = _server()
     for _ in range(3):
-        tile.update_from(
-            RunReport(
-                target_name="test",
-                target_url="https://test.example",
-                results=[CheckResult(name="dhis2_ping", status=Status.OK, message="", duration_ms=1.0)],
-            )
-        )
-    # Then one FAIL.
-    tile.update_from(
-        RunReport(
-            target_name="test",
-            target_url="https://test.example",
-            results=[CheckResult(name="dhis2_ping", status=Status.FAIL, message="down", duration_ms=1.0)],
-        )
+        _feed_report(server, "test", [CheckResult(name="dhis2_ping", status=Status.OK, message="", duration_ms=1.0)])
+    _feed_report(server, "test", [CheckResult(name="dhis2_ping", status=Status.FAIL, message="down", duration_ms=1.0)])
+    tracker = server.trackers["test"]
+    assert tracker.ping_ok == 3
+    assert tracker.ping_total == 4
+
+
+def test_tracker_skipped_ping_does_not_count() -> None:
+    server = _server()
+    _feed_report(
+        server,
+        "test",
+        [CheckResult(name="dhis2_ping", status=Status.SKIPPED, message="", duration_ms=0.0)],
     )
-    assert tile.ping_ok == 3
-    assert tile.ping_total == 4
+    assert server.trackers["test"].ping_total == 0
 
 
-def test_tile_skipped_ping_does_not_count() -> None:
-    tile = InstanceTile(_entry())
-    tile.update_from(
-        RunReport(
-            target_name="test",
-            target_url="https://test.example",
-            results=[
-                CheckResult(name="dhis2_ping", status=Status.SKIPPED, message="", duration_ms=0.0),
-            ],
-        )
+def test_tracker_no_ping_in_results_means_ratio_stays_zero() -> None:
+    server = _server()
+    _feed_report(
+        server,
+        "test",
+        [CheckResult(name="some_other_check", status=Status.OK, message="", duration_ms=0.0)],
     )
-    assert tile.ping_total == 0
-
-
-def test_tile_no_ping_in_results_means_ratio_stays_zero() -> None:
-    tile = InstanceTile(_entry())
-    tile.update_from(
-        RunReport(
-            target_name="test",
-            target_url="https://test.example",
-            results=[CheckResult(name="some_other_check", status=Status.OK, message="", duration_ms=0.0)],
-        )
-    )
-    assert tile.ping_total == 0
-    assert tile.ping_ok == 0
+    assert server.trackers["test"].ping_total == 0
+    assert server.trackers["test"].ping_ok == 0
 
 
 def test_extract_dhis2_version_happy_path() -> None:
@@ -142,59 +183,48 @@ def test_format_relative_seconds() -> None:
     assert _format_relative(now, now + timedelta(seconds=5)) == "0s ago"
 
 
-def test_tile_records_last_refresh_timestamp() -> None:
-    tile = InstanceTile(_entry())
-    assert tile.last_refresh is None
-    tile.update_from(
-        RunReport(
-            target_name="test",
-            target_url="https://test.example",
-            results=[CheckResult(name="dhis2_ping", status=Status.OK, message="", duration_ms=1.0)],
-        )
-    )
-    assert tile.last_refresh is not None
+def test_tracker_records_last_refresh_timestamp() -> None:
+    server = _server()
+    assert server.trackers["test"].last_refresh is None
+    _feed_report(server, "test", [CheckResult(name="dhis2_ping", status=Status.OK, message="", duration_ms=1.0)])
+    assert server.trackers["test"].last_refresh is not None
 
 
-def test_tile_history_appends_worst_status_per_refresh() -> None:
-    tile = InstanceTile(_entry())
+def test_tracker_history_appends_worst_status_per_refresh() -> None:
+    server = _server()
     # Two clean refreshes, then a WARN, then a FAIL, then a refresh
     # where everything is skipped (which must NOT be recorded).
     for status in (Status.OK, Status.OK, Status.WARN, Status.FAIL):
-        tile.update_from(
-            RunReport(
-                target_name="test",
-                target_url="https://test.example",
-                results=[
-                    CheckResult(name="dhis2_ping", status=status, message="", duration_ms=1.0),
-                    CheckResult(name="dhis2_system_info", status=Status.OK, message="", duration_ms=1.0),
-                ],
-            ),
-        )
-    tile.update_from(
-        RunReport(
-            target_name="test",
-            target_url="https://test.example",
-            results=[
-                CheckResult(name="dhis2_ping", status=Status.SKIPPED, message="", duration_ms=0.0),
-                CheckResult(name="dhis2_system_info", status=Status.SKIPPED, message="", duration_ms=0.0),
+        _feed_report(
+            server,
+            "test",
+            [
+                CheckResult(name="dhis2_ping", status=status, message="", duration_ms=1.0),
+                CheckResult(name="dhis2_system_info", status=Status.OK, message="", duration_ms=1.0),
             ],
-        ),
-    )
-    assert list(tile.history) == [Status.OK, Status.OK, Status.WARN, Status.FAIL]
-
-
-def test_tile_history_caps_at_max_len() -> None:
-    tile = InstanceTile(_entry())
-    for _ in range(45):
-        tile.update_from(
-            RunReport(
-                target_name="test",
-                target_url="https://test.example",
-                results=[CheckResult(name="dhis2_ping", status=Status.OK, message="", duration_ms=1.0)],
-            ),
         )
-    assert len(tile.history) == 30
-    assert all(s is Status.OK for s in tile.history)
+    _feed_report(
+        server,
+        "test",
+        [
+            CheckResult(name="dhis2_ping", status=Status.SKIPPED, message="", duration_ms=0.0),
+            CheckResult(name="dhis2_system_info", status=Status.SKIPPED, message="", duration_ms=0.0),
+        ],
+    )
+    assert [s for s, _ in server.trackers["test"].history] == [Status.OK, Status.OK, Status.WARN, Status.FAIL]
+
+
+def test_tracker_history_caps_at_max_len() -> None:
+    server = _server()
+    for _ in range(45):
+        _feed_report(
+            server,
+            "test",
+            [CheckResult(name="dhis2_ping", status=Status.OK, message="", duration_ms=1.0)],
+        )
+    history = server.trackers["test"].history
+    assert len(history) == 30
+    assert all(s is Status.OK for s, _ in history)
 
 
 # ---------- TUI theme mapping ----------
@@ -258,14 +288,12 @@ def test_dashboard_app_mounts_under_every_theme(theme: str) -> None:
 
     Regression for: the first cut used `$text-disabled` as a border colour
     and pill background. That token resolves to ``auto 38%`` (alpha-based
-    foreground), which Textual's parser rejects for borders/backgrounds —
+    foreground), which Textual's parser rejects for borders/backgrounds -
     but only at runtime, when the App's theme variables are loaded into
     the stylesheet. Mounting the app under Pilot is the cheapest way to
     catch that class of mistake.
     """
-    import asyncio
-
-    from chap_checker.config import CheckerConfig, InstanceConfig, UiConfig
+    from chap_checker.config import UiConfig
     from chap_checker.dashboard import DashboardApp
 
     cfg = CheckerConfig(
@@ -286,3 +314,85 @@ def test_dashboard_app_mounts_under_every_theme(theme: str) -> None:
             await pilot.pause()
 
     asyncio.run(_mount())
+
+
+# ---------- Connect mode (--connect URL) ----------
+
+
+def _canned_state() -> DashboardState:
+    return DashboardState(
+        instance_count=1,
+        alerts_enabled=False,
+        interval_s=30.0,
+        ui_title="Remote daemon",
+        ui_theme="phosphor",
+        tiles=[
+            TileModel(
+                name="alpha",
+                url="https://alpha.example",
+                worst_status=Status.OK,
+                ok_count=2,
+                total_count=2,
+                ping_ok=10,
+                ping_total=10,
+                latency_ms=42,
+                uptime_pct=100.0,
+            ),
+        ],
+    )
+
+
+def test_connect_mode_renders_remote_state() -> None:
+    """A successful /api/state fetch mounts tiles from the remote snapshot."""
+    from chap_checker.dashboard import DashboardApp
+
+    canned = _canned_state()
+    # `raise_for_status` walks the response's request; construct one
+    # explicitly so the mocked response behaves like the real thing.
+    request = httpx.Request("GET", "http://remote.example:8765/api/state")
+    mock_get = AsyncMock(
+        return_value=httpx.Response(200, content=canned.model_dump_json().encode(), request=request),
+    )
+
+    async def _run() -> None:
+        with patch.object(httpx.AsyncClient, "get", new=mock_get):
+            app = DashboardApp(
+                interval_s=300.0,
+                connect_url="http://remote.example:8765",
+            )
+            async with app.run_test(headless=True) as pilot:
+                await pilot.pause()
+                await app.action_refresh()
+                await pilot.pause()
+                assert "alpha" in app.tiles
+                assert app.tiles["alpha"].tile_url == "https://alpha.example"
+
+    asyncio.run(_run())
+
+
+def test_connect_mode_shows_disconnect_banner_on_failure() -> None:
+    """A transport error paints the disconnect banner and keeps the app alive."""
+    from chap_checker.dashboard import DashboardApp, DisconnectBanner
+
+    async def _run() -> None:
+        with patch.object(httpx.AsyncClient, "get", new=AsyncMock(side_effect=httpx.ConnectError("nope"))):
+            app = DashboardApp(
+                interval_s=300.0,
+                connect_url="http://nope.example:1",
+            )
+            async with app.run_test(headless=True) as pilot:
+                await app.action_refresh()
+                await pilot.pause()
+                banner = app.query_one("#banner", DisconnectBanner)
+                assert banner.has_class("visible")
+                assert "disconnected from http://nope.example:1" in str(banner.render())
+
+    asyncio.run(_run())
+
+
+def test_local_mode_requires_targets_and_cfg() -> None:
+    """Without connect_url the app must reject construction with no targets / cfg."""
+    from chap_checker.dashboard import DashboardApp
+
+    with pytest.raises(ValueError, match="Local mode"):
+        DashboardApp(interval_s=300.0)

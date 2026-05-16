@@ -28,7 +28,7 @@ is required.
 
 ```
 src/chap_checker/
-├── cli.py                 # typer entry point (verify / checks / alerts / dashboard)
+├── cli.py                 # typer entry point (verify / checks / alerts / tui / web / init)
 ├── client.py              # httpx-based Dhis2Client + Dhis2Target
 ├── config.py              # TOML loader; CheckerConfig, InstanceConfig, SlackAlertConfig
 ├── runner.py              # parallel run_targets, RunReport, VerifyReport, TargetEntry
@@ -36,7 +36,9 @@ src/chap_checker/
 ├── state.py               # GlobalState (CLI flags container)
 ├── state_store.py         # state file load/save + compute_transitions
 ├── logging.py             # stderr-only logger config
-├── dashboard.py           # Textual TUI
+├── daemon.py              # DashboardServer (refresh loop + per-tile trackers + DashboardState)
+├── dashboard.py           # Textual TUI; embeds DashboardServer in local mode, httpx-polls in --connect mode
+├── web.py                 # FastAPI app exposing the daemon's /api/state + browser bundle
 ├── alerts/
 │   ├── base.py            # Alerter protocol + Transition + register_alerter
 │   └── slack.py           # SlackAlerter
@@ -81,6 +83,7 @@ strict Protocol type without duplicating the `ClassVar` declarations on
 test-only classes.
 
 Textual UI tests rely on `pilot` mode rather than launching a real terminal.
-The dashboard module's update logic is decoupled from rendering (data goes
-into `update_from`, UI updates are guarded by `self.is_mounted`) so unit
-tests can poke the data path without an active app.
+The dashboard's data model lives in `daemon.py` (`DashboardServer`,
+`TileTracker`, `TileModel`), so unit tests can exercise the
+ping-counter / history / projection logic without an active app, and
+`pilot` mode covers the rendering path end-to-end.

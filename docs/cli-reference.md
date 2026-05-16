@@ -22,8 +22,8 @@ $ chap-checker [OPTIONS] COMMAND [ARGS]...
 
 * `init`: Create a minimal chap-checker.toml in the...
 * `verify`: Run every registered check against one or...
-* `dashboard`: Launch the Textual TUI dashboard.
-* `web`: Launch the web dashboard.
+* `tui`: Launch the Textual TUI dashboard (local or...
+* `serve`: Launch the chap-checker server.
 * `alerts`: Inspect or test configured alerters.
 * `checks`: Inspect available checks.
 
@@ -97,9 +97,9 @@ $ chap-checker verify [OPTIONS]
 * `--concurrency INTEGER RANGE`: Number of targets to check in parallel. Overrides the config value if given. Default 5.  [1&lt;=x&lt;=100]
 * `--help`: Show this message and exit.
 
-## `chap-checker dashboard`
+## `chap-checker tui`
 
-Launch the Textual TUI dashboard.
+Launch the Textual TUI dashboard (local or `--connect` mode).
 
 One tile per configured instance, in an adaptive grid (1-4 columns
 depending on instance count). Each tile shows the rolled-up status,
@@ -108,49 +108,64 @@ tile&#x27;s left accent stripe color tracks the worst status, so a FAIL
 tile is unmistakable from across the room.
 
 Inside the TUI, press `r` to refresh immediately or `q` to quit.
-Whether alerts fire is decided at launch via `--alerts` (off by
-default - the &quot;TUI is enough, do not page anyone&quot; case).
+
+Two modes:
+
+- **Local** (default): runs the checks itself. Whether alerts fire
+  is decided at launch via `--alerts` (off by default - the &quot;TUI is
+  enough, do not page anyone&quot; case).
+- **Connect** (`--connect URL`): polls a remote `chap-checker serve`
+  daemon&#x27;s `/api/state` endpoint. No local config or check loop;
+  the laptop becomes a thin client of the TV (or wherever `web` is
+  running). Alerts stay where the daemon is.
 
 **Usage**:
 
 ```console
-$ chap-checker dashboard [OPTIONS]
+$ chap-checker tui [OPTIONS]
 ```
 
 **Options**:
 
 * `-c, --config PATH`: Path to a TOML config (defaults to ./chap-checker.toml if present).  [env var: CHAP_CHECKER_CONFIG]
 * `--interval FLOAT RANGE`: Refresh interval in seconds.  [default: 30.0; x&gt;=2.0]
-* `--alerts / --no-alerts`: Dispatch Slack/etc. alerts from refresh cycles. Off by default - the TUI is usually all you need; flip this on if you want this dashboard to also page.  [default: no-alerts]
+* `--alerts / --no-alerts`: Dispatch Slack/etc. alerts from refresh cycles. Off by default - the TUI is usually all you need; flip this on if you want it to also page.  [default: no-alerts]
 * `--state PATH`: State file path (default: ./chap-checker.state.json next to the config).  [env var: CHAP_CHECKER_STATE]
+* `--connect TEXT`: Render a remote `chap-checker serve` daemon instead of running checks locally. Pass the base URL (e.g. http://tv-host:8765). Mutually exclusive with --config / --state / --alerts.
 * `--help`: Show this message and exit.
 
-## `chap-checker web`
+## `chap-checker serve`
 
-Launch the web dashboard.
+Launch the chap-checker server.
 
-A single-page browser dashboard with the same tile layout and palette
-as the Textual TUI. A FastAPI background task runs checks every
-`--interval` seconds; the browser polls `/api/state` every few seconds
-and re-renders tiles client-side.
+Long-running daemon. Runs the check loop, dispatches alerts (when
+`--alerts`), exposes JSON state at `/api/state`, and by default
+serves a browser dashboard at `/`. The TUI&#x27;s `--connect` mode and
+any browser pointed at this server consume the same snapshot.
 
-Designed to fill a TV screen with no scrolling - pin a kiosk browser
-at the URL and leave it.
+Designed to be `systemd`-supervised on a TV machine or small VM and
+left running - see the [Server guide](https://dhis2-chap.github.io/chap-checker/guides/serve/)
+for the unit file.
+
+Pass `--no-ui` for an API-only daemon; the browser dashboard is
+skipped and `/` returns 404, but everything under `/api/*` is
+unchanged.
 
 **Usage**:
 
 ```console
-$ chap-checker web [OPTIONS]
+$ chap-checker serve [OPTIONS]
 ```
 
 **Options**:
 
 * `-c, --config PATH`: Path to a TOML config (defaults to ./chap-checker.toml if present).  [env var: CHAP_CHECKER_CONFIG]
 * `--interval FLOAT RANGE`: Server-side check refresh interval (seconds).  [default: 30.0; x&gt;=2.0]
-* `--alerts / --no-alerts`: Dispatch Slack/etc. alerts from refresh cycles. Off by default - the dashboard is usually all you need; flip this on if you want this dashboard to also page.  [default: no-alerts]
+* `--alerts / --no-alerts`: Dispatch Slack/etc. alerts from refresh cycles. Off by default - the dashboard is usually all you need; flip this on if you want the daemon to also page.  [default: no-alerts]
 * `--state PATH`: State file path (default: ./chap-checker.state.json next to the config).  [env var: CHAP_CHECKER_STATE]
 * `--host TEXT`: Bind address. Use 0.0.0.0 to expose on the local network (e.g. for a TV).  [default: 127.0.0.1]
 * `--port INTEGER RANGE`: Port to listen on.  [default: 8765; 1&lt;=x&lt;=65535]
+* `--ui / --no-ui`: Serve the browser dashboard at `/`. Pass `--no-ui` for a headless deployment where only `chap-checker tui --connect` clients or external scrapers consume `/api/state`.  [default: ui]
 * `--help`: Show this message and exit.
 
 ## `chap-checker alerts`

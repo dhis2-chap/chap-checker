@@ -18,8 +18,9 @@ from pydantic import HttpUrl
 from chap_checker.checks.base import CheckResult, Status
 from chap_checker.client import Dhis2Target
 from chap_checker.config import CheckerConfig, InstanceConfig
+from chap_checker.daemon import DashboardServer, TileTracker
 from chap_checker.runner import RunReport, TargetEntry
-from chap_checker.web import DashboardServer, _TileTracker, make_app
+from chap_checker.serve import make_app
 
 
 def _cfg() -> CheckerConfig:
@@ -86,7 +87,7 @@ def test_snapshot_reflects_tracker_state() -> None:
             ),
         ],
     )
-    tracker = _TileTracker(ping_ok=3, ping_total=3, last_report=report)
+    tracker = TileTracker(ping_ok=3, ping_total=3, last_report=report)
     # Three prior refresh outcomes - one OK, one degraded, one failure
     # so all three sparkline colour paths get covered.
     tracker.history.extend([(Status.OK, 120), (Status.WARN, 140), (Status.FAIL, None)])
