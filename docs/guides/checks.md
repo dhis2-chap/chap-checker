@@ -18,8 +18,8 @@ Two namespaces:
 | `dhis2_chap_route`          | `/api/routes?filter=code:eq:chap`                 | `dhis2_ping`         |
 | `dhis2_chap_ping`           | `/api/routes/chap/run/health`                     | `dhis2_chap_route`   |
 | `dhis2_chap_system_info`    | `/api/routes/chap/run/system/info` (parsed)       | `dhis2_chap_ping`    |
-| `dhis2_chap_modeling_app`   | `/api/apps` (matched by `app_hub_id`)             | `dhis2_ping`         |
-| `dhis2_chap_climate_app`    | `/api/apps` (matched by `app_hub_id`)             | `dhis2_ping`         |
+| `dhis2_chap_modeling_app`   | `/api/apps` (matched by `app_hub_id`)             | `dhis2_chap_route`   |
+| `dhis2_chap_climate_app`    | `/api/apps` (matched by `app_hub_id`)             | `dhis2_chap_route`   |
 
 List them at runtime:
 

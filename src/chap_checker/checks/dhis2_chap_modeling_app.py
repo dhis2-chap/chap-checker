@@ -6,7 +6,7 @@ import time
 from typing import Any, ClassVar
 
 from dhis2w_client import Dhis2Client
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from chap_checker.checks.base import (
     CheckContext,
@@ -108,7 +108,15 @@ class Dhis2ChapModelingAppCheck:
                 message="Unexpected /api/apps entry shape (entries must be objects).",
                 duration_ms=duration_ms,
             )
-        apps = [Dhis2App.model_validate(entry) for entry in entries]
+        try:
+            apps = [Dhis2App.model_validate(entry) for entry in entries]
+        except ValidationError as exc:
+            return CheckResult(
+                name=self.name,
+                status=Status.FAIL,
+                message=f"Unexpected /api/apps entry shape: {exc.errors()[0].get('msg', exc)}",
+                duration_ms=duration_ms,
+            )
         match = next((a for a in apps if a.app_hub_id == MODELING_APP_HUB_ID), None)
         if match is None:
             return CheckResult(

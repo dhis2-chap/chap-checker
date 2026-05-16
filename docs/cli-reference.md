@@ -31,8 +31,8 @@ $ chap-checker [OPTIONS] COMMAND [ARGS]...
 
 Create a minimal chap-checker.toml in the current directory.
 
-Drops a single working `` block pointed at the public
-DHIS2 demo instance (admin / district) so you can run
+Drops a single working `instances.play` TOML table pointed at the
+public DHIS2 demo instance (admin / district) so you can run
 `chap-checker verify` immediately and replace the values once it works.
 
 **Usage**:
@@ -66,8 +66,8 @@ Source of targets is decided as follows:
    Token and password flags are mutually exclusive; passing both
    errors out.
 2. Otherwise the TOML file is loaded from `--config` if given, or
-   from `./chap-checker.toml` if present. Every ``
-   block runs unless `--instance` narrows the run to one.
+   from `./chap-checker.toml` if present. Every `instances.NAME`
+   TOML table runs unless `--instance` narrows the run to one.
 
 Exit code is 0 when every check on every target is `OK`, non-zero
 otherwise. Alert dispatch (Slack etc.) honors each instance&#x27;s
