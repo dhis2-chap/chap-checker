@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+
+- **TUI guide now shows the dhis2-themed dashboard and both auth-modal variants.** The `dashboard-dhis2.svg` artifact existed but was never referenced from the prose; the new `tui-token-modal-{phosphor,dhis2}.svg` pair gives the modal the same theme parity the browser screenshots already had. Naming follows the existing `dashboard.svg` / `dashboard-dhis2.svg` convention (default name = phosphor, `-dhis2` suffix = DHIS2 theme).
+
 ## [0.7.3] — 2026-05-16
 
 ### Fixed
