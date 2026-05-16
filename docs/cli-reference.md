@@ -184,13 +184,13 @@ $ chap-checker alerts [OPTIONS] COMMAND [ARGS]...
 
 **Commands**:
 
-* `list`: List configured alerters.
-* `ls`: List configured alerters.
+* `list`: List registered alerter types and their...
+* `ls`: List registered alerter types.
 * `test`: Send a synthetic transition to every...
 
 ### `chap-checker alerts list`
 
-List configured alerters.
+List registered alerter types and their TOML fields.
 
 **Usage**:
 
@@ -200,12 +200,11 @@ $ chap-checker alerts list [OPTIONS]
 
 **Options**:
 
-* `-c, --config PATH`: Path to a TOML config (defaults to ./chap-checker.toml if present).  [env var: CHAP_CHECKER_CONFIG]
 * `--help`: Show this message and exit.
 
 ### `chap-checker alerts ls`
 
-List configured alerters.
+List registered alerter types.
 
 **Usage**:
 
@@ -215,16 +214,20 @@ $ chap-checker alerts ls [OPTIONS]
 
 **Options**:
 
-* `-c, --config PATH`: Path to a TOML config (defaults to ./chap-checker.toml if present).  [env var: CHAP_CHECKER_CONFIG]
 * `--help`: Show this message and exit.
 
 ### `chap-checker alerts test`
 
 Send a synthetic transition to every configured alerter (or a named one).
 
-Useful after rotating a Slack webhook or when you suspect the alert
-pipeline is broken. Each invocation posts a real message to the
-configured channel, so do not put this on a cron - run it manually.
+Useful after rotating a credential (Slack webhook URL, generic webhook
+bearer token, ...) or when you suspect the alert pipeline is broken.
+Each invocation posts a real message / payload to the configured
+receiver, so do not put this on a cron - run it manually.
+
+`--kind` picks which direction to test: `failure` (default) sends an
+OK-&gt;FAIL transition, `recovery` sends a FAIL-&gt;OK, and `both` sends
+the pair so a single command exercises the full round-trip.
 
 Exit code is 0 only when every alerter delivered successfully.
 
@@ -237,6 +240,7 @@ $ chap-checker alerts test [OPTIONS]
 **Options**:
 
 * `-n, --name TEXT`: Send only to this alerter (must be a configured alerter name). Default: every configured alerter.
+* `-k, --kind [failure|recovery|both]`: Which synthetic transition(s) to send: failure (default), recovery, or both.  [default: failure]
 * `-c, --config PATH`: Path to a TOML config (defaults to ./chap-checker.toml if present).  [env var: CHAP_CHECKER_CONFIG]
 * `--help`: Show this message and exit.
 

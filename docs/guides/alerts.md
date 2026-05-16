@@ -1,13 +1,22 @@
-# Alerting (Slack)
+# Alerting
 
 Alerts are stateful and transition-only: a sustained outage produces one
-Slack message on entry and one on recovery, not a ping every cron tick.
+message on entry and one on recovery, not a ping every cron tick.
+
+Built-in transports:
+
+| Name | Transport | Use when |
+|---|---|---|
+| `slack` | Slack Incoming Webhook (Block Kit + colored attachments) | Slack-native ops chat |
+| `webhook` | Generic HTTP POST with a canonical JSON envelope | Anything else: PagerDuty Events, OpsGenie, internal incident bus, custom receiver |
+
+Run `chap-checker alerts list` for a copy-paste TOML snippet for each alerter, with inline comments explaining every field. Run `chap-checker alerts test` to fire a synthetic transition through each configured alerter without waiting for a real outage.
 
 ## Two-step setup
 
 ### 1. Configure the transport
 
-Add an `[alerts.<name>]` block. Currently only `slack` is supported.
+Add one `[alerts.<name>]` block per transport you want.
 
 ```toml
 [alerts.slack]
@@ -34,12 +43,218 @@ url = "https://staging.dhis2.example.com"
 # ...
 ```
 
-List configured alerters at runtime:
+List registered alerter types with copy-paste TOML snippets:
 
 ```bash
-chap-checker alerts list             # Rich table
+chap-checker alerts list             # one panel per alerter, with per-field comments
 chap-checker --json alerts list      # JSON for tooling
 ```
+
+Each alerter ships its own snippet (the `toml_example` ClassVar on the class), so adding a new alerter is one class + one snippet — no doc-generation step.
+
+## Generic webhook
+
+Use this for any receiver that accepts an `application/json` POST: PagerDuty Events, OpsGenie, an internal incident bus, n8n / Make automations, a custom Flask endpoint, etc.
+
+```toml
+[alerts.webhook]
+url_env = "MY_WEBHOOK_URL"                    # or url = "https://..." (exactly one)
+notify_on = ["fail", "error", "warn"]
+timeout_s = 10.0
+headers = { "Authorization" = "Bearer ..." }  # optional literal HTTP headers
+```
+
+### HTTP request shape
+
+```
+POST {url}
+Content-Type: application/json
+Authorization: <whatever headers you set>   # only if `headers = {...}`
+
+<JSON body, see below>
+```
+
+The alerter raises (and the dispatcher logs + skips the state save, so the transition is retried next run) when the response is `>= 400`. Anything else, including `2xx` with an unexpected body, is treated as delivered.
+
+### Canonical JSON envelope (stable across versions)
+
+Every POST carries this top-level shape:
+
+| Field             | Type                                | Notes |
+|---|---|---|
+| `checker_version` | string                              | Sender's version, e.g. `"0.6.0"`. Use this to gate against future schema changes. |
+| `summary.failures`   | integer                          | Count of transitions with `kind == "failure"` in this batch. |
+| `summary.recoveries` | integer                          | Count of transitions with `kind == "recovery"` in this batch. |
+| `transitions`     | array of [`Transition`](#transition-object) | One entry per status flip. Length is always `summary.failures + summary.recoveries`. |
+
+A single POST may carry multiple transitions when several instances flip in the same refresh cycle. Receivers should iterate `transitions` rather than assuming `length == 1`.
+
+### Transition object
+
+Every entry under `transitions[]` looks like this:
+
+| Field             | Type                                                            | Notes |
+|---|---|---|
+| `kind`            | `"failure"` \| `"recovery"`                                    | `failure` = OK → non-OK; `recovery` = non-OK → OK. |
+| `target_name`     | string                                                          | The `[instances.<name>]` key from the config. |
+| `target_url`      | string                                                          | The DHIS2 base URL of the affected instance. |
+| `check_name`      | string                                                          | Check that flipped, e.g. `dhis2_ping`, `dhis2_chap_route`. Run `chap-checker checks list` for the full set. |
+| `previous_status` | `"ok"` \| `"warn"` \| `"fail"` \| `"error"` \| `"skipped"`     | Status before the flip. |
+| `current_status`  | same enum                                                       | Status after the flip. |
+| `message`         | string                                                          | Operator-facing detail from the check (e.g. `"DHIS2 route returned 502 - chap-core did not respond."`). |
+| `duration_ms`     | number                                                          | How long the check took during the run that detected the flip. |
+| `occurred_at`     | string (ISO-8601, UTC)                                          | Timestamp the runner detected the flip. |
+
+### Example — failure transition
+
+A single check on a single target flipped from OK to FAIL:
+
+```json
+{
+  "checker_version": "0.6.0",
+  "summary": { "failures": 1, "recoveries": 0 },
+  "transitions": [
+    {
+      "kind": "failure",
+      "target_name": "prod",
+      "target_url": "https://dhis2.example.com",
+      "check_name": "dhis2_chap_ping",
+      "previous_status": "ok",
+      "current_status": "fail",
+      "message": "DHIS2 route returned 502 - chap-core did not respond.",
+      "duration_ms": 123.4,
+      "occurred_at": "2026-05-16T11:30:00Z"
+    }
+  ]
+}
+```
+
+### Example — recovery transition
+
+The same check coming back to OK on the next refresh:
+
+```json
+{
+  "checker_version": "0.6.0",
+  "summary": { "failures": 0, "recoveries": 1 },
+  "transitions": [
+    {
+      "kind": "recovery",
+      "target_name": "prod",
+      "target_url": "https://dhis2.example.com",
+      "check_name": "dhis2_chap_ping",
+      "previous_status": "fail",
+      "current_status": "ok",
+      "message": "chap-core responded (status 200).",
+      "duration_ms": 87.1,
+      "occurred_at": "2026-05-16T11:35:00Z"
+    }
+  ]
+}
+```
+
+### Example — mixed batch (multiple transitions in one POST)
+
+Two instances flipping in the same refresh tick share one envelope:
+
+```json
+{
+  "checker_version": "0.6.0",
+  "summary": { "failures": 1, "recoveries": 1 },
+  "transitions": [
+    {
+      "kind": "failure",
+      "target_name": "staging",
+      "target_url": "https://staging.dhis2.example.com",
+      "check_name": "dhis2_ping",
+      "previous_status": "ok",
+      "current_status": "fail",
+      "message": "Authentication rejected (401) on /api/me - credentials no longer valid.",
+      "duration_ms": 540.0,
+      "occurred_at": "2026-05-16T11:30:02Z"
+    },
+    {
+      "kind": "recovery",
+      "target_name": "prod",
+      "target_url": "https://dhis2.example.com",
+      "check_name": "dhis2_chap_route",
+      "previous_status": "fail",
+      "current_status": "ok",
+      "message": "DHIS2 route 'chap' is enabled.",
+      "duration_ms": 92.5,
+      "occurred_at": "2026-05-16T11:30:02Z"
+    }
+  ]
+}
+```
+
+### Trying it locally
+
+Spin up a one-shot receiver and point chap-checker at it:
+
+```bash
+# Terminal A: tiny receiver that prints headers + body and replies 204.
+python -m http.server 9999 --bind 127.0.0.1
+# (or use https://webhook.site for a shareable URL)
+
+# Terminal B: minimal config
+cat > /tmp/wh.toml <<'EOF'
+[instances.play]
+url = "https://play.im.dhis2.org/dev"
+username = "admin"
+password = "district"
+alerts = ["webhook"]
+checks = ["dhis2_ping", "dhis2_system_info"]
+
+[alerts.webhook]
+url = "http://127.0.0.1:9999/notify"
+notify_on = ["fail", "error", "warn"]
+EOF
+chmod 600 /tmp/wh.toml
+
+# Fire a synthetic round-trip without waiting for a real outage.
+chap-checker alerts test --config /tmp/wh.toml --kind both
+```
+
+### Custom payload shape
+
+If the receiver wants a different body (Slack Block Kit, Teams Adaptive Card, PagerDuty Events v2, your own JSON contract), subclass `WebhookAlerter` and override `_build_payload(transitions) -> dict`. The HTTP transport, timeout, header handling, and `>= 400` raise behavior come from the base — that's exactly how `SlackAlerter` is implemented.
+
+```python
+# my_alerter.py
+from chap_checker.alerts.base import Transition, register_alerter
+from chap_checker.alerts.webhook import WebhookAlerter
+from typing import Any, ClassVar
+
+
+@register_alerter("pagerduty")
+class PagerDutyEventsAlerter(WebhookAlerter):
+    name: ClassVar[str] = "pagerduty"
+    description: ClassVar[str] = "PagerDuty Events API v2 - one event per transition."
+
+    def _build_payload(self, transitions: list[Transition]) -> dict[str, Any]:
+        # PagerDuty wants one POST per event; this example only emits the
+        # first transition. Real code would call notify() in a loop, or
+        # adapt the base to support multiple POSTs per notify call.
+        t = transitions[0]
+        return {
+            "routing_key": "<your-integration-key>",
+            "event_action": "trigger" if t.kind == "failure" else "resolve",
+            "dedup_key": f"{t.target_name}:{t.check_name}",
+            "payload": {
+                "summary": f"{t.target_name} {t.check_name}: {t.message}",
+                "source": t.target_url,
+                "severity": "error" if t.kind == "failure" else "info",
+            },
+        }
+```
+
+### Auth and credentials
+
+Any literal headers (bearer tokens, basic-auth, API keys) go in the `headers` dict. Keep the config `chmod 0600` since values are plaintext for now. Env-var substitution per header (e.g. `Authorization = "env:WEBHOOK_TOKEN"`) is a planned follow-up — until then, either:
+
+- Put the token in the file and rely on filesystem permissions, or
+- Subclass `WebhookAlerter` and read the token from `os.environ` inside `__init__`.
 
 ## Creating the Slack webhook
 

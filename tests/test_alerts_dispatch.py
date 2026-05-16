@@ -15,6 +15,7 @@ from chap_checker.state_store import CheckState, StateFile, load_state, save_sta
 
 class _FakeAlerter:
     name: ClassVar[str] = "fake"
+    description: ClassVar[str] = "Test fake; never sends anywhere."
 
     def __init__(self) -> None:
         self.calls: list[list[Transition]] = []
@@ -152,6 +153,7 @@ def test_alerter_exception_is_swallowed_but_state_is_not_saved(
 
     class _BoomAlerter:
         name: ClassVar[str] = "boom"
+        description: ClassVar[str] = "Test fake; always raises."
 
         async def notify(self, transitions: list[Transition]) -> None:
             raise RuntimeError("kaboom")

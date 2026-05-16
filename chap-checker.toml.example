@@ -65,3 +65,14 @@ webhook_url_env = "SLACK_WEBHOOK_URL"
 # Optional overrides (shown with their defaults):
 # notify_on = ["fail", "error", "warn"]
 # timeout_s = 10.0
+
+# Generic webhook alerter: POST the canonical chap-checker JSON envelope to
+# any URL that accepts application/json. Use this to wire PagerDuty Events,
+# OpsGenie, an internal incident bus, or anything else not (yet) covered by
+# a dedicated alerter. Run `chap-checker alerts list` for a copy-paste TOML
+# snippet with field-by-field comments.
+# [alerts.webhook]
+# url_env = "MY_WEBHOOK_URL"
+# notify_on = ["fail", "error", "warn"]
+# timeout_s = 10.0
+# headers = { "Authorization" = "Bearer ..." }

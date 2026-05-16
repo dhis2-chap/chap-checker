@@ -7,6 +7,7 @@ import json
 import os
 import sys
 from datetime import UTC, datetime
+from enum import Enum
 from pathlib import Path
 
 import click
@@ -158,6 +159,14 @@ checks = ["dhis2_ping", "dhis2_system_info"]
 # webhook_url_env = "SLACK_WEBHOOK_URL"   # treat the webhook URL as a credential
 # notify_on = ["fail", "error", "warn"]   # default
 # timeout_s = 10.0                        # default
+
+# Generic webhook alerter: POST the canonical chap-checker JSON envelope to
+# any URL that accepts application/json. Run `chap-checker alerts list` for
+# the full snippet with per-field comments.
+# [alerts.webhook]
+# url_env = "MY_WEBHOOK_URL"
+# notify_on = ["fail", "error", "warn"]
+# headers = { "Authorization" = "Bearer ..." }
 """
 
 
@@ -468,70 +477,95 @@ alerts_app = typer.Typer(
 )
 
 
-def _alerts_list_impl(ctx: typer.Context, config: Path | None) -> None:
-    """List every ``[alerts.<name>]`` section configured in the TOML."""
-    state_obj = _state(ctx)
-    config_path = config if config is not None else default_config_path()
-    if not config_path.exists():
-        raise typer.BadParameter(
-            f"No config at {config_path}. Provide --config <path> or create a ./{DEFAULT_CONFIG_FILENAME}.",
-        )
-    cfg = load_config(config_path)
+def _alerts_list_impl(ctx: typer.Context) -> None:
+    """List every registered alerter type with a copy-paste TOML snippet.
 
-    rows: list[dict[str, object]] = []
-    if cfg.alerts is not None and cfg.alerts.slack is not None:
-        rows.append(
-            {
-                "name": "slack",
-                "transport": "Incoming Webhook",
-                "notify_on": [s.value for s in cfg.alerts.slack.notify_on],
-                "timeout_s": cfg.alerts.slack.timeout_s,
-            }
-        )
+    Registry-driven, no config required - parallels `chap-checker checks
+    list`. Each alerter ships its own `toml_example` ClassVar so the
+    snippet has correct field names, sensible defaults, and inline
+    comments explaining what each field does. Adding a new alerter only
+    requires writing the class, registering it, and authoring the
+    snippet - no separate doc generation step.
+    """
+    state_obj = _state(ctx)
+    # Import alerts package so all @register_alerter decorators have fired.
+    from chap_checker import alerts as _alerts_pkg  # load side-effects: decorators + config_model patching
+    from chap_checker.alerts.base import all_alerter_classes
+
+    _ = _alerts_pkg  # consume the bound name so the side-effect import isn't flagged unused
+
+    classes = all_alerter_classes()
+    ordered = sorted(classes.values(), key=lambda c: c.name)
 
     if state_obj.quiet:
         return
 
     if state_obj.json_output:
-        typer.echo(json.dumps(rows, indent=2, sort_keys=True))
+        payload = [
+            {
+                "name": cls.name,
+                "description": cls.description,
+                "toml_example": getattr(cls, "toml_example", ""),
+            }
+            for cls in ordered
+        ]
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True))
         return
 
     console = Console()
-    table = Table(title=f"Configured alerters ({config_path})")
-    table.add_column("Name", style="cyan", no_wrap=True)
-    table.add_column("Transport", style="dim")
-    table.add_column("notify_on")
-    table.add_column("timeout_s", justify="right", style="dim")
-    if not rows:
-        console.print(table)
-        console.print("[dim]No alerters configured. Add an [alerts.<name>] section to enable.[/]")
+    from rich.panel import Panel
+    from rich.syntax import Syntax
+
+    if not ordered:
+        console.print("[dim]No alerters registered.[/]")
         return
-    for r in rows:
-        table.add_row(
-            str(r["name"]),
-            str(r["transport"]),
-            ", ".join(r["notify_on"]) if isinstance(r["notify_on"], list) else str(r["notify_on"]),
-            str(r["timeout_s"]),
-        )
-    console.print(table)
+
+    console.print()
+    for i, cls in enumerate(ordered):
+        snippet = getattr(cls, "toml_example", None)
+        if snippet:
+            body = Syntax(
+                snippet.rstrip(),
+                "toml",
+                theme="ansi_dark",
+                background_color="default",
+                word_wrap=False,
+            )
+            console.print(
+                Panel(
+                    body,
+                    title=f"[bold cyan]{cls.name}[/] — {cls.description}",
+                    title_align="left",
+                    expand=True,
+                )
+            )
+        else:
+            console.print(f"[bold cyan]{cls.name}[/] — {cls.description}")
+            console.print("[dim](no TOML example provided)[/]")
+        if i < len(ordered) - 1:
+            console.print()
 
 
-def _alerts_list_command(
-    ctx: typer.Context,
-    config: Path | None = typer.Option(
-        None,
-        "--config",
-        "-c",
-        help=f"Path to a TOML config (defaults to ./{DEFAULT_CONFIG_FILENAME} if present).",
-        envvar="CHAP_CHECKER_CONFIG",
-    ),
-) -> None:
-    """List configured alerters."""
-    _alerts_list_impl(ctx, config)
+def _alerts_list_command(ctx: typer.Context) -> None:
+    """List registered alerter types."""
+    _alerts_list_impl(ctx)
 
 
-alerts_app.command("list", help="List configured alerters.")(_alerts_list_command)
+alerts_app.command("list", help="List registered alerter types and their TOML fields.")(_alerts_list_command)
 alerts_app.command("ls", hidden=True)(_alerts_list_command)
+
+
+class _TestAlertKind(str, Enum):
+    """`--kind` choices for `chap-checker alerts test`.
+
+    `both` sends a failure-then-recovery pair so the operator can verify
+    the full round-trip in one invocation (Slack will render two messages,
+    a webhook receiver will see two POSTs).
+    """
+
+    failure = "failure"
+    recovery = "recovery"
+    both = "both"
 
 
 @alerts_app.command("test")
@@ -543,6 +577,12 @@ def alerts_test_command(
         "-n",
         help="Send only to this alerter (must be a configured alerter name). Default: every configured alerter.",
     ),
+    kind: _TestAlertKind = typer.Option(
+        _TestAlertKind.failure,
+        "--kind",
+        "-k",
+        help="Which synthetic transition(s) to send: failure (default), recovery, or both.",
+    ),
     config: Path | None = typer.Option(
         None,
         "--config",
@@ -553,9 +593,14 @@ def alerts_test_command(
 ) -> None:
     """Send a synthetic transition to every configured alerter (or a named one).
 
-    Useful after rotating a Slack webhook or when you suspect the alert
-    pipeline is broken. Each invocation posts a real message to the
-    configured channel, so do not put this on a cron - run it manually.
+    Useful after rotating a credential (Slack webhook URL, generic webhook
+    bearer token, ...) or when you suspect the alert pipeline is broken.
+    Each invocation posts a real message / payload to the configured
+    receiver, so do not put this on a cron - run it manually.
+
+    `--kind` picks which direction to test: `failure` (default) sends an
+    OK->FAIL transition, `recovery` sends a FAIL->OK, and `both` sends
+    the pair so a single command exercises the full round-trip.
 
     Exit code is 0 only when every alerter delivered successfully.
     """
@@ -581,41 +626,81 @@ def alerts_test_command(
                 f"No configured alerter named '{name}'. Configured: {', '.join(configured_names)}."
             )
 
-    test_transition = Transition(
+    now = datetime.now(UTC)
+    failure_transition = Transition(
         kind="failure",
         target_name="test",
         target_url="https://test.example.com",
         check_name="alert-test",
         previous_status=Status.OK,
         current_status=Status.FAIL,
-        message="Test alert from `chap-checker alerts test`.",
+        message="Test alert from `chap-checker alerts test --kind failure`.",
         duration_ms=0.0,
-        occurred_at=datetime.now(UTC),
+        occurred_at=now,
     )
+    recovery_transition = Transition(
+        kind="recovery",
+        target_name="test",
+        target_url="https://test.example.com",
+        check_name="alert-test",
+        previous_status=Status.FAIL,
+        current_status=Status.OK,
+        message="Test alert from `chap-checker alerts test --kind recovery`.",
+        duration_ms=0.0,
+        occurred_at=now,
+    )
+    if kind is _TestAlertKind.failure:
+        transitions = [failure_transition]
+    elif kind is _TestAlertKind.recovery:
+        transitions = [recovery_transition]
+    else:  # both
+        transitions = [failure_transition, recovery_transition]
 
     chatter = not state_obj.quiet and not state_obj.json_output
+    console = Console() if chatter else None
+
+    if chatter and console is not None:
+        kind_label = {
+            _TestAlertKind.failure: "OK -> FAIL",
+            _TestAlertKind.recovery: "FAIL -> OK",
+            _TestAlertKind.both: "OK -> FAIL + FAIL -> OK (both directions)",
+        }[kind]
+        n_alerters = len(alerters)
+        target_word = "alerter" if n_alerters == 1 else "alerters"
+        console.print(f"[bold]Sending synthetic [cyan]{kind_label}[/] via [cyan]{n_alerters}[/] {target_word}.[/]")
+
+    async def _send_one(binding: AlerterBinding) -> AlertTestResult:
+        try:
+            await binding.alerter.notify(transitions)
+        except Exception as exc:  # noqa: BLE001 - surface every failure as a result
+            _log.exception("alerter %s failed", binding.alerter.name)
+            return AlertTestResult(alerter=binding.alerter.name, ok=False, error=str(exc))
+        return AlertTestResult(alerter=binding.alerter.name, ok=True)
 
     async def _send_all() -> AlertTestReport:
-        results: list[AlertTestResult] = []
-        for binding in alerters:
-            if chatter:
-                typer.echo(f"Sending test message via {binding.alerter.name}...")
-            try:
-                await binding.alerter.notify([test_transition])
-                results.append(AlertTestResult(alerter=binding.alerter.name, ok=True))
-                if chatter:
-                    typer.echo("  OK")
-            except Exception as exc:  # noqa: BLE001 - surface every failure as a result
-                results.append(AlertTestResult(alerter=binding.alerter.name, ok=False, error=str(exc)))
-                if chatter:
-                    typer.echo(f"  FAILED: {exc}")
-                _log.exception("alerter %s failed", binding.alerter.name)
+        results: list[AlertTestResult] = [await _send_one(b) for b in alerters]
         return AlertTestReport(ok=all(r.ok for r in results), results=results)
 
     report = asyncio.run(_send_all())
 
     if state_obj.json_output and not state_obj.quiet:
         typer.echo(report.model_dump_json(indent=2))
+    elif chatter and console is not None:
+        table = Table(show_header=True, header_style="bold")
+        table.add_column("Alerter", style="cyan", no_wrap=True)
+        table.add_column("Result", no_wrap=True)
+        table.add_column("Detail", overflow="fold")
+        for r in report.results:
+            if r.ok:
+                result_cell = "[green]OK[/]"
+                detail = f"{len(transitions)} transition(s) delivered"
+            else:
+                result_cell = "[red]FAIL[/]"
+                detail = r.error or "(no detail)"
+            table.add_row(r.alerter, result_cell, detail)
+        console.print(table)
+        if not report.ok:
+            console.print("[red]One or more alerters failed - rotate creds or check the receiver.[/]")
 
     raise typer.Exit(0 if report.ok else 1)
 
@@ -975,6 +1060,8 @@ def _resolve_run_context(
 
 def _build_alerters(cfg: AlertsConfig) -> list[AlerterBinding]:
     """Instantiate one :class:`AlerterBinding` per configured ``[alerts.<name>]`` section."""
+    from chap_checker.alerts.webhook import WebhookAlerter
+
     out: list[AlerterBinding] = []
     if cfg.slack is not None:
         out.append(
@@ -984,6 +1071,17 @@ def _build_alerters(cfg: AlertsConfig) -> list[AlerterBinding]:
                     timeout_s=cfg.slack.timeout_s,
                 ),
                 notify_on=set(cfg.slack.notify_on),
+            )
+        )
+    if cfg.webhook is not None:
+        out.append(
+            AlerterBinding(
+                alerter=WebhookAlerter(
+                    url=cfg.webhook.resolve_url(),
+                    timeout_s=cfg.webhook.timeout_s,
+                    headers=cfg.webhook.headers,
+                ),
+                notify_on=set(cfg.webhook.notify_on),
             )
         )
     return out

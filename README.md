@@ -8,8 +8,10 @@
 
 A small command-line health-check and alerting tool for DHIS2 instances that
 integrate with `chap-core` via a DHIS2 route. Cron-friendly, with optional
-Slack alerts on status transitions and a Textual TUI dashboard for the
-at-a-glance "leave it on a TV" view.
+Slack / generic-webhook alerts on status transitions, a long-running
+daemon that exposes a browser dashboard (designed for a TV / kiosk) and a
+JSON state API, and a Textual TUI for the operator-at-a-desk view (locally
+or pointed at a remote daemon).
 
 **Documentation:** <https://dhis2-chap.github.io/chap-checker>
 
@@ -33,62 +35,60 @@ uv add chap-checker
 
 ## Quick start
 
-Ad-hoc against a single instance (credentials resolved safely):
+The fastest path is `chap-checker init`, which drops a working `chap-checker.toml` (chmod 600) pointed at the public DHIS2 demo so you can verify the tool runs before adding your own instances:
 
 ```bash
-# With a DHIS2 Personal Access Token (recommended on modern servers):
-export PROD_TOKEN=...
-chap-checker verify \
-    --url https://dhis2.example.com \
-    --token-env PROD_TOKEN
-
-# With a password (Basic auth) read from a named env var:
-export PROD_PASSWORD=...
-chap-checker verify \
-    --url https://dhis2.example.com \
-    --username admin \
-    --password-env PROD_PASSWORD
-
-# Omit --password / --token entirely and you'll be prompted on the
-# terminal (hidden input). DHIS2_TOKEN / DHIS2_PASSWORD env vars
-# work as defaults too. Passing --password / --token inline still
-# works but is discouraged - the value lands in shell history and
-# `ps` output. Token and password flags are mutually exclusive.
+chap-checker init
+chap-checker verify           # OK on the play demo
 ```
 
-Multiple instances in `./chap-checker.toml`:
+Then edit `chap-checker.toml`. A typical config:
 
 ```toml
 [instances.prod]
 url = "https://dhis2.example.com"
 username = "ops"
 password_env = "PROD_PASS"
-alerts = ["slack"]
+alerts = ["slack", "webhook"]
 
 [alerts.slack]
 webhook_url_env = "SLACK_WEBHOOK_URL"
+
+[alerts.webhook]
+url_env = "INCIDENT_BUS_URL"
+headers = { "Authorization" = "Bearer ..." }
 ```
 
-Then `chap-checker verify` runs every configured instance and pages Slack on
-status transitions. See [chap-checker.toml.example](./chap-checker.toml.example)
-for the full template.
-
-The TUI:
+Discover the alert transports and copy-paste their TOML:
 
 ```bash
-chap-checker tui
+chap-checker alerts list                       # registry of available alerters with per-field comments
+chap-checker alerts test --kind both           # fire a synthetic OK->FAIL + FAIL->OK pair
 ```
 
-Or run the server (browser dashboard + JSON state API for remote `tui --connect` clients):
+Ad-hoc verify against a single instance (no config needed):
 
 ```bash
-chap-checker serve
+# With a DHIS2 Personal Access Token (recommended on modern servers):
+export PROD_TOKEN=...
+chap-checker verify --url https://dhis2.example.com --token-env PROD_TOKEN
+
+# Or with a password (Basic auth) read from a named env var:
+export PROD_PASSWORD=...
+chap-checker verify --url https://dhis2.example.com --username admin --password-env PROD_PASSWORD
 ```
 
-Run `chap-checker serve` somewhere persistent (a TV machine, a small VM,
-systemd-supervised) and point laptops at it with
-`chap-checker tui --connect http://host:8765` so every viewer sees the
-same numbers. Pass `--no-ui` for a headless API-only daemon.
+`--password` / `--token` inline still works but is discouraged — the value lands in shell history and `ps` output. Omit both and you'll be prompted on a TTY. See [chap-checker.toml.example](./chap-checker.toml.example) for the full config template.
+
+### Surfaces
+
+```bash
+chap-checker tui          # Textual TUI: operator-at-a-desk view, in a terminal
+chap-checker serve        # long-running daemon: browser dashboard at / + JSON state at /api/state
+chap-checker tui --connect http://daemon-host:8765   # TUI as a thin client of a remote `serve`
+```
+
+Pair them: run `chap-checker serve` somewhere persistent (a small VM, the TV machine itself, systemd-supervised — see [the server guide](https://dhis2-chap.github.io/chap-checker/guides/serve/) for the unit file). Pin a kiosk browser at the URL on the TV; operators at desks run `chap-checker tui` locally or `chap-checker tui --connect http://daemon:8765` for the same numbers without spinning up their own check loop. Alerts fire from one place.
 
 ## Built-in checks
 

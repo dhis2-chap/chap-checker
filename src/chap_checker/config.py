@@ -175,12 +175,53 @@ class SlackAlertConfig(BaseModel):
         return value
 
 
+class WebhookAlertConfig(BaseModel):
+    """Generic HTTP-webhook alerter configuration.
+
+    Posts a canonical JSON envelope (see
+    :class:`chap_checker.alerts.webhook.WebhookAlerter`) to any URL that
+    accepts an ``application/json`` POST. Use this to wire chap-checker
+    into receivers that aren't (yet) covered by a dedicated alerter -
+    PagerDuty Events, OpsGenie, an internal incident bus, etc.
+
+    Auth: pass any required tokens via the ``headers`` dict. Values are
+    literal - put them in a chmod-600 config alongside the rest of your
+    credentials. A future iteration will add per-header env-var
+    substitution; for now keep the file off-disk-shareable.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    url: HttpUrl | None = None
+    url_env: str | None = None
+    notify_on: list[Status] = Field(default_factory=lambda: [Status.FAIL, Status.ERROR, Status.WARN])
+    timeout_s: float = Field(default=10.0, gt=0)
+    headers: dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _exactly_one_url_source(self) -> "WebhookAlertConfig":
+        if (self.url is None) == (self.url_env is None):
+            raise ValueError("set exactly one of 'url' or 'url_env'")
+        return self
+
+    def resolve_url(self) -> str:
+        """Return the webhook URL, reading from env if ``url_env`` is set."""
+        if self.url is not None:
+            return str(self.url)
+        assert self.url_env is not None  # guarded by validator
+        value = os.environ.get(self.url_env)
+        if value is None:
+            raise RuntimeError(f"Environment variable '{self.url_env}' is not set.")
+        return value
+
+
 class AlertsConfig(BaseModel):
     """``[alerts.*]`` section — one optional sub-section per alerter."""
 
     model_config = ConfigDict(extra="forbid")
 
     slack: SlackAlertConfig | None = None
+    webhook: WebhookAlertConfig | None = None
 
 
 UiTheme = Literal["phosphor", "amber", "high", "tokyo", "dhis2"]
@@ -235,6 +276,8 @@ class CheckerConfig(BaseModel):
         configured: set[str] = set()
         if self.alerts.slack is not None:
             configured.add("slack")
+        if self.alerts.webhook is not None:
+            configured.add("webhook")
         return configured
 
     @model_validator(mode="after")

@@ -4,11 +4,17 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime
-from typing import ClassVar, Literal, Protocol, TypeVar, runtime_checkable
+from typing import TYPE_CHECKING, ClassVar, Literal, Protocol, TypeVar, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict
 
 from chap_checker.checks.base import Status
+
+if TYPE_CHECKING:
+    # `config_model` points each alerter at its TOML schema so the
+    # registry can describe `[alerts.<name>]` properties without
+    # importing chap_checker.config (which would be a cycle).
+    pass
 
 TransitionKind = Literal["failure", "recovery"]
 
@@ -40,9 +46,23 @@ class Alerter(Protocol):
     it, and skips the state-file save so the transition is retried on the
     next run. Alert delivery failures never change the run's exit code
     regardless of whether the alerter raises or swallows.
+
+    `description` is the one-line text shown in `chap-checker alerts list`
+    (the registry view), parallel to `Check.description`.
     """
 
     name: ClassVar[str]
+    description: ClassVar[str]
+
+    # Optional class attributes (not part of the runtime-checkable
+    # surface, accessed via getattr by `chap-checker alerts list`):
+    #
+    # - `toml_example: ClassVar[str]` - a copy-paste-ready
+    #   `[alerts.<name>]` snippet with inline `# comment` per field.
+    #   Hand-curated so each alerter controls its own wording.
+    # - `config_model: ClassVar[type[BaseModel] | None]` - the pydantic
+    #   config model. Used by tools that want to introspect the schema
+    #   programmatically; the human-facing view uses `toml_example`.
 
     async def notify(self, transitions: list[Transition]) -> None:
         """Send the given transitions out-of-band.
