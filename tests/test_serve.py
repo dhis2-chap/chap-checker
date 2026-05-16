@@ -401,3 +401,81 @@ def test_auth_static_files_remain_public_for_login_modal() -> None:
         # are part of the shell).
         r2 = client.get("/_state.js")
         assert r2.status_code == 200
+
+
+def test_reload_enables_auth_when_block_added(tmp_path: Path) -> None:
+    """Adding an `[auth]` block to the TOML and reloading starts gating /api/*."""
+    cfg_path = tmp_path / "chap-checker.toml"
+    # Initial config has no [auth] - daemon is open.
+    cfg_path.write_text(_VALID_TOML)
+    server = DashboardServer(
+        targets=[_target()],
+        cfg=_cfg(),
+        state_path=None,
+        interval_s=30.0,
+        alerts_enabled=False,
+        config_path=cfg_path,
+    )
+    app = make_app(server, auth_token=None)
+    with TestClient(app, raise_server_exceptions=False) as client:
+        assert client.get("/api/state").status_code == 200
+        assert client.get("/api/auth").json()["required"] is False
+
+        # Operator edits the TOML to add [auth], reloads.
+        cfg_path.write_text(_VALID_TOML + '\n[auth]\ntoken = "after-reload"\n')
+        assert client.post("/api/reload").status_code == 200
+
+        # /api/state now requires the new token.
+        assert client.get("/api/state").status_code == 401
+        assert client.get("/api/state", headers={"Authorization": "Bearer after-reload"}).status_code == 200
+        # /api/auth reports the change too.
+        assert client.get("/api/auth").json()["required"] is True
+
+
+def test_reload_disables_auth_when_block_removed(tmp_path: Path) -> None:
+    """Removing the `[auth]` block via reload opens up /api/* immediately."""
+    cfg_path = tmp_path / "chap-checker.toml"
+    cfg_path.write_text(_VALID_TOML + '\n[auth]\ntoken = "initial-token"\n')
+    server = DashboardServer(
+        targets=[_target()],
+        cfg=_cfg(),
+        state_path=None,
+        interval_s=30.0,
+        alerts_enabled=False,
+        config_path=cfg_path,
+    )
+    app = make_app(server, auth_token="initial-token")
+    with TestClient(app, raise_server_exceptions=False) as client:
+        assert client.get("/api/state").status_code == 401
+        assert client.get("/api/auth").json()["required"] is True
+
+        # Operator removes [auth] from the TOML, reloads.
+        cfg_path.write_text(_VALID_TOML)
+        assert client.post("/api/reload", headers={"Authorization": "Bearer initial-token"}).status_code == 200
+
+        # /api/state no longer requires the token.
+        assert client.get("/api/state").status_code == 200
+        assert client.get("/api/auth").json()["required"] is False
+
+
+def test_reload_rotates_token_when_block_changed(tmp_path: Path) -> None:
+    """Changing the `[auth].token` value via reload makes the old token stop working."""
+    cfg_path = tmp_path / "chap-checker.toml"
+    cfg_path.write_text(_VALID_TOML + '\n[auth]\ntoken = "old-token"\n')
+    server = DashboardServer(
+        targets=[_target()],
+        cfg=_cfg(),
+        state_path=None,
+        interval_s=30.0,
+        alerts_enabled=False,
+        config_path=cfg_path,
+    )
+    app = make_app(server, auth_token="old-token")
+    with TestClient(app, raise_server_exceptions=False) as client:
+        assert client.get("/api/state", headers={"Authorization": "Bearer old-token"}).status_code == 200
+
+        cfg_path.write_text(_VALID_TOML + '\n[auth]\ntoken = "new-token"\n')
+        assert client.post("/api/reload", headers={"Authorization": "Bearer old-token"}).status_code == 200
+
+        assert client.get("/api/state", headers={"Authorization": "Bearer old-token"}).status_code == 401
+        assert client.get("/api/state", headers={"Authorization": "Bearer new-token"}).status_code == 200

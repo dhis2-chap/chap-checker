@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.7.4] — 2026-05-16
+
+### Fixed
+
+- **`POST /api/reload` now applies a new `[auth]` block.** Previously the FastAPI auth dependency closed over the bearer token at app-build time, so adding / removing / changing the `[auth]` block in the TOML and reloading left the prior protection in place until the daemon restarted. The dependency now reads `server.resolved_auth_token` at request time, and `reload()` re-resolves the token from the new config (failing the reload with 400 if `auth.token_env` references a missing env var, which leaves the prior auth state intact). Three regression tests cover add / remove / rotate.
+
 ### Added
 
 - **TUI guide now shows the dhis2-themed dashboard and both auth-modal variants.** The `dashboard-dhis2.svg` artifact existed but was never referenced from the prose; the new `tui-token-modal-{phosphor,dhis2}.svg` pair gives the modal the same theme parity the browser screenshots already had. Naming follows the existing `dashboard.svg` / `dashboard-dhis2.svg` convention (default name = phosphor, `-dhis2` suffix = DHIS2 theme).
@@ -155,7 +161,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 For 0.1.x / 0.2.x release notes, see the [GitHub Releases page](https://github.com/dhis2-chap/chap-checker/releases).
 
-[Unreleased]: https://github.com/dhis2-chap/chap-checker/compare/v0.7.3...HEAD
+[Unreleased]: https://github.com/dhis2-chap/chap-checker/compare/v0.7.4...HEAD
+[0.7.4]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.7.4
 [0.7.3]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.7.3
 [0.7.2]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.7.2
 [0.7.1]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.7.1
