@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.8.1] — 2026-05-16
+
+### Fixed
+
+- **Alert dispatch is now serialised via a file lock around load -> compute -> dispatch -> save.** Previously `dispatch_alerts_async()` did a plain `load_state -> compute_transitions -> alerter.notify -> save_state` cycle. Only the final `save_state` was atomic (via `os.replace`); the load-through-save window itself was unguarded. Two concurrent runs - overlapping cron + a manual `chap-checker verify`, or `tui` and `serve` sharing one state file - could each read the same prior state and re-emit the same transition, duplicating alerts to Slack / webhook receivers. New `alert_state_lock(state_path, timeout_s=30.0)` async context manager in `state_store.py` uses `fcntl.flock` on a sidecar `<state>.lock` file. POSIX-only; Windows operators should keep alert dispatch single-process (the lock is a no-op there). Lock contention beyond the timeout raises `StateLockTimeout`; the dispatch function logs + skips this tick instead of crashing the background refresh loop. Two new regression tests in `tests/test_state_store.py` (serialisation + timeout).
+
 ### Changed
 
 - **`dhis2_chap_ping` and `dhis2_chap_system_info` now produce the same structured failure shape as the other DHIS2 checks.** Both used to return a generic `"Unexpected status 401 from /api/routes/..."` line with no `details`; they now go through `diagnose_status()` like the rest, so 401 / 403 / 404 messages explain the credential / authority / endpoint cause and every failure carries `http_status` + `path` in `details`. Easier to route on for alert receivers and the JSON-API tooling. The 502 special case (chap-core didn't respond) keeps its message but also gains structured `http_status: 502`. Four new regression tests in `tests/test_check_response_guards.py`.
@@ -179,7 +185,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 For 0.1.x / 0.2.x release notes, see the [GitHub Releases page](https://github.com/dhis2-chap/chap-checker/releases).
 
-[Unreleased]: https://github.com/dhis2-chap/chap-checker/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/dhis2-chap/chap-checker/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.8.1
 [0.8.0]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.8.0
 [0.7.4]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.7.4
 [0.7.3]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.7.3
