@@ -7,7 +7,14 @@ from typing import ClassVar
 
 from dhis2w_client import Dhis2Client
 
-from chap_checker.checks.base import CheckContext, CheckResult, Status, format_request_error, register_check
+from chap_checker.checks.base import (
+    CheckContext,
+    CheckResult,
+    Status,
+    diagnose_status,
+    format_request_error,
+    register_check,
+)
 
 PING_PATH = "/api/routes/chap/run/health"
 
@@ -35,17 +42,31 @@ class Dhis2ChapPingCheck:
 
         duration_ms = (time.perf_counter() - start) * 1000
         if response.status_code == 502:
+            # 502 means the DHIS2 route is wired but chap-core upstream
+            # didn't answer. Carry the http_status in details so JSON
+            # consumers (alerts, monitoring) can route on it the same
+            # way they route on 401/403/404 from the other checks.
             return CheckResult(
                 name=self.name,
                 status=Status.FAIL,
                 message="DHIS2 route returned 502 - chap-core did not respond.",
+                details={"http_status": 502, "path": PING_PATH},
                 duration_ms=duration_ms,
             )
-        if response.status_code >= 400:
+        diag = diagnose_status(
+            response.status_code,
+            path=PING_PATH,
+            not_found_meaning=(
+                f"{PING_PATH} returned 404 - the chap route exists but the upstream chap-core has no /health endpoint."
+            ),
+        )
+        if diag is not None:
+            message, details = diag
             return CheckResult(
                 name=self.name,
                 status=Status.FAIL,
-                message=f"Unexpected status {response.status_code} from {PING_PATH}.",
+                message=message,
+                details=details,
                 duration_ms=duration_ms,
             )
 

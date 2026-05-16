@@ -11,6 +11,7 @@ from pydantic import HttpUrl
 
 from chap_checker.checks.base import CheckContext, Status
 from chap_checker.checks.dhis2_chap_modeling_app import Dhis2ChapModelingAppCheck
+from chap_checker.checks.dhis2_chap_ping import Dhis2ChapPingCheck
 from chap_checker.checks.dhis2_chap_system_info import Dhis2ChapSystemInfoCheck
 from chap_checker.checks.dhis2_ping import Dhis2PingCheck
 from chap_checker.checks.dhis2_system_info import Dhis2SystemInfoCheck
@@ -212,3 +213,58 @@ def test_modeling_app_generic_500_keeps_status_in_details() -> None:
     assert result.status is Status.FAIL
     assert "Unexpected status 500" in result.message
     assert result.details["http_status"] == 500
+
+
+def test_chap_ping_diagnoses_401_with_structured_status() -> None:
+    """401 from the chap route surfaces the credential hint + http_status."""
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, content=b"")
+
+    client = _client(handler)
+    result = asyncio.run(Dhis2ChapPingCheck().run(client, _ctx()))
+    assert result.status is Status.FAIL
+    assert "401" in result.message
+    assert "credentials" in result.message.lower()
+    assert result.details["http_status"] == 401
+    assert result.details["path"] == "/api/routes/chap/run/health"
+
+
+def test_chap_ping_502_keeps_chapcore_message_and_http_status() -> None:
+    """502 keeps its chap-core-specific message but now also lands a structured http_status."""
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(502, content=b"")
+
+    client = _client(handler)
+    result = asyncio.run(Dhis2ChapPingCheck().run(client, _ctx()))
+    assert result.status is Status.FAIL
+    assert "chap-core did not respond" in result.message
+    assert result.details["http_status"] == 502
+
+
+def test_chap_system_info_diagnoses_403_with_structured_status() -> None:
+    """403 through the chap route surfaces the authority hint + http_status."""
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, content=b"")
+
+    client = _client(handler)
+    result = asyncio.run(Dhis2ChapSystemInfoCheck().run(client, _ctx()))
+    assert result.status is Status.FAIL
+    assert "403" in result.message
+    assert result.details["http_status"] == 403
+
+
+def test_chap_system_info_404_carries_route_specific_hint() -> None:
+    """404 keeps the system-info-specific not-found message + structured status."""
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, content=b"")
+
+    client = _client(handler)
+    result = asyncio.run(Dhis2ChapSystemInfoCheck().run(client, _ctx()))
+    assert result.status is Status.FAIL
+    assert "404" in result.message
+    assert "chap route" in result.message.lower() or "chap-core" in result.message
+    assert result.details["http_status"] == 404
