@@ -455,3 +455,94 @@ def test_connect_mode_401_paints_auth_banner_not_generic_disconnect() -> None:
                 assert "check the token value" in rendered
 
     asyncio.run(_run())
+
+
+def test_connect_mode_401_without_token_pushes_modal() -> None:
+    """First 401 with no `connect_token` shows the in-TUI token prompt instead of the banner."""
+    from chap_checker.dashboard import DashboardApp, TokenPromptScreen
+
+    request = httpx.Request("GET", "http://remote.example:8765/api/state")
+    mock_get = AsyncMock(return_value=httpx.Response(401, text="bad token", request=request))
+
+    async def _run() -> None:
+        with patch.object(httpx.AsyncClient, "get", new=mock_get):
+            app = DashboardApp(
+                interval_s=300.0,
+                connect_url="http://remote.example:8765",
+                # connect_token=None - no token provided at CLI
+            )
+            async with app.run_test(headless=True) as pilot:
+                await app.action_refresh()
+                await pilot.pause()
+                # Modal screen pushed; the active screen should be TokenPromptScreen.
+                assert isinstance(app.screen, TokenPromptScreen)
+
+    asyncio.run(_run())
+
+
+def test_token_prompt_submit_updates_http_client_and_refetches() -> None:
+    """Submitting the modal sets the bearer header and triggers an immediate refresh."""
+    from chap_checker.dashboard import DashboardApp, TokenPromptScreen
+
+    request = httpx.Request("GET", "http://remote.example:8765/api/state")
+    canned = _canned_state()
+    # First call: 401 (no token yet). Second call (after token submit): 200.
+    responses = [
+        httpx.Response(401, text="bad token", request=request),
+        httpx.Response(200, content=canned.model_dump_json().encode(), request=request),
+    ]
+    mock_get = AsyncMock(side_effect=responses)
+
+    async def _run() -> None:
+        with patch.object(httpx.AsyncClient, "get", new=mock_get):
+            app = DashboardApp(
+                interval_s=300.0,
+                connect_url="http://remote.example:8765",
+            )
+            async with app.run_test(headless=True) as pilot:
+                await app.action_refresh()
+                await pilot.pause()
+                assert isinstance(app.screen, TokenPromptScreen)
+                # Dismiss with a token value (same path as Sign in button).
+                app.screen.dismiss("operator-typed-token")
+                await pilot.pause()
+                await pilot.pause()
+                # `_http_client` was rebuilt with the bearer header.
+                assert app._http_client is not None
+                assert app._http_client.headers.get("Authorization") == "Bearer operator-typed-token"
+                # Both fetches happened: the initial 401 and the post-submit retry.
+                assert mock_get.await_count >= 2
+
+    asyncio.run(_run())
+
+
+def test_token_prompt_cancel_paints_banner_and_stops_prompting() -> None:
+    """Cancelling the modal (Escape) paints the auth-rejected banner and doesn't re-prompt."""
+    from chap_checker.dashboard import DashboardApp, DisconnectBanner, TokenPromptScreen
+
+    request = httpx.Request("GET", "http://remote.example:8765/api/state")
+    mock_get = AsyncMock(return_value=httpx.Response(401, text="bad token", request=request))
+
+    async def _run() -> None:
+        with patch.object(httpx.AsyncClient, "get", new=mock_get):
+            app = DashboardApp(
+                interval_s=300.0,
+                connect_url="http://remote.example:8765",
+            )
+            async with app.run_test(headless=True) as pilot:
+                await app.action_refresh()
+                await pilot.pause()
+                assert isinstance(app.screen, TokenPromptScreen)
+                # Operator cancels without entering a token.
+                app.screen.dismiss(None)
+                await pilot.pause()
+                banner = app.query_one("#banner", DisconnectBanner)
+                assert banner.has_class("visible")
+                assert "auth rejected" in str(banner.render()).lower()
+                # A subsequent refresh tick must NOT push the modal again -
+                # the `_token_prompted` flag gates re-prompting.
+                await app.action_refresh()
+                await pilot.pause()
+                assert not isinstance(app.screen, TokenPromptScreen)
+
+    asyncio.run(_run())

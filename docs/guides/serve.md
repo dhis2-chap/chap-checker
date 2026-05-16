@@ -314,9 +314,9 @@ export CHAP_CHECKER_TOKEN=<the same token>
 chap-checker tui --connect http://daemon-host:8765 --token-env CHAP_CHECKER_TOKEN
 ```
 
-If you omit `--token-env` on a TTY, the TUI probes `/api/auth` and prompts for the token interactively (hidden input) — same UX as `verify --url --token` prompts for a missing password.
+If you omit `--token-env` (and the daemon requires auth), the TUI hits its first 401 and pops a centred token-prompt modal — paste the token, press Enter, the dashboard renders. Escape to cancel, which paints the auth-rejected banner instead. The modal stays inside the Textual surface so the operator never leaves the dashboard.
 
-A wrong token (or one that gets rejected mid-session) paints the disconnect banner with `"auth rejected by ..."` (distinct from a generic "disconnected", so you know the receiver is up but the credential is bad).
+A wrong token (or one rejected mid-session) paints the disconnect banner with `"auth rejected by ..."` (distinct from a generic "disconnected", so you know the receiver is up but the credential is bad).
 
 `chap-checker tui` in local mode (no `--connect`) does not need a token. Local mode runs the check loop itself against DHIS2 — there's no HTTP daemon between the TUI and the data, so `[auth]` doesn't apply.
 

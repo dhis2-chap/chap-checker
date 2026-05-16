@@ -481,26 +481,12 @@ def tui_command(
                 raise typer.BadParameter(f"--token-env {token_env}: env var is not set or empty.")
         elif token is not None:
             connect_token = token
-        else:
-            # Probe the daemon: if `[auth]` is set there we need a token.
-            # On a TTY, prompt the operator interactively (same pattern as
-            # `verify --url` prompting for a missing password). On a
-            # non-TTY (cron, CI), let the request go without a header -
-            # the daemon will return 401 and the TUI will paint the
-            # auth-rejected banner with a clear message about how to set
-            # the token. Probing avoids prompting against an
-            # unauthenticated daemon where the token would be silently
-            # ignored.
-            try:
-                import httpx
-
-                probe = httpx.get(connect.rstrip("/") + "/api/auth", timeout=5.0)
-                required = bool(probe.json().get("required")) if probe.is_success else False
-            except Exception:  # noqa: BLE001 - any probe failure falls through to "no prompt"
-                required = False
-            if required and sys.stdin.isatty():
-                prompted: str = typer.prompt("Token", hide_input=True)
-                connect_token = prompted or None
+        # If neither is set, the TUI handles auth itself via a Textual
+        # modal on the first 401 from /api/state. No CLI-level prompt -
+        # the modal stays inside the dashboard surface, can show the
+        # auth-rejected message on subsequent attempts, and works the
+        # same way for users who pop a fresh tab vs. cron invocations
+        # (which fall through to the banner).
         run_dashboard(
             interval_s=interval,
             connect_url=connect,

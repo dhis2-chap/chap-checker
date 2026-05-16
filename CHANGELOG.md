@@ -6,6 +6,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.7.2] — 2026-05-16
+
+### Changed
+
+- **Token prompt is now an in-TUI Textual modal** instead of a typer one-liner at the CLI before the dashboard starts. `chap-checker tui --connect URL` (no token) launches the TUI, hits its first 401, and pops a centred `TokenPromptScreen` with an `Input` for the token. Submit (or Enter) rebuilds the httpx client with the bearer header and refreshes; cancel (Escape) paints the auth-rejected banner. UX matches the browser modal — same surface, same flow.
+
+### Added
+
+- `TokenPromptScreen` — reusable `ModalScreen[str | None]` in `chap_checker.dashboard` for custom checks / future flows that need a quick masked-input prompt.
+- Three Textual-pilot tests covering: 401 with no token shows the modal; submitting sets the bearer header + re-fetches; Escape paints the banner and doesn't re-prompt on subsequent ticks.
+
+### Removed
+
+- CLI-level `typer.prompt("Token", hide_input=True)` fallback for `tui --connect`. The TUI modal supersedes it; non-TTY invocations still fall through cleanly to the auth-rejected banner.
+
 ## [0.7.1] — 2026-05-16
 
 ### Fixed
@@ -123,7 +138,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 For 0.1.x / 0.2.x release notes, see the [GitHub Releases page](https://github.com/dhis2-chap/chap-checker/releases).
 
-[Unreleased]: https://github.com/dhis2-chap/chap-checker/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/dhis2-chap/chap-checker/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.7.2
 [0.7.1]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.7.1
 [0.7.0]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.7.0
 [0.6.0]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.6.0
