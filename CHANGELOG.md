@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Changed
+
+- **`dhis2_chap_ping` and `dhis2_chap_system_info` now produce the same structured failure shape as the other DHIS2 checks.** Both used to return a generic `"Unexpected status 401 from /api/routes/..."` line with no `details`; they now go through `diagnose_status()` like the rest, so 401 / 403 / 404 messages explain the credential / authority / endpoint cause and every failure carries `http_status` + `path` in `details`. Easier to route on for alert receivers and the JSON-API tooling. The 502 special case (chap-core didn't respond) keeps its message but also gains structured `http_status: 502`. Four new regression tests in `tests/test_check_response_guards.py`.
+
 ## [0.8.0] — 2026-05-16
 
 ### Fixed
