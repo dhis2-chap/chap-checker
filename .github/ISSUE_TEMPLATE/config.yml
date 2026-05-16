@@ -10,6 +10,3 @@ contact_links:
   - name: Security advisory (private)
     url: https://github.com/dhis2-chap/chap-checker/security/advisories/new
     about: Found a vulnerability? Use the private disclosure flow, not a public issue.
-  - name: GitHub Discussions
-    url: https://github.com/dhis2-chap/chap-checker/discussions
-    about: Ask a question, propose a design, share a config. Open-ended chat goes here, not in an issue.
