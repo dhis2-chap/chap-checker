@@ -54,10 +54,16 @@ async def _capture(url: str, token: str, output_dir: Path, width: int, height: i
         # the absence of the modal - we key on the Sign out button.
         await page.wait_for_selector("text=Sign out", timeout=10_000)
         # The browser bootstraps the daemon's `[ui].theme` from /api/state's
-        # `ui_theme` field after sign-in. Without a long-enough wait the
-        # screenshot captures the page mid-render in the default phosphor
-        # palette even when the daemon is configured for dhis2.
-        await page.wait_for_timeout(3500)
+        # `ui_theme` field after sign-in. `window.CK_THEME_BOOTSTRAPPED` is
+        # set inside the applyTheme useEffect once it has run post-bootstrap;
+        # waiting for it is the deterministic signal that the theme reflow
+        # has finished - replaces the previous "sleep 3500ms and hope".
+        await page.wait_for_function(
+            "() => window.CK_THEME_BOOTSTRAPPED === true",
+            timeout=10_000,
+        )
+        # Tiny extra settle for the uptime strip's animated CSS transitions.
+        await page.wait_for_timeout(500)
         dashboard_path = output_dir / "web-dashboard.png"
         await page.screenshot(path=str(dashboard_path), full_page=False)
         print(f"wrote {dashboard_path}")
