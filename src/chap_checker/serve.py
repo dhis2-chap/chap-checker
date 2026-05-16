@@ -40,8 +40,8 @@ from chap_checker.daemon import DashboardServer
 from chap_checker.logging import get_logger
 from chap_checker.runner import TargetEntry
 
-_log = get_logger("web")
-_access_log = get_logger("web.access")
+_log = get_logger("serve")
+_access_log = get_logger("serve.access")
 
 
 class AccessLogMiddleware(BaseHTTPMiddleware):
@@ -204,15 +204,36 @@ def run(
     if pkg_log.level == logging.NOTSET or pkg_log.level > logging.INFO:
         pkg_log.setLevel(logging.INFO)
 
+    # Route uvicorn's own loggers through the chap_checker handler so its
+    # startup banner ("Started server process …") shares the same format
+    # as our own lines instead of printing uvicorn's default `INFO:` style.
+    pkg_handler = pkg_log.handlers[0] if pkg_log.handlers else None
+    if pkg_handler is not None:
+        for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+            u = logging.getLogger(name)
+            u.handlers[:] = [pkg_handler]
+            u.propagate = False
+            u.setLevel(logging.INFO)
+
     surface = "dashboard + API" if ui_enabled else "API only (--no-ui)"
     _log.info("serving %s on http://%s:%d", surface, host, port)
     if config_path is not None:
         _log.info("config: %s", config_path)
     _log.info("interval: %.1fs; alerts: %s", interval_s, "on" if alerts_enabled else "off")
     # `access_log=False` disables uvicorn's built-in per-request log so
-    # AccessLogMiddleware is the single source of those lines. Uvicorn's
-    # own INFO startup banner ("Started server process …") still shows.
-    uvicorn.run(app, host=host, port=port, log_level="info", access_log=False)
+    # AccessLogMiddleware is the single source of those lines.
+    # `log_config=None` tells uvicorn not to re-configure logging on
+    # startup, so its own loggers keep the chap_checker handler we wired
+    # up above and its startup banner ("Started server process …") shares
+    # our format instead of printing in uvicorn's default `INFO:` style.
+    uvicorn.run(
+        app,
+        host=host,
+        port=port,
+        log_level="info",
+        access_log=False,
+        log_config=None,
+    )
 
 
 __all__: list[str] = [
