@@ -11,13 +11,17 @@
  *
  * The modal is hand-rolled JSX (Babel-standalone compiles inline) so it
  * doesn't depend on any of the designer's component primitives.
+ *
+ * Theme handling: the modal applies its own colours INLINE (no writes to
+ * :root CSS variables). Touching :root would race with `app.jsx`'s
+ * `applyTheme()` and could leave keys like `--header-bg` unset after
+ * sign-in. By rendering with literal colours pulled from `MODAL_THEMES`,
+ * the modal stays self-contained and the artifact owns `:root` end-to-end.
  */
 
 (function () {
   "use strict";
 
-  // Mount onto a sibling div so the artifact's React root isn't disturbed.
-  // index.html only ships `<div id="root">`; create our own.
   function ensureAuthRoot() {
     let el = document.getElementById("ck-auth-root");
     if (!el) {
@@ -28,66 +32,69 @@
     return el;
   }
 
-  // Theme subsets used by the login modal. Embedded here (not imported
-  // from app.jsx) because:
-  //   1. The artifact in src/ is designer-replaceable; depending on its
-  //      THEMES export would break on the next drop.
-  //   2. Only the CSS variables the modal actually touches need to be
-  //      here. The artifact applies its full dict via `applyTheme()`
-  //      once `/api/state` returns; this is just the pre-paint subset.
-  // Keep in sync with the matching entries in src/app.jsx::THEMES if
-  // colours change there.
+  // Self-contained palette for the modal. Only the colour slots the modal
+  // actually uses are here. Hex values mirror the matching keys in
+  // src/app.jsx::THEMES; keep them in sync if colours change there.
   const MODAL_THEMES = {
     phosphor: {
-      "--bg": "#050805", "--bg-elev": "#0a0f0a",
-      "--green": "#6ee06e", "--green-2": "#4fbf4f", "--green-dim": "#2f5f2f",
-      "--ink-dim": "#6a7a6a", "--ink-vdim": "#3a4a3a",
-      "--red": "#ff5a5a",
+      bg: "#050805",
+      elev: "#0a0f0a",
+      ink: "#6ee06e",
+      inkDim: "#6a7a6a",
+      inkVdim: "#3a4a3a",
+      accent: "#4fbf4f",
+      accentDim: "#2f5f2f",
+      error: "#ff5a5a",
     },
     amber: {
-      "--bg": "#0a0705", "--bg-elev": "#100b07",
-      "--green": "#ffb84d", "--green-2": "#d9933a", "--green-dim": "#7a5a1f",
-      "--ink-dim": "#8a7a5a", "--ink-vdim": "#4a3a2a",
-      "--red": "#ff5a5a",
+      bg: "#0a0705",
+      elev: "#100b07",
+      ink: "#ffb84d",
+      inkDim: "#8a7a5a",
+      inkVdim: "#4a3a2a",
+      accent: "#d9933a",
+      accentDim: "#7a5a1f",
+      error: "#ff5a5a",
     },
     high: {
-      "--bg": "#000000", "--bg-elev": "#0c0c0c",
-      "--green": "#9eff9e", "--green-2": "#7fff7f", "--green-dim": "#4a8a4a",
-      "--ink-dim": "#a0a0a0", "--ink-vdim": "#606060",
-      "--red": "#ff5a5a",
+      bg: "#000000",
+      elev: "#0c0c0c",
+      ink: "#9eff9e",
+      inkDim: "#a0a0a0",
+      inkVdim: "#606060",
+      accent: "#7fff7f",
+      accentDim: "#4a8a4a",
+      error: "#ff5a5a",
     },
     tokyo: {
-      "--bg": "#11131a", "--bg-elev": "#161922",
-      "--green": "#7aa2f7", "--green-2": "#5d87ee", "--green-dim": "#384a78",
-      "--ink-dim": "#7a85a8", "--ink-vdim": "#3a4567",
-      "--red": "#f7768e",
+      bg: "#11131a",
+      elev: "#161922",
+      ink: "#7aa2f7",
+      inkDim: "#7a85a8",
+      inkVdim: "#3a4567",
+      accent: "#5d87ee",
+      accentDim: "#384a78",
+      error: "#f7768e",
     },
     dhis2: {
-      "--bg": "#c5cad0", "--bg-elev": "#e3e7eb",
-      "--green": "#2e6b32", "--green-2": "#1f4a22", "--green-dim": "#b8d5ba",
-      "--ink-dim": "#4e5b66", "--ink-vdim": "#8a929c",
-      "--red": "#a8302f",
+      bg: "#c5cad0",
+      elev: "#e3e7eb",
+      ink: "#1e293b",
+      inkDim: "#4e5b66",
+      inkVdim: "#8a929c",
+      accent: "#1f4a22",
+      accentDim: "#b8d5ba",
+      error: "#a8302f",
     },
   };
 
-  /**
-   * Apply the named theme's CSS variables to `:root`. Idempotent and
-   * cheap. Called before the login modal becomes visible so it inherits
-   * the configured `[ui].theme` instead of the phosphor defaults baked
-   * into index.html's <style> block.
-   *
-   * When the artifact (`app.jsx`) later renders and calls its own
-   * applyTheme(), it writes the same (or a superset of) variables, so
-   * this pre-paint apply is a no-op from the artifact's perspective.
-   */
-  function applyModalTheme(themeName) {
-    const dict = MODAL_THEMES[themeName] || MODAL_THEMES.phosphor;
-    const root = document.documentElement;
-    Object.entries(dict).forEach(([k, v]) => root.style.setProperty(k, v));
+  function paletteFor(name) {
+    return MODAL_THEMES[name] || MODAL_THEMES.phosphor;
   }
 
   function LoginModal() {
     const [visible, setVisible] = React.useState(false);
+    const [themeName, setThemeName] = React.useState("phosphor");
     const [token, setToken] = React.useState("");
     const [error, setError] = React.useState("");
     const inputRef = React.useRef(null);
@@ -95,13 +102,10 @@
     // Probe /api/auth eagerly on mount. If the daemon requires a token
     // AND we don't have one stored, show the modal immediately - before
     // the artifact's first paint with INSTANCES_BASE mock data flashes
-    // through. The polling hook will still drive subsequent re-prompts
-    // via the "needs-token" event when a stored token is rejected.
-    //
-    // The same probe also returns the configured `[ui].theme`. Applying
-    // it here means the login modal honours the operator's theme on
-    // first paint instead of flashing phosphor-green until the artifact
-    // gets data from /api/state (which it can't, when auth blocks).
+    // through. The same probe returns the configured `[ui].theme` so the
+    // modal renders with the operator's colours instead of phosphor.
+    // The polling hook drives subsequent re-prompts via the "needs-token"
+    // event when a stored token is rejected.
     React.useEffect(() => {
       let cancelled = false;
       (async () => {
@@ -110,7 +114,7 @@
           if (!r.ok || cancelled) return;
           const data = await r.json();
           if (data && data.ui_theme) {
-            applyModalTheme(data.ui_theme);
+            setThemeName(data.ui_theme);
           }
           if (data && data.required && !window.CK_AUTH.readToken()) {
             setVisible(true);
@@ -127,9 +131,6 @@
 
     React.useEffect(() => {
       const off = window.CK_AUTH.on("needs-token", () => {
-        // Clear the previous-attempt token from the input but keep
-        // localStorage intact - the modal re-shows on every 401, the
-        // operator gets to retry.
         setToken("");
         setError(window.CK_AUTH.readToken() ? "Token was rejected. Try again." : "");
         setVisible(true);
@@ -154,22 +155,21 @@
       }
       window.CK_AUTH.writeToken(trimmed);
       setVisible(false);
-      // Let _state.js refetch immediately. If the token is wrong the next
-      // 401 will pop the modal back up with the "rejected" message.
       (window.CK_AUTH._emit || function () {})("token-set");
     }
+
+    const p = paletteFor(themeName);
 
     return (
       <div
         style={{
-          // Fully opaque overlay. The artifact ships a designer-time
-          // INSTANCES_BASE mock so the dashboard has something to paint
-          // before the first live /api/state response - which means the
-          // operator-facing tiles would leak through a translucent
-          // backdrop until auth resolves. Solid var(--bg) hides it.
+          // Fully opaque overlay so the artifact's INSTANCES_BASE mock
+          // (rendered behind the modal while live data is still 401-blocked)
+          // doesn't leak through. Inline colour - we don't touch :root so
+          // the artifact owns its theme variables end-to-end.
           position: "fixed",
           inset: 0,
-          background: "var(--bg, #050805)",
+          background: p.bg,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -181,9 +181,9 @@
         <form
           onSubmit={submit}
           style={{
-            background: "var(--bg-elev, #0a0f0a)",
-            border: "1px solid var(--green-dim, #2f5f2f)",
-            color: "var(--green, #6ee06e)",
+            background: p.elev,
+            border: `1px solid ${p.accentDim}`,
+            color: p.ink,
             padding: "28px 32px",
             minWidth: "420px",
             maxWidth: "560px",
@@ -200,14 +200,14 @@
           >
             chap-checker
           </div>
-          <div style={{ color: "var(--ink-dim, #6a7a6a)", marginBottom: "20px" }}>
+          <div style={{ color: p.inkDim, marginBottom: "20px" }}>
             This deployment requires a bearer token to view the dashboard.
           </div>
           <label
             htmlFor="ck-token"
             style={{
               display: "block",
-              color: "var(--ink-dim, #6a7a6a)",
+              color: p.inkDim,
               fontSize: "12px",
               marginBottom: "6px",
               textTransform: "uppercase",
@@ -227,9 +227,9 @@
             style={{
               width: "100%",
               boxSizing: "border-box",
-              background: "var(--bg, #050805)",
-              border: "1px solid var(--green-dim, #2f5f2f)",
-              color: "var(--green, #6ee06e)",
+              background: p.bg,
+              border: `1px solid ${p.accentDim}`,
+              color: p.ink,
               padding: "10px 12px",
               fontSize: "13px",
               fontFamily: "inherit",
@@ -240,7 +240,7 @@
             <div
               style={{
                 marginTop: "10px",
-                color: "var(--red, #ff5a5a)",
+                color: p.error,
                 fontSize: "12px",
               }}
             >
@@ -251,9 +251,9 @@
             <button
               type="submit"
               style={{
-                background: "var(--green-dim, #2f5f2f)",
-                color: "var(--green, #6ee06e)",
-                border: "1px solid var(--green-2, #4fbf4f)",
+                background: p.accentDim,
+                color: p.ink,
+                border: `1px solid ${p.accent}`,
                 padding: "8px 18px",
                 fontSize: "13px",
                 fontFamily: "inherit",
@@ -268,7 +268,7 @@
           <div
             style={{
               marginTop: "18px",
-              color: "var(--ink-vdim, #3a4a3a)",
+              color: p.inkVdim,
               fontSize: "11px",
               lineHeight: 1.5,
             }}
@@ -288,8 +288,6 @@
     const _origOn = window.CK_AUTH.on;
     const cbs = { "token-set": [] };
     window.CK_AUTH.on = function (evt, fn) {
-      // Pipe both into the original (so _state.js sees `token-set`) AND
-      // into a local map so this file can emit synthetic events too.
       const off1 = _origOn(evt, fn);
       if (cbs[evt]) cbs[evt].push(fn);
       return () => {
@@ -308,8 +306,6 @@
     };
   }
 
-  // Mount the modal. Babel-standalone transforms this `<LoginModal />` JSX
-  // inline because of the `type="text/babel"` script tag in index.html.
   function start() {
     const root = ReactDOM.createRoot(ensureAuthRoot());
     root.render(<LoginModal />);
