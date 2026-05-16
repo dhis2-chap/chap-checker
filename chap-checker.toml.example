@@ -77,11 +77,14 @@ webhook_url_env = "SLACK_WEBHOOK_URL"
 # timeout_s = 10.0
 # headers = { "Authorization" = "Bearer ..." }
 
-# Optional bearer-token auth for `chap-checker serve` (the long-running
-# daemon). Presence of this block requires every /api/state and /api/reload
-# request to carry `Authorization: Bearer <token>`. Browser users get a
-# built-in login modal; the TUI accepts --token-env. Generate with
-# `openssl rand -hex 32`. Rotation = update the env var, restart serve.
+# Optional bearer-token auth for `chap-checker serve` ONLY. The block
+# gates the daemon's /api/state and /api/reload over HTTP - it has no
+# effect on `chap-checker verify` or local `chap-checker tui`, both of
+# which talk straight to DHIS2 from your terminal and aren't network-
+# reachable. Browser users get a built-in login modal; remote TUI
+# clients pass `tui --connect URL --token-env CHAP_CHECKER_TOKEN`.
+# Generate a token with `openssl rand -hex 32`. Rotation = update the
+# env var, restart serve.
 # [auth]
 # token_env = "CHAP_CHECKER_TOKEN"
 

@@ -314,11 +314,19 @@ export CHAP_CHECKER_TOKEN=<the same token>
 chap-checker tui --connect http://daemon-host:8765 --token-env CHAP_CHECKER_TOKEN
 ```
 
-A wrong / missing token paints the disconnect banner with `"auth rejected by ..."` (distinct from a generic "disconnected", so you know the receiver is up but the credential is bad).
+If you omit `--token-env` on a TTY, the TUI probes `/api/auth` and prompts for the token interactively (hidden input) — same UX as `verify --url --token` prompts for a missing password.
+
+A wrong token (or one that gets rejected mid-session) paints the disconnect banner with `"auth rejected by ..."` (distinct from a generic "disconnected", so you know the receiver is up but the credential is bad).
+
+`chap-checker tui` in local mode (no `--connect`) does not need a token. Local mode runs the check loop itself against DHIS2 — there's no HTTP daemon between the TUI and the data, so `[auth]` doesn't apply.
 
 ### Browser
 
-Open the dashboard URL in a browser. First load gets a 401, the SPA renders a login modal, you paste the token, and it's stored in `localStorage` for the session. The Ctrl+K / ⌘K command palette has a **Sign out** entry that clears the stored token and reloads.
+Open the dashboard URL in a browser. First load gets a 401, the SPA renders a login modal in the configured theme, you paste the token, and it's stored in `localStorage` for the session.
+
+![Login modal in the dhis2 theme](../assets/web-dashboard-login-dhis2.png)
+
+The Ctrl+K / ⌘K command palette has a **Sign out** entry that clears the stored token and reloads. Once signed in, a **sign out** button also appears in the dashboard's top-right corner.
 
 ### Rotation
 

@@ -32,59 +32,65 @@
     return el;
   }
 
-  // Self-contained palette for the modal. Only the colour slots the modal
-  // actually uses are here. Hex values mirror the matching keys in
+  // Self-contained palette for the modal. Each entry carries the colour
+  // slots the modal actually paints, plus the per-theme "signature"
+  // colour used for the title heading + Sign in button so the modal
+  // matches the rest of the dashboard's look (DHIS2 blue on the dhis2
+  // theme, etc.). Hex values mirror the matching keys in
   // src/app.jsx::THEMES; keep them in sync if colours change there.
+  //
+  // Fields:
+  //   bg / elev          : page background / form background
+  //   ink                : primary text / label foreground
+  //   inkDim / inkVdim   : secondary / tertiary text
+  //   error              : error message text
+  //   inputBorder        : token input border
+  //   titleInk           : CHAP-CHECKER heading colour (signature accent)
+  //   btnBg / btnInk     : Sign in button background / text
+  //   btnBorder          : Sign in button border
   const MODAL_THEMES = {
     phosphor: {
-      bg: "#050805",
-      elev: "#0a0f0a",
-      ink: "#6ee06e",
-      inkDim: "#6a7a6a",
-      inkVdim: "#3a4a3a",
-      accent: "#4fbf4f",
-      accentDim: "#2f5f2f",
+      bg: "#050805", elev: "#0a0f0a",
+      ink: "#6ee06e", inkDim: "#6a7a6a", inkVdim: "#3a4a3a",
       error: "#ff5a5a",
+      inputBorder: "#2f5f2f",
+      titleInk: "#6ee06e",
+      btnBg: "#2f5f2f", btnInk: "#6ee06e", btnBorder: "#4fbf4f",
     },
     amber: {
-      bg: "#0a0705",
-      elev: "#100b07",
-      ink: "#ffb84d",
-      inkDim: "#8a7a5a",
-      inkVdim: "#4a3a2a",
-      accent: "#d9933a",
-      accentDim: "#7a5a1f",
+      bg: "#0a0705", elev: "#100b07",
+      ink: "#ffb84d", inkDim: "#8a7a5a", inkVdim: "#4a3a2a",
       error: "#ff5a5a",
+      inputBorder: "#7a5a1f",
+      titleInk: "#ffb84d",
+      btnBg: "#7a5a1f", btnInk: "#ffb84d", btnBorder: "#d9933a",
     },
     high: {
-      bg: "#000000",
-      elev: "#0c0c0c",
-      ink: "#9eff9e",
-      inkDim: "#a0a0a0",
-      inkVdim: "#606060",
-      accent: "#7fff7f",
-      accentDim: "#4a8a4a",
+      bg: "#000000", elev: "#0c0c0c",
+      ink: "#9eff9e", inkDim: "#a0a0a0", inkVdim: "#606060",
       error: "#ff5a5a",
+      inputBorder: "#4a8a4a",
+      titleInk: "#9eff9e",
+      btnBg: "#4a8a4a", btnInk: "#9eff9e", btnBorder: "#7fff7f",
     },
     tokyo: {
-      bg: "#11131a",
-      elev: "#161922",
-      ink: "#7aa2f7",
-      inkDim: "#7a85a8",
-      inkVdim: "#3a4567",
-      accent: "#5d87ee",
-      accentDim: "#384a78",
+      bg: "#11131a", elev: "#161922",
+      ink: "#7aa2f7", inkDim: "#7a85a8", inkVdim: "#3a4567",
       error: "#f7768e",
+      inputBorder: "#384a78",
+      titleInk: "#7aa2f7",
+      btnBg: "#384a78", btnInk: "#7aa2f7", btnBorder: "#5d87ee",
     },
+    // dhis2 takes its accent from THEMES.dhis2's --header-bg (#1f4d75)
+    // so the login modal's title + Sign in button visually match the
+    // signed-in dashboard's blue header strip.
     dhis2: {
-      bg: "#c5cad0",
-      elev: "#e3e7eb",
-      ink: "#1e293b",
-      inkDim: "#4e5b66",
-      inkVdim: "#8a929c",
-      accent: "#1f4a22",
-      accentDim: "#b8d5ba",
+      bg: "#c5cad0", elev: "#e3e7eb",
+      ink: "#1e293b", inkDim: "#4e5b66", inkVdim: "#8a929c",
       error: "#a8302f",
+      inputBorder: "#9eb3c4",
+      titleInk: "#1f4d75",
+      btnBg: "#1f4d75", btnInk: "#eef1f4", btnBorder: "#1f4d75",
     },
   };
 
@@ -155,7 +161,13 @@
       }
       window.CK_AUTH.writeToken(trimmed);
       setVisible(false);
-      (window.CK_AUTH._emit || function () {})("token-set");
+      // Tell _state.js to refetch immediately; otherwise the operator
+      // waits for the next polling tick (~5s) before the dashboard
+      // appears. emit() goes through the shared bus so useLiveState's
+      // pull subscription actually fires.
+      if (typeof window.CK_AUTH.emit === "function") {
+        window.CK_AUTH.emit("token-set");
+      }
     }
 
     const p = paletteFor(themeName);
@@ -182,7 +194,7 @@
           onSubmit={submit}
           style={{
             background: p.elev,
-            border: `1px solid ${p.accentDim}`,
+            border: `1px solid ${p.inputBorder}`,
             color: p.ink,
             padding: "28px 32px",
             minWidth: "420px",
@@ -196,6 +208,7 @@
               textTransform: "uppercase",
               letterSpacing: "0.08em",
               marginBottom: "4px",
+              color: p.titleInk,
             }}
           >
             chap-checker
@@ -228,7 +241,7 @@
               width: "100%",
               boxSizing: "border-box",
               background: p.bg,
-              border: `1px solid ${p.accentDim}`,
+              border: `1px solid ${p.inputBorder}`,
               color: p.ink,
               padding: "10px 12px",
               fontSize: "13px",
@@ -251,9 +264,9 @@
             <button
               type="submit"
               style={{
-                background: p.accentDim,
-                color: p.ink,
-                border: `1px solid ${p.accent}`,
+                background: p.btnBg,
+                color: p.btnInk,
+                border: `1px solid ${p.btnBorder}`,
                 padding: "8px 18px",
                 fontSize: "13px",
                 fontFamily: "inherit",
@@ -279,31 +292,6 @@
         </form>
       </div>
     );
-  }
-
-  // Patch the auth bus with a tiny `_emit` so this file (which doesn't own
-  // the listeners array) can trigger refetches. `_state.js` already has an
-  // internal `emit` but it's not exposed; keep this as a public escape hatch.
-  if (!window.CK_AUTH._emit) {
-    const _origOn = window.CK_AUTH.on;
-    const cbs = { "token-set": [] };
-    window.CK_AUTH.on = function (evt, fn) {
-      const off1 = _origOn(evt, fn);
-      if (cbs[evt]) cbs[evt].push(fn);
-      return () => {
-        off1();
-        if (cbs[evt]) cbs[evt] = cbs[evt].filter((f) => f !== fn);
-      };
-    };
-    window.CK_AUTH._emit = function (evt) {
-      (cbs[evt] || []).forEach((f) => {
-        try {
-          f();
-        } catch (_e) {
-          // ignore
-        }
-      });
-    };
   }
 
   function start() {

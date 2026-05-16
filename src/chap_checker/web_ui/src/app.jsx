@@ -200,7 +200,12 @@ function Header({ instances, alertsOn, refreshSec, clock, reload, reloadState, t
         <span style={{ color: metaColor, opacity: 0.85 }}>refresh every {refreshSec}s</span>
       </div>
       <div style={{ display:'flex', alignItems:'center', gap:14 }}>
-        <ReloadButton onClick={reload} state={reloadState} />
+        {/* CK-WIRING: when auth is enabled (a token sits in localStorage),
+            the top-right slot becomes a Sign Out button. Reload-config
+            stays accessible via the Ctrl+K palette but no longer takes
+            up header real-estate. With auth off, the slot is empty and
+            the clock is the only thing in the top right. */}
+        <SignOutButton />
         <div style={{
           color: brandColor, fontVariantNumeric:'tabular-nums',
           fontSize: 'calc(var(--fs-head) * 1.1)',
@@ -209,6 +214,48 @@ function Header({ instances, alertsOn, refreshSec, clock, reload, reloadState, t
         </div>
       </div>
     </header>
+  );
+}
+
+function SignOutButton() {
+  // CK-WIRING: only render when CK_AUTH says we're signed in. The polling
+  // hook reads the token on every fetch, so localStorage is the source
+  // of truth - no extra state. We do need to re-evaluate after writeToken
+  // / signOut runs, so subscribe to storage events (covers other tabs)
+  // and re-read every render via a state ping.
+  const [hasToken, setHasToken] = React.useState(
+    () => !!(typeof window !== 'undefined' && window.CK_AUTH && window.CK_AUTH.readToken())
+  );
+  React.useEffect(() => {
+    if (typeof window === 'undefined' || !window.CK_AUTH) return;
+    function refresh() {
+      setHasToken(!!window.CK_AUTH.readToken());
+    }
+    window.addEventListener('storage', refresh);
+    // Local writes don't fire `storage` (that's for cross-tab only); a
+    // small interval keeps the button in sync after our own writeToken.
+    const id = setInterval(refresh, 1000);
+    return () => {
+      window.removeEventListener('storage', refresh);
+      clearInterval(id);
+    };
+  }, []);
+  if (!hasToken) return null;
+  return (
+    <button
+      onClick={() => window.CK_AUTH && window.CK_AUTH.signOut()}
+      title="Clear the stored bearer token and reload"
+      style={{
+        background:'transparent',
+        border:'1px solid var(--header-ink, var(--green-vdim))',
+        color:'var(--header-ink, var(--ink-dim))',
+        padding:'2px 10px',
+        fontFamily:'inherit', fontSize:'inherit',
+        cursor:'pointer',
+      }}
+    >
+      sign out
+    </button>
   );
 }
 

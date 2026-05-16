@@ -168,10 +168,9 @@ checks = ["dhis2_ping", "dhis2_system_info"]
 # notify_on = ["fail", "error", "warn"]
 # headers = { "Authorization" = "Bearer ..." }
 
-# Optional bearer-token auth for `chap-checker serve`. Presence of this
-# block requires every /api/state and /api/reload request to carry
-# `Authorization: Bearer <token>`. Browser dashboard gets a built-in login
-# modal; TUI accepts --token-env. See docs/guides/serve.md#authentication.
+# Optional bearer-token auth for `chap-checker serve` ONLY (the HTTP
+# daemon). No effect on `verify` or local `tui` - those run in your
+# terminal and aren't network-reachable. See docs/guides/serve.md#authentication.
 # [auth]
 # token_env = "CHAP_CHECKER_TOKEN"
 
@@ -482,6 +481,26 @@ def tui_command(
                 raise typer.BadParameter(f"--token-env {token_env}: env var is not set or empty.")
         elif token is not None:
             connect_token = token
+        else:
+            # Probe the daemon: if `[auth]` is set there we need a token.
+            # On a TTY, prompt the operator interactively (same pattern as
+            # `verify --url` prompting for a missing password). On a
+            # non-TTY (cron, CI), let the request go without a header -
+            # the daemon will return 401 and the TUI will paint the
+            # auth-rejected banner with a clear message about how to set
+            # the token. Probing avoids prompting against an
+            # unauthenticated daemon where the token would be silently
+            # ignored.
+            try:
+                import httpx
+
+                probe = httpx.get(connect.rstrip("/") + "/api/auth", timeout=5.0)
+                required = bool(probe.json().get("required")) if probe.is_success else False
+            except Exception:  # noqa: BLE001 - any probe failure falls through to "no prompt"
+                required = False
+            if required and sys.stdin.isatty():
+                prompted: str = typer.prompt("Token", hide_input=True)
+                connect_token = prompted or None
         run_dashboard(
             interval_s=interval,
             connect_url=connect,
@@ -507,6 +526,18 @@ def tui_command(
     cfg = load_config(config_path)
     if not cfg.instances:
         raise typer.BadParameter(f"{config_path} contains no [instances.<name>] entries.")
+    # The `[auth]` block gates `chap-checker serve`'s HTTP surface; local
+    # `tui` has no HTTP, so the block is inactive here. Print a one-line
+    # heads-up so an operator who added [auth] thinking it'd lock down
+    # the TUI doesn't quietly assume they got that protection. Only fires
+    # once at startup, isn't fatal.
+    if cfg.auth is not None:
+        typer.echo(
+            "note: [auth] in chap-checker.toml gates `chap-checker serve` only. "
+            "Local `tui` mode talks directly to DHIS2 in your terminal and isn't network-reachable; "
+            "no token is needed or asked for here.",
+            err=True,
+        )
 
     targets = [entry.to_target_entry(name, default_retry_policy=cfg.retry) for name, entry in cfg.instances.items()]
     state_path = state if state is not None else config_path.parent / DEFAULT_STATE_FILENAME
