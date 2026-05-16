@@ -55,6 +55,59 @@ def format_request_error(exc: BaseException, *, path: str | None = None) -> str:
     return f"{type(exc).__name__}{where}: {base}"
 
 
+def diagnose_status(
+    status_code: int,
+    *,
+    path: str,
+    not_found_meaning: str | None = None,
+    required_authority: str | None = None,
+) -> tuple[str, dict[str, Any]] | None:
+    """Return `(message, details)` for a 4xx/5xx response, or `None` for 2xx-3xx.
+
+    Distinguishes the three permission-shaped failure modes operators care
+    about most:
+
+    - **401**: credentials no longer valid at the DHIS2 level. Distinct from
+      the "all good" path, even though both look like a normal HTTP failure.
+    - **403**: authenticated but the user lacks the required DHIS2
+      authority. The check that knows which authority should be present
+      passes it via `required_authority` (e.g. `M_dhis-web-app-management`)
+      so the message can point the operator at the fix.
+    - **404**: ambiguous on its own — could mean the endpoint isn't on this
+      DHIS2 version, or the resource (route/app/user) isn't there. Callers
+      pass `not_found_meaning` to disambiguate against their specific
+      endpoint.
+
+    Everything else >= 400 gets a generic "unexpected status" line. Every
+    branch carries an `http_status` and `path` in details so a JSON consumer
+    (alerts, monitoring) can route on them without parsing strings.
+    """
+    if status_code < 400:
+        return None
+    details: dict[str, Any] = {"http_status": status_code, "path": path}
+    if status_code == 401:
+        return (
+            f"Authentication rejected (401) on {path} - credentials no longer valid.",
+            details,
+        )
+    if status_code == 403:
+        if required_authority is not None:
+            details["required_authority"] = required_authority
+            msg = (
+                f"Forbidden (403) on {path} - authenticated but the user lacks the "
+                f"'{required_authority}' authority needed to read this endpoint."
+            )
+        else:
+            msg = f"Forbidden (403) on {path} - authenticated but the user lacks the required authority."
+        return msg, details
+    if status_code == 404:
+        msg = not_found_meaning or (
+            f"{path} returned 404 - the endpoint is missing on this server (unexpected on DHIS2)."
+        )
+        return msg, details
+    return f"Unexpected status {status_code} on {path}.", details
+
+
 class Status(StrEnum):
     """Outcome of a single check.
 

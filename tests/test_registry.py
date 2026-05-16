@@ -2,7 +2,7 @@ import httpx
 from dhis2w_client import Dhis2
 
 from chap_checker.checks import all_checks
-from chap_checker.checks.base import format_request_error, parse_dhis2_version
+from chap_checker.checks.base import diagnose_status, format_request_error, parse_dhis2_version
 
 
 def test_registry_has_builtin_checks() -> None:
@@ -84,3 +84,42 @@ def test_parse_dhis2_version_returns_none_for_unsupported_or_garbage() -> None:
     assert parse_dhis2_version("2.44-SNAPSHOT") is None  # past the generated v43 ceiling
     assert parse_dhis2_version("garbage") is None
     assert parse_dhis2_version("") is None
+
+
+def test_diagnose_status_returns_none_for_success() -> None:
+    """A 2xx-3xx status means the caller should keep going; helper returns None."""
+    assert diagnose_status(200, path="/api/anything") is None
+    assert diagnose_status(204, path="/api/anything") is None
+    assert diagnose_status(301, path="/api/anything") is None
+
+
+def test_diagnose_status_401_points_at_credentials() -> None:
+    msg, details = diagnose_status(401, path="/api/me")  # type: ignore[misc]
+    assert "401" in msg and "credentials" in msg.lower()
+    assert details == {"http_status": 401, "path": "/api/me"}
+
+
+def test_diagnose_status_403_with_authority_surfaces_it_in_details() -> None:
+    msg, details = diagnose_status(  # type: ignore[misc]
+        403, path="/api/apps", required_authority="M_dhis-web-app-management"
+    )
+    assert "M_dhis-web-app-management" in msg
+    assert details["required_authority"] == "M_dhis-web-app-management"
+    assert details["http_status"] == 403
+
+
+def test_diagnose_status_404_uses_caller_supplied_meaning() -> None:
+    """The 404 message is endpoint-specific, not generic."""
+    msg, details = diagnose_status(  # type: ignore[misc]
+        404,
+        path="/api/routes",
+        not_found_meaning="/api/routes returned 404 - routes were introduced in DHIS2 2.40.",
+    )
+    assert "2.40" in msg
+    assert details["http_status"] == 404
+
+
+def test_diagnose_status_other_4xx_5xx_carries_status_in_details() -> None:
+    msg, details = diagnose_status(503, path="/api/system/info")  # type: ignore[misc]
+    assert "503" in msg
+    assert details == {"http_status": 503, "path": "/api/system/info"}

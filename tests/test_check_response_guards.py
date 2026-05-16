@@ -121,3 +121,62 @@ def test_modeling_app_fails_on_non_dict_entries() -> None:
     result = asyncio.run(Dhis2ChapModelingAppCheck().run(client, _ctx()))
     assert result.status is Status.FAIL
     assert "entry" in result.message or "shape" in result.message
+
+
+# ---------- Endpoint permission diagnostics (401/403/404) ----------
+
+
+def test_system_info_diagnoses_401_as_credential_problem() -> None:
+    """401 on /api/system/info points the operator at the credentials, not the endpoint."""
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, json={"message": "Unauthorized"})
+
+    client = _client(handler)
+    result = asyncio.run(Dhis2SystemInfoCheck().run(client, _ctx()))
+    assert result.status is Status.FAIL
+    assert "401" in result.message
+    assert "credentials" in result.message.lower()
+    assert result.details["http_status"] == 401
+    assert result.details["path"] == "/api/system/info"
+
+
+def test_system_info_diagnoses_404_as_not_a_dhis2_instance() -> None:
+    """404 on /api/system/info is unambiguous - this isn't a DHIS2 server."""
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, content=b"")
+
+    client = _client(handler)
+    result = asyncio.run(Dhis2SystemInfoCheck().run(client, _ctx()))
+    assert result.status is Status.FAIL
+    assert "does not look like a DHIS2" in result.message
+    assert result.details["http_status"] == 404
+
+
+def test_modeling_app_diagnoses_403_as_missing_authority() -> None:
+    """403 on /api/apps surfaces the required authority so the operator can grant it."""
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, json={"message": "Forbidden"})
+
+    client = _client(handler)
+    result = asyncio.run(Dhis2ChapModelingAppCheck().run(client, _ctx()))
+    assert result.status is Status.FAIL
+    assert "403" in result.message
+    assert "M_dhis-web-app-management" in result.message
+    assert result.details["required_authority"] == "M_dhis-web-app-management"
+    assert result.details["http_status"] == 403
+
+
+def test_modeling_app_generic_500_keeps_status_in_details() -> None:
+    """Anything past 401/403/404 still gets a generic line + structured status."""
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, content=b"")
+
+    client = _client(handler)
+    result = asyncio.run(Dhis2ChapModelingAppCheck().run(client, _ctx()))
+    assert result.status is Status.FAIL
+    assert "Unexpected status 500" in result.message
+    assert result.details["http_status"] == 500

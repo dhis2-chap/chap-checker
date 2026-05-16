@@ -7,7 +7,14 @@ from typing import Any, ClassVar
 
 from dhis2w_client import Dhis2Client
 
-from chap_checker.checks.base import CheckContext, CheckResult, Status, format_request_error, register_check
+from chap_checker.checks.base import (
+    CheckContext,
+    CheckResult,
+    Status,
+    diagnose_status,
+    format_request_error,
+    register_check,
+)
 from chap_checker.checks.dhis2_chap_modeling_app import Dhis2App
 
 CLIMATE_APP_HUB_ID = "effb986c-a3c7-485e-a2f6-5e54ff9df7c3"
@@ -39,11 +46,22 @@ class Dhis2ChapClimateAppCheck:
             )
 
         duration_ms = (time.perf_counter() - start) * 1000
-        if response.status_code >= 400:
+        diag = diagnose_status(
+            response.status_code,
+            path=APPS_PATH,
+            not_found_meaning=(
+                f"{APPS_PATH} returned 404 - the apps endpoint is missing on this server "
+                "(unexpected on DHIS2; check the URL / reverse-proxy config)."
+            ),
+            required_authority="M_dhis-web-app-management",
+        )
+        if diag is not None:
+            message, details = diag
             return CheckResult(
                 name=self.name,
                 status=Status.FAIL,
-                message=f"Could not list apps (status {response.status_code}).",
+                message=message,
+                details=details,
                 duration_ms=duration_ms,
             )
 
