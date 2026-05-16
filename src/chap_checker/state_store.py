@@ -8,13 +8,16 @@ status flips, which keeps Slack quiet during sustained outages.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import tempfile
-from collections.abc import Iterable
+import time
+from collections.abc import AsyncGenerator, Iterable
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from typing import IO, Literal
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -26,6 +29,93 @@ from chap_checker.runner import RunReport
 DEFAULT_STATE_FILENAME = "chap-checker.state.json"
 
 _log = get_logger("state_store")
+
+
+class StateLockTimeout(RuntimeError):
+    """Raised when ``alert_state_lock()`` can't acquire the lock in time.
+
+    Wraps the contended-state-file case so callers can react (skip
+    dispatch this tick, log + retry next tick) instead of crashing the
+    background loop. Carries the path of the lock file for ops triage.
+    """
+
+    def __init__(self, lock_path: Path, timeout_s: float) -> None:
+        super().__init__(
+            f"Could not acquire alert-state lock at {lock_path} within {timeout_s:.1f}s. "
+            f"Another chap-checker process is holding the lock; remove it manually only if "
+            f"you are certain no process owns it.",
+        )
+        self.lock_path = lock_path
+        self.timeout_s = timeout_s
+
+
+@asynccontextmanager
+async def alert_state_lock(state_path: Path, *, timeout_s: float = 30.0) -> AsyncGenerator[None]:
+    """File lock around the alert-state load->compute->dispatch->save window.
+
+    Two concurrent ``chap-checker`` runs (overlapping cron tick + a manual
+    invocation; ``tui`` and ``serve`` pointed at the same state file) can
+    each read the same prior state, compute the same transitions, and
+    dispatch the same alerts. The actual file write at the end of
+    :func:`save_state` is atomic via ``os.replace``, but the window between
+    :func:`load_state` and that replace is the race.
+
+    We use a sidecar ``<state>.lock`` so the state file itself is not
+    locked while it is being atomically replaced (the FD would be
+    invalidated). ``fcntl.flock`` is POSIX-only; on Windows the context
+    manager is a no-op and a deployment note in the alerting guide tells
+    operators to keep alert dispatch single-process.
+
+    Polls with ``LOCK_NB`` + ``asyncio.sleep`` so the asyncio event loop
+    keeps ticking while we wait - matters for ``serve``, where this is
+    called from the background refresh task. ``timeout_s`` bounds how
+    long we wait before raising :class:`StateLockTimeout`; the caller
+    should log and skip dispatch (don't crash the loop on a stuck peer).
+    """
+    if os.name != "posix":
+        # Windows / unsupported - skip locking. Documented in
+        # `docs/guides/alerts.md` so cron operators on Windows know
+        # to serialise dispatch externally.
+        yield
+        return
+
+    import fcntl  # POSIX-only import kept inside the function
+
+    lock_path = Path(str(state_path) + ".lock")
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        # ``a+`` keeps the file even if another holder has it open; we
+        # never write to the lock file, only to its lock byte range.
+        handle: IO[str] = lock_path.open("a+")
+    except OSError as exc:
+        # Parent isn't a directory / no permission / disk full - state
+        # writes will fail too, but :func:`save_state` swallows that.
+        # Fall through to the no-lock path so alert delivery still
+        # happens on a broken --state. Same contract the dispatch
+        # function already has for state-write failures.
+        _log.warning(
+            "alert-state lock at %s could not be opened (%s); proceeding without it",
+            lock_path,
+            exc,
+        )
+        yield
+        return
+    deadline = time.monotonic() + timeout_s
+    try:
+        while True:
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise StateLockTimeout(lock_path, timeout_s) from None
+                await asyncio.sleep(0.1)
+        yield
+    finally:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            handle.close()
 
 
 class CheckState(BaseModel):

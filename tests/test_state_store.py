@@ -1,4 +1,6 @@
+import asyncio
 import json
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -9,6 +11,8 @@ from chap_checker.runner import RunReport
 from chap_checker.state_store import (
     CheckState,
     StateFile,
+    StateLockTimeout,
+    alert_state_lock,
     compute_transitions,
     load_state,
     save_state,
@@ -270,3 +274,58 @@ def test_partial_run_does_not_resurrect_fail_as_new_first_failure() -> None:
     # Critical: no re-alert for staging - the partial run preserved its
     # FAIL state so the full run sees it as sustained, not fresh.
     assert transitions == []
+
+
+# ---------- alert_state_lock ----------
+
+
+@pytest.mark.skipif(os.name != "posix", reason="alert_state_lock is POSIX-only")
+def test_alert_state_lock_serialises_holders(tmp_path: Path) -> None:
+    """Two concurrent acquires never overlap inside the protected region."""
+    state_path = tmp_path / "chap-checker.state.json"
+    in_critical = 0
+    max_concurrent = 0
+
+    async def hold(delay_s: float) -> None:
+        nonlocal in_critical, max_concurrent
+        async with alert_state_lock(state_path):
+            in_critical += 1
+            max_concurrent = max(max_concurrent, in_critical)
+            await asyncio.sleep(delay_s)
+            in_critical -= 1
+
+    async def main() -> None:
+        await asyncio.gather(hold(0.2), hold(0.2), hold(0.2))
+
+    asyncio.run(main())
+    assert max_concurrent == 1
+
+
+@pytest.mark.skipif(os.name != "posix", reason="alert_state_lock is POSIX-only")
+def test_alert_state_lock_timeout_raises(tmp_path: Path) -> None:
+    """If the lock is held longer than ``timeout_s`` the second acquire raises."""
+    state_path = tmp_path / "chap-checker.state.json"
+
+    async def hold_long() -> None:
+        async with alert_state_lock(state_path):
+            await asyncio.sleep(1.0)
+
+    async def try_short() -> Exception | None:
+        # Sleep first to let `hold_long` grab the lock; then try with a
+        # tight timeout.
+        await asyncio.sleep(0.1)
+        try:
+            async with alert_state_lock(state_path, timeout_s=0.2):
+                pass
+        except StateLockTimeout as exc:
+            return exc
+        return None
+
+    async def main() -> Exception | None:
+        long_task = asyncio.create_task(hold_long())
+        result = await try_short()
+        await long_task
+        return result
+
+    raised = asyncio.run(main())
+    assert isinstance(raised, StateLockTimeout)

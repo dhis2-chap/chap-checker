@@ -37,6 +37,8 @@ from chap_checker.runner import RunReport, TargetEntry, VerifyReport, run_target
 from chap_checker.state import GlobalState
 from chap_checker.state_store import (
     DEFAULT_STATE_FILENAME,
+    StateLockTimeout,
+    alert_state_lock,
     compute_transitions,
     load_state,
     save_state,
@@ -1184,34 +1186,46 @@ async def dispatch_alerts_async(
         notify_on_union.update(binding.notify_on)
 
     now = datetime.now(UTC)
-    previous = load_state(state_path)
-    transitions, new_state = compute_transitions(previous, reports, notify_on_union, now)
+    # Hold the file lock across the entire load->compute->dispatch->save
+    # window so two overlapping runs (cron + manual, tui + serve sharing
+    # one state file) can't both read the same prior state and re-emit
+    # the same transitions. POSIX-only; Windows users are documented in
+    # the alerting guide to keep dispatch single-process.
+    try:
+        async with alert_state_lock(state_path):
+            previous = load_state(state_path)
+            transitions, new_state = compute_transitions(previous, reports, notify_on_union, now)
 
-    if not transitions:
-        _safe_save_state(state_path, new_state)
-        return
+            if not transitions:
+                _safe_save_state(state_path, new_state)
+                return
 
-    all_ok = True
-    for binding in bindings:
-        alerter_name = binding.alerter.name
-        filtered = [
-            t
-            for t in transitions
-            if alerter_name in target_alerts.get(t.target_name, set())
-            and (t.current_status in binding.notify_on or t.previous_status in binding.notify_on)
-        ]
-        if not filtered:
-            continue
-        try:
-            await binding.alerter.notify(filtered)
-        except Exception:  # noqa: BLE001 - alerts must not change exit code
-            all_ok = False
-            _log.exception("alerter %s failed", binding.alerter.name)
+            all_ok = True
+            for binding in bindings:
+                alerter_name = binding.alerter.name
+                filtered = [
+                    t
+                    for t in transitions
+                    if alerter_name in target_alerts.get(t.target_name, set())
+                    and (t.current_status in binding.notify_on or t.previous_status in binding.notify_on)
+                ]
+                if not filtered:
+                    continue
+                try:
+                    await binding.alerter.notify(filtered)
+                except Exception:  # noqa: BLE001 - alerts must not change exit code
+                    all_ok = False
+                    _log.exception("alerter %s failed", binding.alerter.name)
 
-    if all_ok:
-        _safe_save_state(state_path, new_state)
-    else:
-        _log.warning("alerter delivery failed; not saving state so transitions will retry on the next run")
+            if all_ok:
+                _safe_save_state(state_path, new_state)
+            else:
+                _log.warning("alerter delivery failed; not saving state so transitions will retry on the next run")
+    except StateLockTimeout as exc:
+        # Another process is mid-dispatch. Skipping this tick keeps the
+        # serve background loop alive; the next tick will retry. Same
+        # log+continue contract as a webhook delivery failure.
+        _log.warning("%s; skipping alert dispatch this tick", exc)
 
 
 def _safe_save_state(state_path: Path, new_state: object) -> None:
