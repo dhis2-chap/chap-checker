@@ -76,8 +76,19 @@ for the full template.
 The TUI:
 
 ```bash
-chap-checker dashboard
+chap-checker tui
 ```
+
+Or run the server (browser dashboard + JSON state API for remote `tui --connect` clients):
+
+```bash
+chap-checker serve
+```
+
+Run `chap-checker serve` somewhere persistent (a TV machine, a small VM,
+systemd-supervised) and point laptops at it with
+`chap-checker tui --connect http://host:8765` so every viewer sees the
+same numbers. Pass `--no-ui` for a headless API-only daemon.
 
 ## Built-in checks
 

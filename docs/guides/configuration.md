@@ -118,12 +118,12 @@ theme = "phosphor"                          # phosphor | amber | high | tokyo | 
 ```
 
 `title` is the top-left header text shown in both the [Textual TUI](dashboard.md)
-and the [web dashboard](web.md). The web also syncs `document.title` so the
-browser tab matches.
+and the [browser dashboard served by `chap-checker serve`](serve.md). The
+browser also syncs `document.title` so the browser tab matches.
 
-`theme` selects the palette for both the web and the Textual TUI. The
-web's command palette (`Ctrl+K`/`⌘K`) also exposes the same options at
-runtime — for the web, the config value acts as the **starting default**
+`theme` selects the palette for both the browser dashboard and the Textual
+TUI. The browser's command palette (`Ctrl+K`/`⌘K`) also exposes the same
+options at runtime — there, the config value acts as the **starting default**
 and a per-user palette pick (persisted in browser `localStorage`) wins
 over the config until cleared. For the TUI the config value is applied
 on mount and re-applied on reload (`Ctrl+R` re-reads the toml).

@@ -115,15 +115,36 @@ chap-checker --json alerts test
 to the channel. Run after webhook rotation, not on a cron. See
 [Alerting](alerts.md#testing-the-wiring).
 
-## `dashboard`
+## `tui`
 
 Launch the [Textual TUI dashboard](dashboard.md).
 
 ```bash
-chap-checker dashboard                       # alerts off (default)
-chap-checker dashboard --alerts              # also dispatch Slack on transitions
-chap-checker dashboard --interval 10         # refresh every 10s instead of 30
-chap-checker dashboard --config /etc/chap-checker.toml
+chap-checker tui                                # alerts off (default)
+chap-checker tui --alerts                       # also dispatch Slack on transitions
+chap-checker tui --interval 10                  # refresh every 10s instead of 30
+chap-checker tui --config /etc/chap-checker.toml
+chap-checker tui --connect http://tv-host:8765  # render a remote `chap-checker serve` daemon
 ```
 
 Keys inside the TUI: `r` refresh now, `q` quit.
+
+`--connect URL` turns the TUI into a thin client of a remote
+`chap-checker serve` daemon: no local config, no local check loop, just
+polls `{URL}/api/state` every refresh tick. Mutually exclusive with
+`--config`, `--state`, and `--alerts` (those live on the remote
+daemon). See [TUI dashboard → Connect mode](dashboard.md#connect-mode-cross-machine-consistency)
+and [Server](serve.md).
+
+## `serve`
+
+Launch the long-running daemon. See [Server](serve.md) for the full
+walkthrough including systemd / launchd autostart.
+
+```bash
+chap-checker serve                              # dashboard + API on 127.0.0.1:8765
+chap-checker serve --host 0.0.0.0               # expose on the LAN for a TV
+chap-checker serve --alerts                     # also dispatch Slack on transitions
+chap-checker serve --no-ui                      # API-only, no browser dashboard
+chap-checker serve --port 8000
+```

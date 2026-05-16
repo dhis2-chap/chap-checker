@@ -39,7 +39,7 @@ nav:
       - CLI overview: guides/cli.md
       - Cron deployment: guides/cron.md
       - TUI dashboard: guides/dashboard.md
-      - Web dashboard: guides/web.md
+      - Server (chap-checker serve): guides/serve.md
       - Adding a custom check: guides/custom-checks.md
       - Development: guides/development.md
       - Releasing: guides/releasing.md

@@ -108,7 +108,7 @@ DEFAULT_INIT_TEMPLATE = """\
 # `chap-checker verify`             - check every instance below
 # `chap-checker verify -i <name>`   - check just one
 # `chap-checker dashboard`          - Textual TUI
-# `chap-checker web`                - browser dashboard (loopback by default)
+# `chap-checker serve`              - long-running daemon + browser dashboard (loopback by default)
 # `chap-checker checks list`        - every available check name
 #
 # WARNING: this file may contain credentials. Keep it out of git and
@@ -352,8 +352,8 @@ def verify_command(
     raise typer.Exit(0 if verify_report.ok else 1)
 
 
-@app.command("dashboard")
-def dashboard_command(
+@app.command("tui")
+def tui_command(
     ctx: typer.Context,
     config: Path | None = typer.Option(
         None,
@@ -368,7 +368,7 @@ def dashboard_command(
         "--alerts/--no-alerts",
         help=(
             "Dispatch Slack/etc. alerts from refresh cycles. Off by default - the TUI is "
-            "usually all you need; flip this on if you want this dashboard to also page."
+            "usually all you need; flip this on if you want it to also page."
         ),
     ),
     state: Path | None = typer.Option(
@@ -377,8 +377,17 @@ def dashboard_command(
         help=f"State file path (default: ./{DEFAULT_STATE_FILENAME} next to the config).",
         envvar="CHAP_CHECKER_STATE",
     ),
+    connect: str | None = typer.Option(
+        None,
+        "--connect",
+        help=(
+            "Render a remote `chap-checker serve` daemon instead of running checks locally. "
+            "Pass the base URL (e.g. http://tv-host:8765). Mutually exclusive with --config / "
+            "--state / --alerts."
+        ),
+    ),
 ) -> None:
-    """Launch the Textual TUI dashboard.
+    """Launch the Textual TUI dashboard (local or `--connect` mode).
 
     One tile per configured instance, in an adaptive grid (1-4 columns
     depending on instance count). Each tile shows the rolled-up status,
@@ -387,9 +396,41 @@ def dashboard_command(
     tile is unmistakable from across the room.
 
     Inside the TUI, press `r` to refresh immediately or `q` to quit.
-    Whether alerts fire is decided at launch via `--alerts` (off by
-    default - the "TUI is enough, do not page anyone" case).
+
+    Two modes:
+
+    - **Local** (default): runs the checks itself. Whether alerts fire
+      is decided at launch via `--alerts` (off by default - the "TUI is
+      enough, do not page anyone" case).
+    - **Connect** (`--connect URL`): polls a remote `chap-checker serve`
+      daemon's `/api/state` endpoint. No local config or check loop;
+      the laptop becomes a thin client of the TV (or wherever `web` is
+      running). Alerts stay where the daemon is.
     """
+    # Late import so the textual dependency only loads when the TUI runs.
+    from chap_checker.dashboard import run as run_dashboard
+
+    if connect is not None:
+        # `--config`, `--state`, and `--alerts` only apply to local mode.
+        # In connect mode the daemon owns those concerns.
+        conflicts: list[str] = []
+        if ctx.get_parameter_source("config") == click.core.ParameterSource.COMMANDLINE:
+            conflicts.append("--config")
+        if ctx.get_parameter_source("state") == click.core.ParameterSource.COMMANDLINE:
+            conflicts.append("--state")
+        if ctx.get_parameter_source("alerts_enabled") == click.core.ParameterSource.COMMANDLINE:
+            conflicts.append("--alerts/--no-alerts")
+        if conflicts:
+            raise typer.BadParameter(
+                f"--connect is mutually exclusive with {', '.join(conflicts)}. "
+                "Those settings live on the remote daemon you're connecting to.",
+            )
+        run_dashboard(
+            interval_s=interval,
+            connect_url=connect,
+        )
+        return
+
     config_path = config if config is not None else default_config_path()
     if not config_path.exists():
         raise typer.BadParameter(
@@ -401,9 +442,6 @@ def dashboard_command(
 
     targets = [entry.to_target_entry(name) for name, entry in cfg.instances.items()]
     state_path = state if state is not None else config_path.parent / DEFAULT_STATE_FILENAME
-
-    # Late import so the textual dependency only loads when the dashboard runs.
-    from chap_checker.dashboard import run as run_dashboard
 
     run_dashboard(
         targets=targets,
@@ -577,8 +615,8 @@ def alerts_test_command(
 app.add_typer(alerts_app, name="alerts")
 
 
-@app.command("web")
-def web_command(
+@app.command("serve")
+def serve_command(
     ctx: typer.Context,
     config: Path | None = typer.Option(
         None,
@@ -593,7 +631,7 @@ def web_command(
         "--alerts/--no-alerts",
         help=(
             "Dispatch Slack/etc. alerts from refresh cycles. Off by default - the dashboard is "
-            "usually all you need; flip this on if you want this dashboard to also page."
+            "usually all you need; flip this on if you want the daemon to also page."
         ),
     ),
     state: Path | None = typer.Option(
@@ -608,16 +646,29 @@ def web_command(
         help="Bind address. Use 0.0.0.0 to expose on the local network (e.g. for a TV).",
     ),
     port: int = typer.Option(8765, "--port", help="Port to listen on.", min=1, max=65535),
+    ui_enabled: bool = typer.Option(
+        True,
+        "--ui/--no-ui",
+        help=(
+            "Serve the browser dashboard at `/`. Pass `--no-ui` for a headless deployment "
+            "where only `chap-checker tui --connect` clients or external scrapers consume `/api/state`."
+        ),
+    ),
 ) -> None:
-    """Launch the web dashboard.
+    """Launch the chap-checker server.
 
-    A single-page browser dashboard with the same tile layout and palette
-    as the Textual TUI. A FastAPI background task runs checks every
-    `--interval` seconds; the browser polls `/api/state` every few seconds
-    and re-renders tiles client-side.
+    Long-running daemon. Runs the check loop, dispatches alerts (when
+    `--alerts`), exposes JSON state at `/api/state`, and by default
+    serves a browser dashboard at `/`. The TUI's `--connect` mode and
+    any browser pointed at this server consume the same snapshot.
 
-    Designed to fill a TV screen with no scrolling - pin a kiosk browser
-    at the URL and leave it.
+    Designed to be `systemd`-supervised on a TV machine or small VM and
+    left running - see the [Server guide](https://dhis2-chap.github.io/chap-checker/guides/serve/)
+    for the unit file.
+
+    Pass `--no-ui` for an API-only daemon; the browser dashboard is
+    skipped and `/` returns 404, but everything under `/api/*` is
+    unchanged.
     """
     config_path = config if config is not None else default_config_path()
     if not config_path.exists():
@@ -631,15 +682,12 @@ def web_command(
     targets = [entry.to_target_entry(name) for name, entry in cfg.instances.items()]
     state_path = state if state is not None else config_path.parent / DEFAULT_STATE_FILENAME
 
-    # Late import so the FastAPI / uvicorn deps only load when the web
-    # subcommand actually runs.
-    from chap_checker.web import run as run_web
+    # Late import so the FastAPI / uvicorn deps only load when serve runs.
+    # The startup banner + per-request access lines are emitted via the
+    # chap_checker logger from inside serve.run.
+    from chap_checker.serve import run as run_serve
 
-    typer.echo(f"chap-checker web dashboard on http://{host}:{port}")
-    typer.echo(f"  config:   {config_path}")
-    typer.echo(f"  interval: {interval}s")
-    typer.echo(f"  alerts:   {'on' if alerts_enabled else 'off'}")
-    run_web(
+    run_serve(
         targets=targets,
         cfg=cfg,
         state_path=state_path,
@@ -648,6 +696,7 @@ def web_command(
         config_path=config_path,
         host=host,
         port=port,
+        ui_enabled=ui_enabled,
     )
 
 

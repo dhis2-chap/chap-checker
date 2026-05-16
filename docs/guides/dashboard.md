@@ -1,13 +1,13 @@
 # TUI dashboard
 
 ```bash
-chap-checker dashboard
+chap-checker tui
 ```
 
 A Textual-based dashboard with one tile per configured instance. Designed to
 be left on a TV / second monitor so the operator sees at a glance what's up.
 
-![chap-checker dashboard against five DHIS2 play servers](../assets/dashboard.svg)
+![chap-checker tui against five DHIS2 play servers](../assets/dashboard.svg)
 
 ## Layout
 
@@ -26,7 +26,7 @@ be left on a TV / second monitor so the operator sees at a glance what's up.
 | Key      | Action                                                          |
 | -------- | --------------------------------------------------------------- |
 | `r`      | Refresh immediately (otherwise auto every `--interval` seconds).|
-| `Ctrl+R` | Reload `chap-checker.toml` from disk.                           |
+| `Ctrl+R` | Reload `chap-checker.toml` from disk (local mode only).         |
 | `Ctrl+P` | Open the [command palette](#command-palette).                   |
 | `q`      | Quit.                                                           |
 
@@ -36,13 +36,13 @@ There is no in-UI alert toggle — see below.
 
 Textual ships a built-in command palette (`Ctrl+P`) and chap-checker
 registers a small Provider that adds dashboard-specific entries, so the
-same items are available in both the TUI and the [web dashboard](web.md):
+same items are available in both the TUI and the [browser dashboard served by `chap-checker serve`](serve.md):
 
 - **Refresh now** — re-run every check immediately.
 - **Reload config** — re-read `chap-checker.toml` from disk and apply the
   new targets / auth / check sets in place. Tiles for surviving instances
-  hot-swap; if the instance set itself changed, a notification points you
-  at a restart so the grid layout reflects the new count.
+  hot-swap; if the instance set itself changed, the next tick reconciles
+  the grid.
 - **Open GitHub repository** — opens `github.com/dhis2-chap/chap-checker`
   in your default browser.
 - **Open documentation** — opens this docs site.
@@ -58,8 +58,8 @@ in `src/chap_checker/dashboard.py`.
 ## Alerts decision is at launch
 
 ```bash
-chap-checker dashboard               # alerts OFF (the "TUI is enough" default)
-chap-checker dashboard --alerts      # also dispatch Slack on transitions
+chap-checker tui               # alerts OFF (the "TUI is enough" default)
+chap-checker tui --alerts      # also dispatch Slack on transitions
 ```
 
 When `--alerts` is set, the same per-instance `alerts = [...]` opt-in from the
@@ -70,20 +70,43 @@ the `verify --no-alerts` semantics.
 ## Tweaking the refresh cadence
 
 ```bash
-chap-checker dashboard --interval 10         # tick every 10s
-chap-checker dashboard --interval 120        # tick every 2 minutes
+chap-checker tui --interval 10         # tick every 10s
+chap-checker tui --interval 120        # tick every 2 minutes
 ```
 
 `--interval` accepts `>= 2.0`. The clock and "updated X ago" labels still
 tick every second; only the actual probes wait for the interval.
 
-## How the dashboard relates to `verify`
+## Connect mode (cross-machine consistency)
 
-The dashboard reuses the same `run_targets()` machinery as `verify`, with the
-same `concurrency` setting, the same per-instance `checks = [...]` filter, and
-the same per-instance `alerts = [...]` opt-in when `--alerts` is on. The state
-file is shared too — if you run a cron `verify` and an interactive
-`dashboard` side-by-side, both honor the same transition history.
+```bash
+# On the TV machine (the daemon — runs the checks, fires alerts):
+chap-checker serve --host 0.0.0.0 --alerts
+
+# On the laptop (thin client — just renders, no checks):
+chap-checker tui --connect http://tv-host:8765
+```
+
+In `--connect` mode the TUI does not load a config or run any checks itself.
+It polls `{URL}/api/state` each refresh tick and renders whatever the
+daemon reports. If the daemon goes down, a red banner appears across the
+top; the last-known tiles stay on screen and the TUI reconnects on the
+next tick once the daemon comes back.
+
+`--connect` is mutually exclusive with `--config`, `--state`, and
+`--alerts` (those settings live on the remote daemon). To swap the
+remote config, `POST /api/reload` on the daemon — or run
+`chap-checker tui` locally on the daemon host and hit `Ctrl+R`.
+
+## How the TUI relates to `verify` and `web`
+
+All three subcommands share one runner (`run_targets()`), one tile
+projection (`DashboardServer`), and the same per-instance `checks`
+filter and `alerts` opt-in. In local mode the TUI and `web` each
+embed their own `DashboardServer`; in `--connect` mode the TUI is a
+thin client of the `web` daemon's server. Cron `verify` is independent
+of both; if you want a single authoritative alert path, stop running
+cron and let `chap-checker serve --alerts` fire instead.
 
 ## Regenerating the screenshot
 
