@@ -1,0 +1,50 @@
+# Dependabot config. Watches pyproject.toml + the GitHub Actions workflows.
+# uv-managed projects still surface their deps in pyproject.toml, so the `pip`
+# ecosystem works (Dependabot reads pyproject; it doesn't run `pip` itself).
+#
+# Conventional Commits prefixes are wired into the commit messages so the
+# PRs land cleanly in the release-notes generator.
+
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Oslo"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    labels:
+      - "dependencies"
+    groups:
+      # Patch / minor bumps land as one PR per week so we don't drown in
+      # 10 separate "bump foo from 1.2.3 to 1.2.4" PRs. Majors stay
+      # individual so reviewers see them clearly.
+      python-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Oslo"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(actions)"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "github-actions"
+    groups:
+      actions-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"

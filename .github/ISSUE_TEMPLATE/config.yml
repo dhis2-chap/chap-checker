@@ -1,0 +1,15 @@
+# Block "open a blank issue" - force users into the bug / feature forms above,
+# but offer escape hatches to docs + security disclosure so they don't open a
+# bug just to ask a question or report a vulnerability in the wrong channel.
+
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://dhis2-chap.github.io/chap-checker
+    about: How-to guides, CLI reference, releasing playbook.
+  - name: Security advisory (private)
+    url: https://github.com/dhis2-chap/chap-checker/security/advisories/new
+    about: Found a vulnerability? Use the private disclosure flow, not a public issue.
+  - name: GitHub Discussions
+    url: https://github.com/dhis2-chap/chap-checker/discussions
+    about: Ask a question, propose a design, share a config. Open-ended chat goes here, not in an issue.
