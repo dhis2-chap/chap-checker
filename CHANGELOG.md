@@ -6,6 +6,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.8.2] — 2026-05-16
+
+### Fixed
+
+- **Browser *Reload config* now works on auth-enabled deployments.** `app.jsx`'s reload command was `POST /api/reload` without an `Authorization` header. `/api/reload` is auth-protected since 0.7.0, so signed-in operators got 401 every time they hit the palette entry. The command now forwards the stored bearer token via a new `window.CK_AUTH.headers()` helper exposed on the public bus.
+- **Browser *Refresh now* / `r` key now triggers a real server-side run.** Previously the command and the `r` keybinding only updated local timestamps and mock-data jitter — the `/api/state` poll loop only fired on mount, on the configured `interval_s` tick, and on `token-set`. The docs at `docs/guides/dashboard.md` already promised "re-run every check immediately". Adds a new `POST /api/refresh` endpoint (auth-protected, calls `server.refresh_once()`) and wires `app.jsx`'s `refresh` action to POST to it then emit a new `'refresh-now'` event that the state hook subscribes to for an immediate refetch.
+
+### Added
+
+- **`POST /api/refresh`** — auth-protected (when `[auth]` is configured). Drives an immediate run on the daemon, returns `{status, instance_count, last_refresh}`. Both the browser dashboard and any future `tui --connect` refresh-now wiring consume it. Two regression tests in `tests/test_serve.py`.
+- **`window.CK_AUTH.headers()`** — public helper that returns `{ Authorization: 'Bearer <token>' }` if a token is stored, else `{}`. Saves duplicating the localStorage read across every fetch in the artifact.
+
+### Changed
+
+- **Docs**: `docs/guides/dashboard.md` no longer talks about a `web` subcommand / daemon (renamed to `serve` in 0.4.0).
+- **Docs**: `docs/guides/configuration.md` no longer claims there is a `chap-checker reload` CLI command — reload is in-process only (TUI `Ctrl+R`, the browser's command palette, or `POST /api/reload` directly).
+- **Docs**: `docs/index.md`'s "moving pieces" bullet list now includes the climate app alongside the modeling app — both are monitored by default and documented in the checks guide.
+
 ## [0.8.1] — 2026-05-16
 
 ### Fixed
@@ -185,7 +203,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 For 0.1.x / 0.2.x release notes, see the [GitHub Releases page](https://github.com/dhis2-chap/chap-checker/releases).
 
-[Unreleased]: https://github.com/dhis2-chap/chap-checker/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/dhis2-chap/chap-checker/compare/v0.8.2...HEAD
+[0.8.2]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.8.2
 [0.8.1]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.8.1
 [0.8.0]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.8.0
 [0.7.4]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.7.4

@@ -158,6 +158,27 @@ def make_app(
     async def api_state() -> JSONResponse:
         return JSONResponse(server.snapshot().model_dump(mode="json"))
 
+    @app.post("/api/refresh", dependencies=protected)
+    async def api_refresh() -> JSONResponse:
+        """Re-run every check immediately on the daemon's server.
+
+        Lets the browser's *Refresh now* command and the `tui --connect`
+        client trigger a fresh run instead of just refetching the
+        cached snapshot. Returns 200 with the new instance count once
+        the run completes; the caller can poll `/api/state` afterward
+        to render the updated tiles. Errors during refresh are
+        swallowed by the background loop's exception handler so this
+        endpoint stays 200; check the server logs for details.
+        """
+        await server.refresh_once()
+        return JSONResponse(
+            {
+                "status": "ok",
+                "instance_count": len(server.targets),
+                "last_refresh": server.last_refresh.isoformat() if server.last_refresh else None,
+            }
+        )
+
     @app.post("/api/reload", dependencies=protected)
     async def api_reload() -> JSONResponse:
         """Re-read the config file and apply targets / cfg in place.

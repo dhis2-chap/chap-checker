@@ -12,7 +12,8 @@ have to stay healthy at once:
 - the DHIS2 server itself (reachable, accepts credentials, reports a version),
 - the `chap` route on DHIS2 that proxies traffic to `chap-core`,
 - the `chap-core` service behind that route (alive, reports a version),
-- the modeling app on the DHIS2 frontend.
+- the modeling app on the DHIS2 frontend,
+- the climate app on the DHIS2 frontend.
 
 `chap-checker` runs one HTTP probe per piece against each DHIS2 instance it's
 pointed at, rolls the results up into a non-zero exit code on any failure, and

@@ -63,15 +63,18 @@
   }
 
   /**
-   * Tiny event-emitter the artifact's app.jsx subscribes to. Two events:
+   * Tiny event-emitter the artifact's app.jsx subscribes to. Three events:
    *
    *  - "needs-token" - fired when /api/state returns 401. The login modal
    *    listens and renders itself.
    *  - "token-set"   - fired when the modal stores a new token. The hook
    *    listens and triggers an immediate refetch instead of waiting for
    *    the next poll tick.
+   *  - "refresh-now" - fired when the artifact's *Refresh now* command /
+   *    `r` keybinding runs. The hook listens and refetches /api/state
+   *    immediately, matching what the user sees in the TUI.
    */
-  const listeners = { "needs-token": [], "token-set": [] };
+  const listeners = { "needs-token": [], "token-set": [], "refresh-now": [] };
   function on(evt, fn) {
     if (!listeners[evt]) return () => {};
     listeners[evt].push(fn);
@@ -99,6 +102,12 @@
     TOKEN_KEY: CK_TOKEN_KEY,
     readToken,
     writeToken,
+    // Public helper for any fetch() the artifact issues. Returns the
+    // Authorization header dict if a token is stored, else {}. Saves
+    // duplicating the localStorage read in app.jsx (which had a bug
+    // where POST /api/reload skipped the header entirely, so reload
+    // returned 401 on every auth-enabled deployment).
+    headers: authHeaders,
     on,
     emit,
     signOut() {
@@ -221,13 +230,15 @@
         }
       }
 
-      const unsub = on("token-set", pull);
+      const unsubToken = on("token-set", pull);
+      const unsubRefresh = on("refresh-now", pull);
       pull();
       const id = setInterval(pull, pollSec * 1000);
       return () => {
         cancelled = true;
         clearInterval(id);
-        unsub();
+        unsubToken();
+        unsubRefresh();
       };
     }, [pollSec]);
 

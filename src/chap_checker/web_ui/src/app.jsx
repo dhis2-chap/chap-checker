@@ -342,7 +342,11 @@ function App() {
   const reload = React.useCallback(async () => {
     setReloadState({ status: 'pending', message: '' });
     try {
-      const r = await fetch('/api/reload', { method: 'POST' });
+      // CK-WIRING: forward the stored bearer token (if any) so reload
+      // works on auth-enabled deployments. Without this, /api/reload
+      // returns 401 even though the operator is signed in for state.
+      const headers = (window.CK_AUTH && window.CK_AUTH.headers) ? window.CK_AUTH.headers() : {};
+      const r = await fetch('/api/reload', { method: 'POST', headers });
       const body = await r.json().catch(() => ({}));
       if (r.ok) {
         const n = body.instance_count ?? '?';
@@ -449,9 +453,26 @@ function App() {
     });
   }, [live, t.demoDown, refreshTick, lastRefreshAt, now]);
 
+  // CK-WIRING: trigger a real server-side rerun via POST /api/refresh
+  // and refetch /api/state. The artifact's `setRefreshTick` only nudges
+  // local mock-jitter; without this call neither `r` nor the *Refresh
+  // now* command pulled fresh data on a live deployment.
+  const refreshNow = React.useCallback(async () => {
+    setLastRefreshAt(Date.now());
+    setRefreshTick(x => x + 1);
+    try {
+      const headers = (window.CK_AUTH && window.CK_AUTH.headers) ? window.CK_AUTH.headers() : {};
+      await fetch('/api/refresh', { method: 'POST', headers });
+    } catch (_e) {
+      // Server-side refresh failed; the next poll tick still shows
+      // a real snapshot. Don't block the UI feedback.
+    }
+    if (window.CK_AUTH && window.CK_AUTH.emit) window.CK_AUTH.emit('refresh-now');
+  }, []);
+
   // commands
   const commands = React.useMemo(() => [
-    { id:'refresh', label:'Refresh now', hint:'r', run:() => { setLastRefreshAt(Date.now()); setRefreshTick(x=>x+1); } },
+    { id:'refresh', label:'Refresh now', hint:'r', run: refreshNow },
     { id:'reload',  label:'Reload config', hint:'re-reads chap-checker.toml', run: reload },
     { id:'fs', label:'Toggle fullscreen', hint:'f', run:() => {
         if (document.fullscreenElement) document.exitFullscreen?.();
@@ -486,7 +507,7 @@ function App() {
     // every other command.
     { id:'signout', label:'Sign out', hint:'clear stored token',
       run:() => { if (window.CK_AUTH) window.CK_AUTH.signOut(); } },
-  ], [t.demoDown, reload]);
+  ], [t.demoDown, reload, refreshNow]);
 
   // global keybindings
   React.useEffect(() => {
@@ -505,7 +526,7 @@ function App() {
         e.preventDefault(); setPaletteOpen(false); return;
       }
       if (isTyping || paletteOpen) return;
-      if (e.key === 'r') { setLastRefreshAt(Date.now()); setRefreshTick(x=>x+1); }
+      if (e.key === 'r') { refreshNow(); }
       else if (e.key === 'f') {
         if (document.fullscreenElement) document.exitFullscreen?.();
         else document.documentElement.requestFullscreen?.();
@@ -515,7 +536,7 @@ function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [paletteOpen, t.demoDown]);
+  }, [paletteOpen, t.demoDown, refreshNow]);
 
   // layout grid: auto, 2x2, 3x2, 4x1
   const isCardLayout = t.theme === 'dhis2';

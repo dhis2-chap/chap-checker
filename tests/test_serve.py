@@ -403,6 +403,41 @@ def test_auth_static_files_remain_public_for_login_modal() -> None:
         assert r2.status_code == 200
 
 
+def _server_with_no_targets() -> DashboardServer:
+    """Server with empty targets - refresh_once is a no-op (no network)."""
+    return DashboardServer(
+        targets=[],
+        cfg=CheckerConfig(),
+        state_path=None,
+        interval_s=30.0,
+        alerts_enabled=False,
+    )
+
+
+def test_refresh_endpoint_runs_refresh_once() -> None:
+    """POST /api/refresh drives a server-side run; the *Refresh now* command depends on it."""
+    server = _server_with_no_targets()
+    app = make_app(server, auth_token=None)
+    with TestClient(app, raise_server_exceptions=False) as client:
+        r = client.post("/api/refresh")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["status"] == "ok"
+        assert body["instance_count"] == 0
+        # last_refresh is populated by refresh_once even when there are no targets.
+        assert body["last_refresh"] is not None
+
+
+def test_refresh_endpoint_requires_auth_when_token_set() -> None:
+    """The new /api/refresh endpoint is gated by the same bearer token as /api/state."""
+    server = _server_with_no_targets()
+    app = make_app(server, auth_token="s3cret")
+    with TestClient(app, raise_server_exceptions=False) as client:
+        assert client.post("/api/refresh").status_code == 401
+        ok = client.post("/api/refresh", headers={"Authorization": "Bearer s3cret"})
+        assert ok.status_code == 200
+
+
 def test_reload_enables_auth_when_block_added(tmp_path: Path) -> None:
     """Adding an `[auth]` block to the TOML and reloading starts gating /api/*."""
     cfg_path = tmp_path / "chap-checker.toml"
