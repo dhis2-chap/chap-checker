@@ -1,13 +1,22 @@
-# Alerting (Slack)
+# Alerting
 
 Alerts are stateful and transition-only: a sustained outage produces one
-Slack message on entry and one on recovery, not a ping every cron tick.
+message on entry and one on recovery, not a ping every cron tick.
+
+Built-in transports:
+
+| Name | Transport | Use when |
+|---|---|---|
+| `slack` | Slack Incoming Webhook (Block Kit + colored attachments) | Slack-native ops chat |
+| `webhook` | Generic HTTP POST with a canonical JSON envelope | Anything else: PagerDuty Events, OpsGenie, internal incident bus, custom receiver |
+
+Run `chap-checker alerts list` for a copy-paste TOML snippet for each alerter, with inline comments explaining every field. Run `chap-checker alerts test` to fire a synthetic transition through each configured alerter without waiting for a real outage.
 
 ## Two-step setup
 
 ### 1. Configure the transport
 
-Add an `[alerts.<name>]` block. Currently only `slack` is supported.
+Add one `[alerts.<name>]` block per transport you want.
 
 ```toml
 [alerts.slack]
@@ -34,12 +43,52 @@ url = "https://staging.dhis2.example.com"
 # ...
 ```
 
-List configured alerters at runtime:
+List registered alerter types with copy-paste TOML snippets:
 
 ```bash
-chap-checker alerts list             # Rich table
+chap-checker alerts list             # one panel per alerter, with per-field comments
 chap-checker --json alerts list      # JSON for tooling
 ```
+
+Each alerter ships its own snippet (the `toml_example` ClassVar on the class), so adding a new alerter is one class + one snippet — no doc-generation step.
+
+## Generic webhook
+
+Use this for any receiver that accepts an `application/json` POST: PagerDuty Events, OpsGenie, an internal incident bus, n8n / Make automations, a custom Flask endpoint, etc.
+
+```toml
+[alerts.webhook]
+url_env = "MY_WEBHOOK_URL"                    # or url = "https://..." (exactly one)
+notify_on = ["fail", "error", "warn"]
+timeout_s = 10.0
+headers = { "Authorization" = "Bearer ..." }  # optional literal HTTP headers
+```
+
+Canonical JSON envelope (stable across versions):
+
+```json
+{
+  "checker_version": "0.6.0",
+  "summary": { "failures": 2, "recoveries": 1 },
+  "transitions": [
+    {
+      "kind": "failure",
+      "target_name": "prod",
+      "target_url": "https://dhis2.example.com",
+      "check_name": "dhis2_chap_ping",
+      "previous_status": "ok",
+      "current_status": "fail",
+      "message": "DHIS2 route returned 502 - chap-core did not respond.",
+      "duration_ms": 123.4,
+      "occurred_at": "2026-05-16T11:30:00Z"
+    }
+  ]
+}
+```
+
+For a receiver that wants a different shape, subclass `WebhookAlerter` and override `_build_payload`. That's exactly how `SlackAlerter` is implemented (Block Kit attachments on top of the same HTTP transport).
+
+Auth: any literal headers go in the `headers` dict. Keep the config `chmod 0600` since tokens live in plaintext for now; env-var substitution per header (e.g. `Authorization = "env:WEBHOOK_TOKEN"`) is a planned follow-up.
 
 ## Creating the Slack webhook
 

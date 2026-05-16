@@ -1,17 +1,23 @@
-"""Slack Incoming Webhook alerter."""
+"""Slack Incoming Webhook alerter.
+
+Subclasses `WebhookAlerter` so the HTTP plumbing, timeout handling, and
+error contract come from one place; this module only owns the Slack
+Block Kit payload shape.
+"""
 
 from __future__ import annotations
 
-from typing import ClassVar, Literal
+from typing import Any, ClassVar, Literal
 
-import httpx
 from pydantic import BaseModel
 
 from chap_checker.alerts.base import Transition, register_alerter
+from chap_checker.alerts.webhook import WebhookAlerter
 from chap_checker.checks.base import Status
-from chap_checker.logging import get_logger
 
-_log = get_logger("alerts.slack")
+# Avoid circular import at module load; chap_checker.config imports from
+# chap_checker.alerts.base. The reference lives behind the ClassVar so
+# `alerts list` can pull TOML field names off the model.
 
 # Slack's status colors (from their brand guide; render well on dark and light).
 _COLOR_BY_STATUS: dict[Status, str] = {
@@ -56,41 +62,38 @@ class SlackPayload(BaseModel):
 
 
 @register_alerter("slack")
-class SlackAlerter:
+class SlackAlerter(WebhookAlerter):
     """POST a Block Kit message to a Slack Incoming Webhook URL.
 
-    Always raises on transport / 5xx so the cron-side dispatcher can decide
-    whether to commit state (it doesn't) and whether to surface the failure
-    in exit code (it doesn't - just logs).
+    Behaviour identical to a generic `WebhookAlerter` for the transport
+    half (POST, timeout, raise on >=400) - this subclass only customises
+    the payload shape to use Slack Block Kit + colored attachments.
     """
 
     name: ClassVar[str] = "slack"
+    description: ClassVar[str] = "Slack Incoming Webhook (Block Kit message with colored attachments)."
+    toml_example: ClassVar[str] = """\
+[alerts.slack]
+# webhook_url = "https://hooks.slack.com/services/REPLACE/ME/HERE"  # Inline URL (NOT recommended for shared configs)
+webhook_url_env = "SLACK_WEBHOOK_URL"            # Env var holding the URL (recommended)
+notify_on = ["fail", "error", "warn"]            # Statuses that fire alerts (any of: ok, warn, fail, error)
+timeout_s = 10.0                                  # HTTP timeout in seconds (must be > 0)
+"""
+    config_model: ClassVar[type[BaseModel] | None] = None
 
     def __init__(
         self,
         webhook_url: str,
         timeout_s: float = 10.0,
-        transport: httpx.AsyncBaseTransport | None = None,
+        transport: Any = None,
     ) -> None:
-        self._webhook_url = webhook_url
-        self._timeout_s = timeout_s
-        self._transport = transport
+        # `webhook_url` is the historical kwarg name on this class and is
+        # the one wired from `SlackAlertConfig.resolve_webhook_url()`; map
+        # it onto the base's generic `url` argument.
+        super().__init__(url=webhook_url, timeout_s=timeout_s, transport=transport)
 
-    async def notify(self, transitions: list[Transition]) -> None:
-        """POST the transitions to Slack.
-
-        Raises on transport errors or non-2xx responses. The caller is
-        responsible for deciding what to do with the failure (the cron-side
-        dispatcher swallows it but skips the state save so the transition
-        retries next run).
-        """
-        if not transitions:
-            return
-        payload = _build_payload(transitions)
-        async with httpx.AsyncClient(timeout=self._timeout_s, transport=self._transport) as client:
-            response = await client.post(self._webhook_url, json=payload.model_dump(mode="json"))
-        if response.status_code >= 400:
-            raise RuntimeError(f"slack webhook returned {response.status_code}: {response.text[:200]}")
+    def _build_payload(self, transitions: list[Transition]) -> dict[str, Any]:
+        return _build_slack_payload(transitions).model_dump(mode="json")
 
 
 def _color_for(transition: Transition) -> str:
@@ -99,7 +102,7 @@ def _color_for(transition: Transition) -> str:
     return _COLOR_BY_STATUS.get(transition.current_status, _COLOR_BY_STATUS[Status.FAIL])
 
 
-def _build_payload(transitions: list[Transition]) -> SlackPayload:
+def _build_slack_payload(transitions: list[Transition]) -> SlackPayload:
     failures = [t for t in transitions if t.kind == "failure"]
     recoveries = [t for t in transitions if t.kind == "recovery"]
     failure_word = "failure" if len(failures) == 1 else "failures"

@@ -158,6 +158,14 @@ checks = ["dhis2_ping", "dhis2_system_info"]
 # webhook_url_env = "SLACK_WEBHOOK_URL"   # treat the webhook URL as a credential
 # notify_on = ["fail", "error", "warn"]   # default
 # timeout_s = 10.0                        # default
+
+# Generic webhook alerter: POST the canonical chap-checker JSON envelope to
+# any URL that accepts application/json. Run `chap-checker alerts list` for
+# the full snippet with per-field comments.
+# [alerts.webhook]
+# url_env = "MY_WEBHOOK_URL"
+# notify_on = ["fail", "error", "warn"]
+# headers = { "Authorization" = "Bearer ..." }
 """
 
 
@@ -468,69 +476,81 @@ alerts_app = typer.Typer(
 )
 
 
-def _alerts_list_impl(ctx: typer.Context, config: Path | None) -> None:
-    """List every ``[alerts.<name>]`` section configured in the TOML."""
-    state_obj = _state(ctx)
-    config_path = config if config is not None else default_config_path()
-    if not config_path.exists():
-        raise typer.BadParameter(
-            f"No config at {config_path}. Provide --config <path> or create a ./{DEFAULT_CONFIG_FILENAME}.",
-        )
-    cfg = load_config(config_path)
+def _alerts_list_impl(ctx: typer.Context) -> None:
+    """List every registered alerter type with a copy-paste TOML snippet.
 
-    rows: list[dict[str, object]] = []
-    if cfg.alerts is not None and cfg.alerts.slack is not None:
-        rows.append(
-            {
-                "name": "slack",
-                "transport": "Incoming Webhook",
-                "notify_on": [s.value for s in cfg.alerts.slack.notify_on],
-                "timeout_s": cfg.alerts.slack.timeout_s,
-            }
-        )
+    Registry-driven, no config required - parallels `chap-checker checks
+    list`. Each alerter ships its own `toml_example` ClassVar so the
+    snippet has correct field names, sensible defaults, and inline
+    comments explaining what each field does. Adding a new alerter only
+    requires writing the class, registering it, and authoring the
+    snippet - no separate doc generation step.
+    """
+    state_obj = _state(ctx)
+    # Import alerts package so all @register_alerter decorators have fired.
+    from chap_checker import alerts as _alerts_pkg  # load side-effects: decorators + config_model patching
+    from chap_checker.alerts.base import all_alerter_classes
+
+    _ = _alerts_pkg  # consume the bound name so the side-effect import isn't flagged unused
+
+    classes = all_alerter_classes()
+    ordered = sorted(classes.values(), key=lambda c: c.name)
 
     if state_obj.quiet:
         return
 
     if state_obj.json_output:
-        typer.echo(json.dumps(rows, indent=2, sort_keys=True))
+        payload = [
+            {
+                "name": cls.name,
+                "description": cls.description,
+                "toml_example": getattr(cls, "toml_example", ""),
+            }
+            for cls in ordered
+        ]
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True))
         return
 
     console = Console()
-    table = Table(title=f"Configured alerters ({config_path})")
-    table.add_column("Name", style="cyan", no_wrap=True)
-    table.add_column("Transport", style="dim")
-    table.add_column("notify_on")
-    table.add_column("timeout_s", justify="right", style="dim")
-    if not rows:
-        console.print(table)
-        console.print("[dim]No alerters configured. Add an [alerts.<name>] section to enable.[/]")
+    from rich.panel import Panel
+    from rich.syntax import Syntax
+
+    if not ordered:
+        console.print("[dim]No alerters registered.[/]")
         return
-    for r in rows:
-        table.add_row(
-            str(r["name"]),
-            str(r["transport"]),
-            ", ".join(r["notify_on"]) if isinstance(r["notify_on"], list) else str(r["notify_on"]),
-            str(r["timeout_s"]),
-        )
-    console.print(table)
+
+    console.print()
+    for i, cls in enumerate(ordered):
+        snippet = getattr(cls, "toml_example", None)
+        if snippet:
+            body = Syntax(
+                snippet.rstrip(),
+                "toml",
+                theme="ansi_dark",
+                background_color="default",
+                word_wrap=False,
+            )
+            console.print(
+                Panel(
+                    body,
+                    title=f"[bold cyan]{cls.name}[/] — {cls.description}",
+                    title_align="left",
+                    expand=True,
+                )
+            )
+        else:
+            console.print(f"[bold cyan]{cls.name}[/] — {cls.description}")
+            console.print("[dim](no TOML example provided)[/]")
+        if i < len(ordered) - 1:
+            console.print()
 
 
-def _alerts_list_command(
-    ctx: typer.Context,
-    config: Path | None = typer.Option(
-        None,
-        "--config",
-        "-c",
-        help=f"Path to a TOML config (defaults to ./{DEFAULT_CONFIG_FILENAME} if present).",
-        envvar="CHAP_CHECKER_CONFIG",
-    ),
-) -> None:
-    """List configured alerters."""
-    _alerts_list_impl(ctx, config)
+def _alerts_list_command(ctx: typer.Context) -> None:
+    """List registered alerter types."""
+    _alerts_list_impl(ctx)
 
 
-alerts_app.command("list", help="List configured alerters.")(_alerts_list_command)
+alerts_app.command("list", help="List registered alerter types and their TOML fields.")(_alerts_list_command)
 alerts_app.command("ls", hidden=True)(_alerts_list_command)
 
 
@@ -553,9 +573,10 @@ def alerts_test_command(
 ) -> None:
     """Send a synthetic transition to every configured alerter (or a named one).
 
-    Useful after rotating a Slack webhook or when you suspect the alert
-    pipeline is broken. Each invocation posts a real message to the
-    configured channel, so do not put this on a cron - run it manually.
+    Useful after rotating a credential (Slack webhook URL, generic webhook
+    bearer token, ...) or when you suspect the alert pipeline is broken.
+    Each invocation posts a real message / payload to the configured
+    receiver, so do not put this on a cron - run it manually.
 
     Exit code is 0 only when every alerter delivered successfully.
     """
@@ -975,6 +996,8 @@ def _resolve_run_context(
 
 def _build_alerters(cfg: AlertsConfig) -> list[AlerterBinding]:
     """Instantiate one :class:`AlerterBinding` per configured ``[alerts.<name>]`` section."""
+    from chap_checker.alerts.webhook import WebhookAlerter
+
     out: list[AlerterBinding] = []
     if cfg.slack is not None:
         out.append(
@@ -984,6 +1007,17 @@ def _build_alerters(cfg: AlertsConfig) -> list[AlerterBinding]:
                     timeout_s=cfg.slack.timeout_s,
                 ),
                 notify_on=set(cfg.slack.notify_on),
+            )
+        )
+    if cfg.webhook is not None:
+        out.append(
+            AlerterBinding(
+                alerter=WebhookAlerter(
+                    url=cfg.webhook.resolve_url(),
+                    timeout_s=cfg.webhook.timeout_s,
+                    headers=cfg.webhook.headers,
+                ),
+                notify_on=set(cfg.webhook.notify_on),
             )
         )
     return out
