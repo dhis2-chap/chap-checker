@@ -122,6 +122,27 @@ re-issuing the request.
   Bad status codes (`>= 400`) return `Status.FAIL`. Unexpected response shapes
   return `Status.FAIL`. `Status.WARN` is for "responded but with anomalies"
   (e.g. missing version field).
+- **Use `diagnose_status()` for 4xx/5xx**. It distinguishes the three
+  permission-shaped modes (401 / 403 / 404) so the message points the
+  operator at the actual fix - credentials vs. missing authority vs.
+  missing endpoint - and stashes `http_status`, `path`, and optional
+  `required_authority` into the result's `details` dict so JSON consumers
+  (alerts, monitoring) can route on the cause without parsing strings.
+
+  ```python
+  from chap_checker.checks.base import diagnose_status
+
+  response = await client.get_response("/api/apps")
+  diag = diagnose_status(
+      response.status_code,
+      path="/api/apps",
+      required_authority="M_dhis-web-app-management",  # surfaced in the 403 message
+      not_found_meaning="/api/apps returned 404 - check your reverse-proxy config.",
+  )
+  if diag is not None:
+      message, details = diag
+      return CheckResult(name=self.name, status=Status.FAIL, message=message, details=details, ...)
+  ```
 - **Wrap `response.json()` in `try`/`except ValueError`** — a non-JSON body
   should produce a clean `FAIL`, not a crash that the runner has to catch.
 - **Guard `isinstance(body, dict)`** before constructing pydantic models from

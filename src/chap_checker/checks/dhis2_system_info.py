@@ -12,6 +12,7 @@ from chap_checker.checks.base import (
     CheckContext,
     CheckResult,
     Status,
+    diagnose_status,
     format_request_error,
     parse_dhis2_version,
     register_check,
@@ -53,11 +54,21 @@ class Dhis2SystemInfoCheck:
             )
 
         duration_ms = (time.perf_counter() - start) * 1000
-        if response.status_code >= 400:
+        diag = diagnose_status(
+            response.status_code,
+            path="/api/system/info",
+            not_found_meaning=(
+                "/api/system/info returned 404 - this server does not look like a DHIS2 "
+                "instance (or sits behind a proxy that doesn't expose the API)."
+            ),
+        )
+        if diag is not None:
+            message, details = diag
             return CheckResult(
                 name=self.name,
                 status=Status.FAIL,
-                message=f"Unexpected status {response.status_code}.",
+                message=message,
+                details=details,
                 duration_ms=duration_ms,
             )
 

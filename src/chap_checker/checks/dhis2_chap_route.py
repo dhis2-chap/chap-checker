@@ -8,7 +8,14 @@ from typing import ClassVar
 from dhis2w_client import Dhis2Client
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from chap_checker.checks.base import CheckContext, CheckResult, Status, format_request_error, register_check
+from chap_checker.checks.base import (
+    CheckContext,
+    CheckResult,
+    Status,
+    diagnose_status,
+    format_request_error,
+    register_check,
+)
 
 CHAP_ROUTE_CODE = "chap"
 ROUTE_LIST_PATH = "/api/routes"
@@ -63,11 +70,22 @@ class Dhis2ChapRouteCheck:
             )
 
         duration_ms = (time.perf_counter() - start) * 1000
-        if response.status_code >= 400:
+        diag = diagnose_status(
+            response.status_code,
+            path=ROUTE_LIST_PATH,
+            not_found_meaning=(
+                f"{ROUTE_LIST_PATH} returned 404 - the routes API is missing on this server "
+                "(routes were introduced in DHIS2 2.40; older versions do not expose this endpoint)."
+            ),
+            required_authority="F_ROUTE_READ_PRIVATE",
+        )
+        if diag is not None:
+            message, details = diag
             return CheckResult(
                 name=self.name,
                 status=Status.FAIL,
-                message=f"Could not list routes (status {response.status_code}).",
+                message=message,
+                details=details,
                 duration_ms=duration_ms,
             )
 
