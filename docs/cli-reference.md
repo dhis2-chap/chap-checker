@@ -225,6 +225,10 @@ bearer token, ...) or when you suspect the alert pipeline is broken.
 Each invocation posts a real message / payload to the configured
 receiver, so do not put this on a cron - run it manually.
 
+`--kind` picks which direction to test: `failure` (default) sends an
+OK-&gt;FAIL transition, `recovery` sends a FAIL-&gt;OK, and `both` sends
+the pair so a single command exercises the full round-trip.
+
 Exit code is 0 only when every alerter delivered successfully.
 
 **Usage**:
@@ -236,6 +240,7 @@ $ chap-checker alerts test [OPTIONS]
 **Options**:
 
 * `-n, --name TEXT`: Send only to this alerter (must be a configured alerter name). Default: every configured alerter.
+* `-k, --kind [failure|recovery|both]`: Which synthetic transition(s) to send: failure (default), recovery, or both.  [default: failure]
 * `-c, --config PATH`: Path to a TOML config (defaults to ./chap-checker.toml if present).  [env var: CHAP_CHECKER_CONFIG]
 * `--help`: Show this message and exit.
 

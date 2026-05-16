@@ -7,6 +7,7 @@ import json
 import os
 import sys
 from datetime import UTC, datetime
+from enum import Enum
 from pathlib import Path
 
 import click
@@ -554,6 +555,19 @@ alerts_app.command("list", help="List registered alerter types and their TOML fi
 alerts_app.command("ls", hidden=True)(_alerts_list_command)
 
 
+class _TestAlertKind(str, Enum):
+    """`--kind` choices for `chap-checker alerts test`.
+
+    `both` sends a failure-then-recovery pair so the operator can verify
+    the full round-trip in one invocation (Slack will render two messages,
+    a webhook receiver will see two POSTs).
+    """
+
+    failure = "failure"
+    recovery = "recovery"
+    both = "both"
+
+
 @alerts_app.command("test")
 def alerts_test_command(
     ctx: typer.Context,
@@ -562,6 +576,12 @@ def alerts_test_command(
         "--name",
         "-n",
         help="Send only to this alerter (must be a configured alerter name). Default: every configured alerter.",
+    ),
+    kind: _TestAlertKind = typer.Option(
+        _TestAlertKind.failure,
+        "--kind",
+        "-k",
+        help="Which synthetic transition(s) to send: failure (default), recovery, or both.",
     ),
     config: Path | None = typer.Option(
         None,
@@ -577,6 +597,10 @@ def alerts_test_command(
     bearer token, ...) or when you suspect the alert pipeline is broken.
     Each invocation posts a real message / payload to the configured
     receiver, so do not put this on a cron - run it manually.
+
+    `--kind` picks which direction to test: `failure` (default) sends an
+    OK->FAIL transition, `recovery` sends a FAIL->OK, and `both` sends
+    the pair so a single command exercises the full round-trip.
 
     Exit code is 0 only when every alerter delivered successfully.
     """
@@ -602,41 +626,81 @@ def alerts_test_command(
                 f"No configured alerter named '{name}'. Configured: {', '.join(configured_names)}."
             )
 
-    test_transition = Transition(
+    now = datetime.now(UTC)
+    failure_transition = Transition(
         kind="failure",
         target_name="test",
         target_url="https://test.example.com",
         check_name="alert-test",
         previous_status=Status.OK,
         current_status=Status.FAIL,
-        message="Test alert from `chap-checker alerts test`.",
+        message="Test alert from `chap-checker alerts test --kind failure`.",
         duration_ms=0.0,
-        occurred_at=datetime.now(UTC),
+        occurred_at=now,
     )
+    recovery_transition = Transition(
+        kind="recovery",
+        target_name="test",
+        target_url="https://test.example.com",
+        check_name="alert-test",
+        previous_status=Status.FAIL,
+        current_status=Status.OK,
+        message="Test alert from `chap-checker alerts test --kind recovery`.",
+        duration_ms=0.0,
+        occurred_at=now,
+    )
+    if kind is _TestAlertKind.failure:
+        transitions = [failure_transition]
+    elif kind is _TestAlertKind.recovery:
+        transitions = [recovery_transition]
+    else:  # both
+        transitions = [failure_transition, recovery_transition]
 
     chatter = not state_obj.quiet and not state_obj.json_output
+    console = Console() if chatter else None
+
+    if chatter and console is not None:
+        kind_label = {
+            _TestAlertKind.failure: "OK -> FAIL",
+            _TestAlertKind.recovery: "FAIL -> OK",
+            _TestAlertKind.both: "OK -> FAIL + FAIL -> OK (both directions)",
+        }[kind]
+        n_alerters = len(alerters)
+        target_word = "alerter" if n_alerters == 1 else "alerters"
+        console.print(f"[bold]Sending synthetic [cyan]{kind_label}[/] via [cyan]{n_alerters}[/] {target_word}.[/]")
+
+    async def _send_one(binding: AlerterBinding) -> AlertTestResult:
+        try:
+            await binding.alerter.notify(transitions)
+        except Exception as exc:  # noqa: BLE001 - surface every failure as a result
+            _log.exception("alerter %s failed", binding.alerter.name)
+            return AlertTestResult(alerter=binding.alerter.name, ok=False, error=str(exc))
+        return AlertTestResult(alerter=binding.alerter.name, ok=True)
 
     async def _send_all() -> AlertTestReport:
-        results: list[AlertTestResult] = []
-        for binding in alerters:
-            if chatter:
-                typer.echo(f"Sending test message via {binding.alerter.name}...")
-            try:
-                await binding.alerter.notify([test_transition])
-                results.append(AlertTestResult(alerter=binding.alerter.name, ok=True))
-                if chatter:
-                    typer.echo("  OK")
-            except Exception as exc:  # noqa: BLE001 - surface every failure as a result
-                results.append(AlertTestResult(alerter=binding.alerter.name, ok=False, error=str(exc)))
-                if chatter:
-                    typer.echo(f"  FAILED: {exc}")
-                _log.exception("alerter %s failed", binding.alerter.name)
+        results: list[AlertTestResult] = [await _send_one(b) for b in alerters]
         return AlertTestReport(ok=all(r.ok for r in results), results=results)
 
     report = asyncio.run(_send_all())
 
     if state_obj.json_output and not state_obj.quiet:
         typer.echo(report.model_dump_json(indent=2))
+    elif chatter and console is not None:
+        table = Table(show_header=True, header_style="bold")
+        table.add_column("Alerter", style="cyan", no_wrap=True)
+        table.add_column("Result", no_wrap=True)
+        table.add_column("Detail", overflow="fold")
+        for r in report.results:
+            if r.ok:
+                result_cell = "[green]OK[/]"
+                detail = f"{len(transitions)} transition(s) delivered"
+            else:
+                result_cell = "[red]FAIL[/]"
+                detail = r.error or "(no detail)"
+            table.add_row(r.alerter, result_cell, detail)
+        console.print(table)
+        if not report.ok:
+            console.print("[red]One or more alerters failed - rotate creds or check the receiver.[/]")
 
     raise typer.Exit(0 if report.ok else 1)
 
