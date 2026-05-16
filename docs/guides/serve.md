@@ -330,7 +330,12 @@ The Ctrl+K / ⌘K command palette has a **Sign out** entry that clears the store
 
 ### Rotation
 
-There's no rotation API. Update the env var (or the inline `token`) and restart `chap-checker serve`. Every existing browser session will pop the login modal on its next poll; every TUI client gets the auth-rejected banner until you update its `--token-env`.
+Two flows depending on which form the daemon is configured for:
+
+- **Inline `token`** — edit the TOML, then `POST /api/reload` (or `Ctrl+R` in the local TUI). The daemon re-resolves `[auth]` in place; the new token is in effect on the next request. No restart.
+- **`token_env`** — the env-var lives in the daemon's process environment. Updating it in your shell does *not* propagate to the running daemon, so this flow still needs a restart (or whatever way your supervisor — systemd `EnvironmentFile=`, launchd `EnvironmentVariables`, Docker `-e`, ... — re-launches the process with the new value).
+
+Either way, every existing browser session pops the login modal on its next poll, and every `tui --connect` client gets the auth-rejected banner until you update its `--token-env` / `--token`.
 
 ### Threat model
 
