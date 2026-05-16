@@ -122,15 +122,16 @@ Escape (or *Cancel*) paints the "auth rejected" banner instead and stops
 re-prompting on subsequent ticks — sign in via `--token-env` and
 relaunch.
 
-## How the TUI relates to `verify` and `web`
+## How the TUI relates to `verify` and `serve`
 
 All three subcommands share one runner (`run_targets()`), one tile
 projection (`DashboardServer`), and the same per-instance `checks`
-filter and `alerts` opt-in. In local mode the TUI and `web` each
+filter and `alerts` opt-in. In local mode the TUI and `serve` each
 embed their own `DashboardServer`; in `--connect` mode the TUI is a
-thin client of the `web` daemon's server. Cron `verify` is independent
-of both; if you want a single authoritative alert path, stop running
-cron and let `chap-checker serve --alerts` fire instead.
+thin client of the `serve` daemon's `DashboardServer`. Cron `verify`
+is independent of both; if you want a single authoritative alert
+path, stop running cron and let `chap-checker serve --alerts` fire
+instead.
 
 ## Regenerating the screenshots
 

@@ -179,7 +179,10 @@ Themes:
   text. Status colours stay semantic (green/amber/red) but pick darker
   shades for legibility on white.
 
-Both fields are optional; omit `[ui]` to take the defaults. `chap-checker
-reload` (Ctrl+R in the TUI, button in the web header) re-reads the section
-along with the rest of the config — the web picks up `title` changes on the
-next `/api/state` poll without a reload of the browser tab.
+Both fields are optional; omit `[ui]` to take the defaults. The
+`Reload config` command (Ctrl+R in the TUI, the same entry in the
+browser's Ctrl+K palette, or `POST /api/reload` directly) re-reads the
+section along with the rest of the config — the browser picks up
+`title` changes on the next `/api/state` poll without a reload of the
+browser tab. There is no top-level `chap-checker reload` CLI command;
+reload is in-process only.
