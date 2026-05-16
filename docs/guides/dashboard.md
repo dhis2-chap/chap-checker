@@ -9,6 +9,11 @@ be left on a TV / second monitor so the operator sees at a glance what's up.
 
 ![chap-checker tui against five DHIS2 play servers](../assets/dashboard.svg)
 
+The `dhis2` theme (light mode, DHIS2 blue strip) for embedding in a DHIS2
+ops environment:
+
+![chap-checker tui, dhis2 theme](../assets/dashboard-dhis2.svg)
+
 ## Layout
 
 - **Header**: `chap-checker | N instance(s) | alerts ON|OFF | refresh every Ns ... HH:MM:SS`. The clock ticks every second.
@@ -98,6 +103,25 @@ next tick once the daemon comes back.
 remote config, `POST /api/reload` on the daemon — or run
 `chap-checker tui` locally on the daemon host and hit `Ctrl+R`.
 
+### Auth prompt
+
+If the remote daemon requires a bearer token (`[auth]` configured) and
+you didn't pass `--token` / `--token-env`, the TUI pops a centred prompt
+on top of the dashboard:
+
+![tui auth-token modal, phosphor theme](../assets/tui-token-modal.svg)
+
+Type the token and press Enter (or click *Sign in*) to rebuild the
+client with the bearer header and refresh. The modal picks up the
+daemon's `[ui].theme` before paint, so the dhis2 deployment looks like
+this:
+
+![tui auth-token modal, dhis2 theme](../assets/tui-token-modal-dhis2.svg)
+
+Escape (or *Cancel*) paints the "auth rejected" banner instead and stops
+re-prompting on subsequent ticks — sign in via `--token-env` and
+relaunch.
+
 ## How the TUI relates to `verify` and `web`
 
 All three subcommands share one runner (`run_targets()`), one tile
@@ -108,16 +132,34 @@ thin client of the `web` daemon's server. Cron `verify` is independent
 of both; if you want a single authoritative alert path, stop running
 cron and let `chap-checker serve --alerts` fire instead.
 
-## Regenerating the screenshot
+## Regenerating the screenshots
 
-The image at the top is checked in at `docs/assets/dashboard.svg`. To
-re-capture against a real config:
+The dashboard image at the top is checked in at
+`docs/assets/dashboard.svg`. To re-capture against a real config:
 
 ```bash
 uv run python scripts/capture_dashboard.py --config chap-checker.toml \
     --output docs/assets/dashboard.svg
 ```
 
-See [`scripts/capture_dashboard.py`](https://github.com/dhis2-chap/chap-checker/blob/main/scripts/capture_dashboard.py)
-in the repo for how the screenshot is produced (Textual `pilot` mode + a
-delay long enough for the first refresh to land).
+The auth-modal images are produced by a sibling script that drives a
+TUI client (`DashboardApp(connect_url=URL)`) against a running daemon:
+
+```bash
+# Phosphor variant (default theme - no [ui].theme in the daemon config).
+uv run python scripts/capture_token_modal.py \
+    --connect http://127.0.0.1:8765 \
+    --output docs/assets/tui-token-modal.svg
+
+# dhis2 variant (daemon config has [ui] theme = "dhis2").
+uv run python scripts/capture_token_modal.py \
+    --connect http://127.0.0.1:8765 \
+    --output docs/assets/tui-token-modal-dhis2.svg
+```
+
+See
+[`scripts/capture_dashboard.py`](https://github.com/dhis2-chap/chap-checker/blob/main/scripts/capture_dashboard.py)
+and
+[`scripts/capture_token_modal.py`](https://github.com/dhis2-chap/chap-checker/blob/main/scripts/capture_token_modal.py)
+in the repo for how the screenshots are produced (Textual `pilot` mode
++ `app.save_screenshot()`).
