@@ -34,9 +34,10 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.command import DiscoveryHit, Hit, Hits, Provider
 from textual.containers import Container, Grid, Horizontal, Vertical
+from textual.screen import ModalScreen
 from textual.theme import Theme
 from textual.widget import Widget
-from textual.widgets import Static
+from textual.widgets import Button, Input, Label, Static
 
 from chap_checker.checks.base import Status
 from chap_checker.config import CheckerConfig, load_config
@@ -740,6 +741,109 @@ class ChapCheckerCommands(Provider):
             yield DiscoveryHit(name, callback, help=help_text)
 
 
+class TokenPromptScreen(ModalScreen[str | None]):
+    """Centred modal asking the operator for a bearer token.
+
+    Shown by `DashboardApp` in `--connect` mode when the daemon requires
+    auth and no token was supplied via `--token` / `--token-env`. The
+    screen blocks the underlying dashboard until the operator submits a
+    token (or hits Escape, which returns `None` and lets the app paint
+    the auth-rejected banner). Matches the typer-prompt UX `verify --url
+    --token` uses, but stays inside the Textual surface.
+    """
+
+    DEFAULT_CSS = """
+    TokenPromptScreen {
+        align: center middle;
+    }
+    TokenPromptScreen > #token-modal {
+        width: auto;
+        max-width: 80;
+        min-width: 60;
+        height: auto;
+        padding: 1 2;
+        background: $surface;
+        border: thick $primary;
+        layout: vertical;
+    }
+    TokenPromptScreen .title {
+        text-style: bold;
+        color: $primary;
+        margin-bottom: 1;
+    }
+    TokenPromptScreen .desc {
+        color: $text-muted;
+        margin-bottom: 1;
+        height: auto;
+    }
+    TokenPromptScreen #token-input {
+        margin-bottom: 1;
+    }
+    TokenPromptScreen #token-row {
+        height: auto;
+        align: right middle;
+    }
+    TokenPromptScreen #token-row Button {
+        margin-left: 2;
+    }
+    TokenPromptScreen .hint {
+        color: $text-disabled;
+        margin-top: 1;
+        height: auto;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel", show=False),
+    ]
+
+    def __init__(self, target_url: str) -> None:
+        super().__init__()
+        self._target_url = target_url
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="token-modal"):
+            yield Label("chap-checker", classes="title")
+            yield Label(
+                f"This deployment requires a bearer token to view the dashboard.\nServer: {self._target_url}",
+                classes="desc",
+            )
+            yield Input(
+                id="token-input",
+                placeholder="bearer token",
+                password=True,
+            )
+            with Horizontal(id="token-row"):
+                yield Button("Cancel", id="cancel-btn", variant="default")
+                yield Button("Sign in", id="signin-btn", variant="primary")
+            yield Label(
+                "Tip: pass `--token-env NAME` next time to skip this prompt.",
+                classes="hint",
+            )
+
+    def on_mount(self) -> None:
+        self.query_one("#token-input", Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        # Pressing Enter inside the input submits the form.
+        self._submit(event.value)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "signin-btn":
+            self._submit(self.query_one("#token-input", Input).value)
+        elif event.button.id == "cancel-btn":
+            self.dismiss(None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def _submit(self, raw: str) -> None:
+        token = (raw or "").strip()
+        if not token:
+            return
+        self.dismiss(token)
+
+
 class DashboardApp(App[None]):
     """Textual TUI for chap-checker.
 
@@ -791,6 +895,12 @@ class DashboardApp(App[None]):
         self.tiles: dict[str, InstanceTile] = {}
         self._refreshing = False
         self._http_client: httpx.AsyncClient | None = None
+        # Set once after the first auth-prompt cycle so a wrong-token 401
+        # paints the auth-rejected banner instead of looping the modal.
+        self._token_prompted = False
+        # While the prompt screen is up we don't want the refresh interval
+        # firing in the background.
+        self._auth_modal_open = False
 
         if connect_url is None:
             if targets is None or cfg is None:
@@ -876,10 +986,16 @@ class DashboardApp(App[None]):
         url = self.connect_url.rstrip("/") + "/api/state"
         try:
             response = await self._http_client.get(url)
-            # Distinct banner for auth failure - the receiver is up but the
-            # token is wrong / missing, which is a different fix from
-            # "server is down". Don't raise_for_status before checking.
+            # Distinct handling for auth failure. First 401 with no
+            # stored token: pop the in-TUI modal and let the operator
+            # paste a token. Subsequent 401s (after the modal closed):
+            # paint the auth-rejected banner so the operator knows the
+            # token is wrong / expired. Don't raise_for_status before
+            # checking the status code ourselves.
             if response.status_code == 401:
+                if not self._token_prompted and self.connect_token is None:
+                    await self._prompt_for_token()
+                    return None
                 hint = "set --token-env" if self.connect_token is None else "check the token value"
                 self._set_disconnect_banner(f"auth rejected by {self.connect_url}: {hint}")
                 return None
@@ -888,6 +1004,50 @@ class DashboardApp(App[None]):
         except Exception as exc:  # noqa: BLE001 - banner-paint covers any transport / parse error
             self._set_disconnect_banner(f"disconnected from {self.connect_url}: {exc}")
             return None
+
+    async def _prompt_for_token(self) -> None:
+        """Pop the TokenPromptScreen non-blockingly; result is handled by callback.
+
+        Uses `push_screen(..., callback=...)` rather than
+        `push_screen_wait(...)` because the wait variant needs a worker
+        context and we're already inside an action handler. The callback
+        rebuilds the httpx client with the new token and triggers an
+        immediate refresh - same end-to-end semantics, lower ceremony.
+        """
+        if self._auth_modal_open or self.connect_url is None:
+            return
+        self._auth_modal_open = True
+        self.push_screen(TokenPromptScreen(self.connect_url), self._on_token_submitted)
+
+    def _on_token_submitted(self, token: str | None) -> None:
+        """Callback fired when TokenPromptScreen dismisses.
+
+        Receives the operator-typed token (or `None` if they cancelled).
+        Builds a fresh `httpx.AsyncClient` with the bearer header (httpx
+        clients carry immutable headers per client, so updating means a
+        new client) and kicks off an immediate refresh.
+        """
+        self._auth_modal_open = False
+        self._token_prompted = True
+        if not token:
+            self._set_disconnect_banner(
+                f"auth rejected by {self.connect_url}: set --token-env or sign in",
+            )
+            return
+        self.connect_token = token
+        # Schedule an async worker to close the old client + open a new
+        # one with the bearer header, then refresh. The callback is sync
+        # but `aclose()` needs an event loop.
+        self.run_worker(self._reopen_client_and_refresh(), exclusive=True)
+
+    async def _reopen_client_and_refresh(self) -> None:
+        if self._http_client is not None:
+            await self._http_client.aclose()
+        self._http_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(10.0),
+            headers={"Authorization": f"Bearer {self.connect_token}"},
+        )
+        await self.action_refresh()
 
     def _set_disconnect_banner(self, message: str | None) -> None:
         try:
