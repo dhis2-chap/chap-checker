@@ -45,18 +45,22 @@ _log = get_logger("serve")
 _access_log = get_logger("serve.access")
 
 
-def _make_auth_dependency(token: str | None) -> Callable[..., Awaitable[None]]:
-    """Return a FastAPI dependency that gates protected routes on a bearer token.
+def _make_auth_dependency(server: DashboardServer) -> Callable[..., Awaitable[None]]:
+    """Return a FastAPI dependency that gates protected routes on the current bearer token.
 
-    `token=None` means auth is disabled (dependency is a no-op). When a token
-    is configured, every protected route receives a `require_auth` call that
-    parses `Authorization: Bearer <token>` and compares the value with
-    `hmac.compare_digest` so a wrong token can't be brute-forced by timing.
+    Reads `server.resolved_auth_token` at request time (not at app-build
+    time) so that POST /api/reload, which re-resolves the token from the
+    new `[auth]` block, takes effect immediately. Token=None means auth
+    is currently disabled - the dependency is a no-op.
+
+    Comparison uses `hmac.compare_digest` so a wrong token can't be
+    brute-forced by timing.
     """
 
     async def require_auth(
         authorization: Annotated[str | None, Header(include_in_schema=False)] = None,
     ) -> None:
+        token = server.resolved_auth_token
         if token is None:
             return
         if not authorization or not authorization.startswith("Bearer "):
@@ -119,13 +123,18 @@ def make_app(
     `/api/*` is unaffected; use this for headless deployments where only
     the TUI `--connect` clients or external scrapers consume the state.
 
-    `auth_token`, when set, protects `/api/state` and `/api/reload` with
-    a bearer-token check. The browser SPA + static assets stay
-    unauthenticated so the login modal can render before a token exists
-    (the SPA fetches `/api/state`, gets 401, prompts for the token,
-    stores it in localStorage, retries). `auth_token=None` keeps the
-    routes unauthenticated, matching 0.6.x behaviour.
+    `auth_token`, when set, seeds the server's resolved-token state so
+    that `/api/state` and `/api/reload` start out gated by a bearer-token
+    check. The check itself reads `server.resolved_auth_token` at
+    request time, so subsequent POST /api/reload calls re-resolve from
+    the new `[auth]` block and take effect immediately. The browser SPA
+    + static assets stay unauthenticated so the login modal can render
+    before a token exists (the SPA fetches `/api/state`, gets 401,
+    prompts for the token, stores it in localStorage, retries).
+    `auth_token=None` keeps the routes unauthenticated initially,
+    matching 0.6.x behaviour - reload can still enable auth later.
     """
+    server.resolved_auth_token = auth_token
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
@@ -142,7 +151,7 @@ def make_app(
     app = FastAPI(title="chap-checker", lifespan=lifespan)
     app.add_middleware(AccessLogMiddleware)
 
-    require_auth = _make_auth_dependency(auth_token)
+    require_auth = _make_auth_dependency(server)
     protected: list[Any] = [Depends(require_auth)]
 
     @app.get("/api/state", dependencies=protected)
@@ -186,7 +195,7 @@ def make_app(
         """
         return JSONResponse(
             {
-                "required": auth_token is not None,
+                "required": server.resolved_auth_token is not None,
                 "ui_theme": server.cfg.ui.theme,
                 "ui_title": server.cfg.ui.title,
             }

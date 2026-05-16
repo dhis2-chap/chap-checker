@@ -161,6 +161,11 @@ class DashboardServer(BaseModel):
     config_path: Path | None = None
     trackers: dict[str, TileTracker] = Field(default_factory=dict)
     last_refresh: datetime | None = None
+    # Currently-applied bearer token, re-resolved on every reload(). Kept on
+    # the server (not closed-over in the FastAPI dependency) so that adding
+    # or removing the `[auth]` block in the TOML and POSTing /api/reload
+    # takes effect immediately, instead of requiring a daemon restart.
+    resolved_auth_token: str | None = None
 
     def model_post_init(self, _context: object) -> None:
         for entry in self.targets:
@@ -185,10 +190,16 @@ class DashboardServer(BaseModel):
         new_targets = [
             entry.to_target_entry(name, default_retry_policy=new_cfg.retry) for name, entry in new_cfg.instances.items()
         ]
+        # Re-resolve the bearer token from the new [auth] block before any
+        # mutation, so a missing `token_env` raises and we leave the prior
+        # auth state untouched (operator gets 400 + the old config keeps
+        # serving). Removing the block disables auth on the next request.
+        new_token = new_cfg.auth.resolve_token() if new_cfg.auth is not None else None
         old_names = {t.name for t in self.targets}
         new_names = {t.name for t in new_targets}
         self.targets = new_targets
         self.cfg = new_cfg
+        self.resolved_auth_token = new_token
         for removed in old_names - new_names:
             self.trackers.pop(removed, None)
         for added in new_names - old_names:
