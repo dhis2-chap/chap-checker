@@ -26,47 +26,58 @@ you want to gate publish on manual approval.
 
 ## Cutting a release
 
-1. **Bump the version.** Edit `pyproject.toml` -> `[project].version`
-   following [SemVer](https://semver.org/):
+The recipe — **bump → tag → push**, done straight from `main`:
 
-   - `MAJOR` for breaking changes
-   - `MINOR` for backwards-compatible features
-   - `PATCH` for backwards-compatible bug fixes
+```bash
+git checkout main && git pull
 
-2. **Update the changelog / docs** if you keep one (none yet, but
-   tag annotations work as a starting point).
+# 1. Bump [project].version in pyproject.toml following SemVer:
+#    MAJOR  - breaking changes
+#    MINOR  - backwards-compatible features
+#    PATCH  - backwards-compatible bug fixes
 
-3. **Open a PR**, get CI green, merge to `main`.
+# 2. Move the CHANGELOG's [Unreleased] block into a new
+#    [<version>] — YYYY-MM-DD section, then reset [Unreleased] to
+#    empty. Update the compare-link footer at the bottom of the file
+#    so it points at the new tag.
 
-4. **Tag from `main`** with a `v`-prefixed semver tag matching the
-   new version:
+# 3. For MINOR / MAJOR bumps only: bump SECURITY.md's "Supported
+#    versions" table so the currently-patched line matches the new
+#    release.
 
-   ```bash
-   git checkout main && git pull
-   git tag -a v0.2.0 -m "v0.2.0: short summary"
-   git push origin v0.2.0
-   ```
+# 4. Commit + push the bump on main.
+git commit -am "chore(release): vX.Y.Z"
+git push origin main
 
-   The release workflow:
+# 5. Tag from main with a v-prefixed semver tag that matches
+#    pyproject.toml exactly, then push the tag.
+git tag -a vX.Y.Z -m "vX.Y.Z: short summary"
+git push origin vX.Y.Z
+```
 
-   1. Verifies the tag (`v0.2.0`) matches `pyproject.toml` version
-      (`0.2.0`); fails fast otherwise.
-   2. Runs `uv build` to produce both an sdist and a wheel.
-   3. Uploads to PyPI via the trusted-publisher OIDC exchange.
-   4. Creates a GitHub Release for the tag with auto-generated
-      notes (from merged PRs since the previous tag) and the wheel +
-      sdist attached as assets.
+The release workflow (`.github/workflows/release.yml`) fires on the
+tag push and:
 
-5. **Verify** within ~30s of the workflow completing:
+1. Verifies the tag (`vX.Y.Z`) matches `pyproject.toml` version
+   (`X.Y.Z`); fails fast otherwise so a mismatched tag never reaches
+   PyPI.
+2. Runs `uv build` to produce both an sdist and a wheel.
+3. Uploads to PyPI via the trusted-publisher OIDC exchange.
+4. Creates a GitHub Release for the tag with auto-generated notes
+   (from merged PRs since the previous tag) and the wheel + sdist
+   attached as assets.
 
-   ```bash
-   pip install chap-checker --upgrade
-   chap-checker --version
-   ```
+Verify within ~30s of the workflow completing:
 
-   Both pages update on success:
-   - https://pypi.org/project/chap-checker/
-   - https://github.com/dhis2-chap/chap-checker/releases
+```bash
+uv tool upgrade chap-checker     # or: uvx chap-checker --version
+chap-checker --version
+```
+
+Both pages update on success:
+
+- <https://pypi.org/project/chap-checker/>
+- <https://github.com/dhis2-chap/chap-checker/releases>
 
 ## Dry-run / hotfix tips
 

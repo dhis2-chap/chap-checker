@@ -28,29 +28,43 @@ is required.
 
 ```
 src/chap_checker/
-├── cli.py                 # typer entry point (verify / checks / alerts / tui / web / init)
+├── cli.py                 # typer entry point (init / verify / tui / serve / alerts / checks)
 ├── client.py              # httpx-based Dhis2Client + Dhis2Target
-├── config.py              # TOML loader; CheckerConfig, InstanceConfig, SlackAlertConfig
+├── config.py              # TOML loader; CheckerConfig, InstanceConfig, SlackAlertConfig,
+│                          # WebhookAlertConfig, AuthConfig, UiConfig, RetryConfig
 ├── runner.py              # parallel run_targets, RunReport, VerifyReport, TargetEntry
 ├── output.py              # Rich table + JSON renderers
 ├── state.py               # GlobalState (CLI flags container)
 ├── state_store.py         # state file load/save + compute_transitions
+│                          # + alert_state_lock (fcntl.flock async ctx mgr, POSIX-only)
 ├── logging.py             # stderr-only logger config
 ├── daemon.py              # DashboardServer (refresh loop + per-tile trackers + DashboardState)
 ├── dashboard.py           # Textual TUI; embeds DashboardServer in local mode, httpx-polls in --connect mode
 ├── serve.py               # FastAPI app exposing the daemon's /api/state + browser bundle (chap-checker serve)
 ├── alerts/
+│   ├── __init__.py        # re-exports + builtins import (registers Slack + webhook)
 │   ├── base.py            # Alerter protocol + Transition + register_alerter
-│   └── slack.py           # SlackAlerter
-└── checks/
-    ├── base.py            # Check protocol + register_check + resolve_checks
-    ├── dhis2_ping.py
-    ├── dhis2_system_info.py
-    ├── dhis2_chap_route.py
-    ├── dhis2_chap_ping.py
-    ├── dhis2_chap_system_info.py
-    ├── dhis2_chap_modeling_app.py
-    └── dhis2_chap_climate_app.py
+│   ├── slack.py           # SlackAlerter (subclass of WebhookAlerter)
+│   └── webhook.py         # Generic WebhookAlerter (canonical JSON envelope)
+├── checks/
+│   ├── __init__.py        # explicit imports so @register_check fires on package load
+│   ├── base.py            # Check protocol + register_check + resolve_checks + diagnose_status
+│   ├── dhis2_ping.py
+│   ├── dhis2_system_info.py
+│   ├── dhis2_chap_route.py
+│   ├── dhis2_chap_ping.py
+│   ├── dhis2_chap_system_info.py
+│   ├── dhis2_chap_modeling_app.py
+│   └── dhis2_chap_climate_app.py
+└── web_ui/                # FastAPI-served browser dashboard (React/Babel-standalone, no build)
+    ├── index.html
+    ├── vendor/            # React 18 UMD + Babel 7 standalone (committed)
+    ├── _state.js          # wiring layer (polls /api/state, maps to artifact shape, auth)
+    └── src/               # designer artifact (replaced wholesale on next zip drop)
+        ├── app.jsx
+        ├── card.jsx
+        ├── palette.jsx
+        └── tweaks-panel.jsx
 ```
 
 ## House rules
