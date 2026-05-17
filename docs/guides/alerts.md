@@ -29,12 +29,14 @@ webhook_url_env = "SLACK_WEBHOOK_URL"
 ### 2. Opt instances in
 
 `alerts = [...]` on an instance lists which alerters fire for it. Default is
-`[]` — no opt-in, no Slack.
+`[]` — no opt-in, no dispatch (the transition is still tracked in the state
+file, so flipping the opt-in on later doesn't backfill spurious "first
+failure" pings for sustained outages).
 
 ```toml
-[instances.prod]               # pages on transitions
+[instances.prod]               # fans out to both alerters on every transition
 url = "https://dhis2.example.com"
-alerts = ["slack"]
+alerts = ["slack", "ops-webhook"]
 # ...
 
 [instances.staging]            # silent, tracked but never paged
