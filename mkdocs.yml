@@ -1,5 +1,5 @@
 site_name: chap-checker
-site_description: Health-check CLI for DHIS2 instances integrated with chap-core; cron-friendly with Slack alerts and a TUI dashboard.
+site_description: Health-check CLI for DHIS2 instances integrated with chap-core; cron-friendly with Slack/webhook alerts and a TUI dashboard.
 site_url: https://dhis2-chap.github.io/chap-checker
 repo_url: https://github.com/dhis2-chap/chap-checker
 repo_name: dhis2-chap/chap-checker
@@ -24,7 +24,6 @@ theme:
     - navigation.expand
     - navigation.top
     - navigation.tracking
-    - toc.integrate
     - search.highlight
     - search.share
     - content.code.copy
@@ -34,13 +33,13 @@ nav:
   - Home: index.md
   - Guides:
       - Configuration: guides/configuration.md
-      - Built-in checks: guides/checks.md
-      - Alerting (Slack): guides/alerts.md
-      - CLI overview: guides/cli.md
-      - Cron deployment: guides/cron.md
+      - Checks: guides/checks.md
+      - Custom checks: guides/custom-checks.md
+      - Alerting: guides/alerts.md
+      - CLI: guides/cli.md
+      - Cron: guides/cron.md
       - TUI dashboard: guides/dashboard.md
-      - Server (chap-checker serve): guides/serve.md
-      - Adding a custom check: guides/custom-checks.md
+      - Server: guides/serve.md
       - Development: guides/development.md
       - Releasing: guides/releasing.md
   - CLI reference: cli-reference.md
