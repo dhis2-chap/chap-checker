@@ -66,8 +66,8 @@ app = typer.Typer(
     name="chap-checker",
     help=(
         "Health-check CLI for DHIS2 instances integrated with chap-core. "
-        "Cron-friendly with Slack alerts on status transitions and a TUI "
-        "dashboard for at-a-glance monitoring."
+        "Cron-friendly with Slack/webhook alerts on status transitions and "
+        "a TUI dashboard for at-a-glance monitoring."
     ),
     rich_markup_mode="rich",
 )
@@ -331,8 +331,9 @@ def verify_command(
        TOML table runs unless `--instance` narrows the run to one.
 
     Exit code is 0 when every check on every target is `OK`, non-zero
-    otherwise. Alert dispatch (Slack etc.) honors each instance's
-    `alerts = [...]` opt-in; skip dispatch entirely with `--no-alerts`.
+    otherwise. Alert dispatch honors each instance's `alerts = [...]`
+    opt-in across every configured alerter (Slack, webhook, custom);
+    skip dispatch entirely with `--no-alerts`.
     """
     state_obj = _state(ctx)
     # Capture which of the auth-mode flags actually came from the
@@ -397,8 +398,8 @@ def tui_command(
         False,
         "--alerts/--no-alerts",
         help=(
-            "Dispatch Slack/etc. alerts from refresh cycles. Off by default - the TUI is "
-            "usually all you need; flip this on if you want it to also page."
+            "Dispatch alerts (Slack, webhook, ...) from refresh cycles. Off by default - "
+            "the TUI is usually all you need; flip this on if you want it to also page."
         ),
     ),
     state: Path | None = typer.Option(
@@ -629,8 +630,9 @@ class _TestAlertKind(str, Enum):
     """`--kind` choices for `chap-checker alerts test`.
 
     `both` sends a failure-then-recovery pair so the operator can verify
-    the full round-trip in one invocation (Slack will render two messages,
-    a webhook receiver will see two POSTs).
+    the full round-trip in one invocation (each configured alerter
+    delivers two events: Slack renders two messages, a webhook receiver
+    sees two POSTs, and so on).
     """
 
     failure = "failure"
@@ -793,8 +795,8 @@ def serve_command(
         False,
         "--alerts/--no-alerts",
         help=(
-            "Dispatch Slack/etc. alerts from refresh cycles. Off by default - the dashboard is "
-            "usually all you need; flip this on if you want the daemon to also page."
+            "Dispatch alerts (Slack, webhook, ...) from refresh cycles. Off by default - "
+            "the dashboard is usually all you need; flip this on if you want the daemon to also page."
         ),
     ),
     state: Path | None = typer.Option(
@@ -1262,8 +1264,9 @@ def _dispatch_alerts(
     instance from silent to alerting later without spurious "first failure"
     pings for sustained outages).
 
-    Delivery failures (Slack 5xx, transport errors) are caught so they cannot
-    change the run's exit code, but on failure the new state is *not* saved.
+    Delivery failures (alerter 5xx, transport errors) are caught so they
+    cannot change the run's exit code, but on failure the new state is
+    *not* saved.
     Next run will recompute the same transitions and retry. With multiple
     alerters this is conservative (any failure suppresses the save and may
     re-deliver to alerters that already succeeded); per-alerter dedupe is a
