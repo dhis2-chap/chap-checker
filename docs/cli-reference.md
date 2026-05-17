@@ -1,6 +1,6 @@
 # CLI reference
 
-Health-check CLI for DHIS2 instances integrated with chap-core. Cron-friendly with Slack alerts on status transitions and a TUI dashboard for at-a-glance monitoring.
+Health-check CLI for DHIS2 instances integrated with chap-core. Cron-friendly with Slack/webhook alerts on status transitions and a TUI dashboard for at-a-glance monitoring.
 
 **Usage**:
 
@@ -70,8 +70,9 @@ Source of targets is decided as follows:
    TOML table runs unless `--instance` narrows the run to one.
 
 Exit code is 0 when every check on every target is `OK`, non-zero
-otherwise. Alert dispatch (Slack etc.) honors each instance&#x27;s
-`alerts = [...]` opt-in; skip dispatch entirely with `--no-alerts`.
+otherwise. Alert dispatch honors each instance&#x27;s `alerts = [...]`
+opt-in across every configured alerter (Slack, webhook, custom);
+skip dispatch entirely with `--no-alerts`.
 
 **Usage**:
 
@@ -129,7 +130,7 @@ $ chap-checker tui [OPTIONS]
 
 * `-c, --config PATH`: Path to a TOML config (defaults to ./chap-checker.toml if present).  [env var: CHAP_CHECKER_CONFIG]
 * `--interval FLOAT RANGE`: Refresh interval in seconds.  [default: 30.0; x&gt;=2.0]
-* `--alerts / --no-alerts`: Dispatch Slack/etc. alerts from refresh cycles. Off by default - the TUI is usually all you need; flip this on if you want it to also page.  [default: no-alerts]
+* `--alerts / --no-alerts`: Dispatch alerts (Slack, webhook, ...) from refresh cycles. Off by default - the TUI is usually all you need; flip this on if you want it to also page.  [default: no-alerts]
 * `--state PATH`: State file path (default: ./chap-checker.state.json next to the config).  [env var: CHAP_CHECKER_STATE]
 * `--connect TEXT`: Render a remote `chap-checker serve` daemon instead of running checks locally. Pass the base URL (e.g. http://tv-host:8765). Mutually exclusive with --config / --state / --alerts.
 * `--token TEXT`: Bearer token for an authenticated remote `chap-checker serve` (--connect mode only). Discouraged inline - the value lands in shell history and `ps` output; prefer --token-env.  [env var: CHAP_CHECKER_TOKEN]
@@ -163,7 +164,7 @@ $ chap-checker serve [OPTIONS]
 
 * `-c, --config PATH`: Path to a TOML config (defaults to ./chap-checker.toml if present).  [env var: CHAP_CHECKER_CONFIG]
 * `--interval FLOAT RANGE`: Server-side check refresh interval (seconds).  [default: 30.0; x&gt;=2.0]
-* `--alerts / --no-alerts`: Dispatch Slack/etc. alerts from refresh cycles. Off by default - the dashboard is usually all you need; flip this on if you want the daemon to also page.  [default: no-alerts]
+* `--alerts / --no-alerts`: Dispatch alerts (Slack, webhook, ...) from refresh cycles. Off by default - the dashboard is usually all you need; flip this on if you want the daemon to also page.  [default: no-alerts]
 * `--state PATH`: State file path (default: ./chap-checker.state.json next to the config).  [env var: CHAP_CHECKER_STATE]
 * `--host TEXT`: Bind address. Use 0.0.0.0 to expose on the local network (e.g. for a TV).  [default: 127.0.0.1]
 * `--port INTEGER RANGE`: Port to listen on.  [default: 8765; 1&lt;=x&lt;=65535]

@@ -106,9 +106,11 @@ alerts after every pod restart.
 
 ## What `alerts test` is NOT for
 
-`alerts test` posts a real Slack message every invocation. Put it behind a
-manual run (post-webhook-rotation sanity check), not a cron — daily synthetic
-messages are operationally annoying.
+`alerts test` posts a real message through every configured alerter on every
+invocation — a Slack post, a webhook POST, anything custom you've wired up.
+Put it behind a manual run (post-credential-rotation sanity check), not a
+cron — daily synthetic alerts are operationally annoying and burn through
+rate limits.
 
 ## Exit codes
 

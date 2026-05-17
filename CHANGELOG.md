@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Changed
+
+- **Docs and CLI help text generalised from "Slack alerts" to "Slack/webhook/custom alerters".** The site's landing page, the cron-deployment guide, the alerts opt-in example, and the typer help strings (which drive `docs/cli-reference.md`) all predated the generic webhook alerter and were misleading new readers into thinking Slack was the only supported transport. Surface behaviour is unchanged; only wording and the regenerated CLI reference move.
+
 ## [0.8.2] — 2026-05-16
 
 ### Fixed
