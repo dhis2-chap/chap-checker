@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Changed
+
+- **Alerts guide now documents the state-file concurrency lock.** The behaviour shipped in 0.8.1 (`alert_state_lock` around the full *load → compute → dispatch → save* cycle, 30s timeout, POSIX-only) was only described in the CHANGELOG until now. `docs/guides/alerts.md` § *State file* gains a *Concurrency lock* subsection covering acquisition, timeout behaviour, sidecar `<state>.lock` footprint, and the Windows-no-op caveat with the recommended single-dispatch-process pattern. The § *Delivery failure retry* paragraph also generalises away from Slack-only language and notes that retry is per-batch rather than per-alerter.
+
 ## [0.8.2] — 2026-05-16
 
 ### Fixed

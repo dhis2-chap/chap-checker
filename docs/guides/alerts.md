@@ -326,12 +326,19 @@ SKIPPED window).
 
 ## Delivery failure retry
 
-If an alerter throws (Slack 5xx, transport error), the dispatcher swallows
-the exception so it can't change the run's exit code — **but it does not
-save the new state**. The next run recomputes the same transition and
-retries. Operationally this means: a Slack outage during a real failure
-produces one alert on the next cron tick after Slack recovers, not zero
-alerts.
+If an alerter throws (5xx response, transport error, malformed reply), the
+dispatcher swallows the exception so it can't change the run's exit code —
+**but it does not save the new state**. The next run recomputes the same
+transition and retries. Operationally this means: a Slack (or webhook
+receiver) outage during a real failure produces one alert on the next
+cron tick after the receiver recovers, not zero alerts.
+
+The retry is per-batch, not per-alerter: if a single instance fans out to
+both `slack` and `webhook` and Slack errors while the webhook succeeds,
+the state isn't saved and **both** receivers see the transition again on
+the next tick. Per-alerter dedupe is a deliberate non-goal — operators
+running with two transports usually want at-least-once on every transport
+rather than partial silence.
 
 ## State file
 
@@ -353,8 +360,37 @@ is left on disk for human inspection.
 
 The parent directory is created on save (`mkdir -p`) so `--state
 /var/lib/chap-checker/state.json` on a fresh host doesn't crash dispatch.
-Concurrent writes use unique tmp files via `tempfile.mkstemp` so overlapping
+Individual writes use unique tmp files via `tempfile.mkstemp` so overlapping
 runs don't race on `os.replace`.
+
+### Concurrency lock
+
+The full *load → compute → dispatch → save* cycle is serialised across
+processes by an `fcntl.flock` on a sidecar `<state>.lock` file. Without
+the lock, two overlapping runs — an overdue cron tick colliding with a
+manual `chap-checker verify`, or `tui` (local mode) and `serve --alerts`
+sharing one state file — could each read the same prior state and
+re-emit the same transition, duplicating every alert to every receiver.
+
+- **Acquisition**: each runner opens the lock file `O_RDWR | O_CREAT`, takes
+  an exclusive non-blocking flock, and polls with `asyncio.sleep(0.1)` so
+  the daemon's event loop keeps serving HTTP while it waits.
+- **Timeout**: 30 seconds by default. On timeout the dispatcher logs at
+  WARNING and skips that tick's dispatch (state is left as-is so the next
+  tick recomputes the same transitions). The check loop and the run's
+  exit code are unaffected.
+- **Footprint**: a zero-byte `<state>.lock` file is created next to the
+  state file the first time dispatch runs. It is safe to delete when no
+  chap-checker process is running.
+
+!!! note "Windows"
+    The lock uses `fcntl`, which ships only on POSIX. On Windows the
+    context manager falls through to no-lock semantics — every write is
+    still atomic via `os.replace`, but two concurrent dispatch processes
+    on the same state file can still duplicate alerts. The supported
+    pattern on Windows is to run a single dispatch process: either
+    `chap-checker serve --alerts` *or* a cron-driven `verify`, not both
+    against the same state file.
 
 ## Message format
 
