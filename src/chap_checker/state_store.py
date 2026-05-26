@@ -250,6 +250,7 @@ def compute_transitions(
                 Transition(
                     kind=kind,
                     target_name=report.target_name,
+                    target_display_name=report.target_display_name,
                     target_url=report.target_url,
                     check_name=result.name,
                     previous_status=prev_status,

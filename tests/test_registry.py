@@ -37,6 +37,7 @@ def test_builtin_requires_reference_known_checks() -> None:
 def test_builtin_checks_run_in_dependency_order() -> None:
     names = [c.name for c in all_checks()]
     expected = [
+        "http_2xx",
         "dhis2_ping",
         "dhis2_system_info",
         "dhis2_chap_route",

@@ -60,6 +60,7 @@ class InstanceConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
+    name: str | None = None
     url: HttpUrl
     username: str | None = None
     password: str | None = None
@@ -163,6 +164,7 @@ class InstanceConfig(BaseModel):
 
         return TargetEntry(
             name=name,
+            display_name=self.name,
             target=self.to_target(default_retry_policy=default_retry_policy),
             check_names=self.checks,
             alerts=list(self.alerts),

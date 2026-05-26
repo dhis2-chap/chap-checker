@@ -119,7 +119,13 @@ DEFAULT_INIT_TEMPLATE = """\
 
 # A working example pointed at the public DHIS2 demo. Replace with your
 # own instance once you've confirmed the tool runs.
+#
+# Optional `name` sets the human label shown in the TUI / dashboard /
+# verify table / Slack message. The section key (`play` here) stays the
+# stable identifier - state-file dedup keys off it, so renaming `name`
+# later doesn't reset the instance's history.
 [instances.play]
+# name = "DHIS2 demo"
 url = "https://play.im.dhis2.org/dev"
 username = "admin"
 password = "district"

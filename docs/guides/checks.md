@@ -5,14 +5,16 @@ checks are recorded as `SKIPPED` and don't contact the server — so a single
 unreachable URL produces one alert (ping FAIL) instead of six cascading
 failures.
 
-Two namespaces:
+Three namespaces:
 
+- `http_*` — transport-level reachability probes that don't speak DHIS2.
 - `dhis2_*` — probes against DHIS2 itself.
 - `dhis2_chap_*` — probes against the `chap-core` service behind the DHIS2
   `chap` route.
 
 | Check                       | Endpoint                                          | Requires             |
 | --------------------------- | ------------------------------------------------- | -------------------- |
+| `http_2xx`                 | `GET <base_url>` (unauthenticated, follows redirects) | —                |
 | `dhis2_ping`                | `/api/me`                                         | —                    |
 | `dhis2_system_info`         | `/api/system/info`                                | `dhis2_ping`         |
 | `dhis2_chap_route`          | `/api/routes?filter=code:eq:chap`                 | `dhis2_ping`         |
@@ -29,6 +31,24 @@ chap-checker --json checks list      # JSON for tooling
 ```
 
 ## What each check does
+
+### `http_2xx`
+
+Unauthenticated `GET` against the instance's configured `url`. Follows
+redirects (up to five hops) and reports `OK` if the final response is in
+the `2xx` range — so a DHIS2 root that returns `302` to a login page is
+still `OK`. `FAIL` on any non-2xx final status, `ERROR` on transport
+failure (DNS / TLS / connect).
+
+Useful for distinguishing two failure shapes that otherwise look similar
+on the tile grid:
+
+- the reverse proxy / TLS terminator / load balancer in front of DHIS2 is
+  down (`http_2xx` FAILs, `dhis2_ping` ERRORs);
+- the front door is fine but the credentials are wrong or DHIS2 itself is
+  unhealthy (`http_2xx` OK, `dhis2_ping` FAILs).
+
+No `requires`, so it runs even if every other check is disabled.
 
 ### `dhis2_ping`
 

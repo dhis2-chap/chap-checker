@@ -117,7 +117,8 @@ def _build_slack_payload(transitions: list[Transition]) -> SlackPayload:
     for t in transitions:
         label = "FAILURE" if t.kind == "failure" else "RECOVERY"
         status_label = t.current_status.value.upper()
-        body = f"*{label} — `{t.target_name}`*\n{t.target_url}\n`{t.check_name}`  *{status_label}*  {t.message}"
+        display = t.target_display_name or t.target_name
+        body = f"*{label} — `{display}`*\n{t.target_url}\n`{t.check_name}`  *{status_label}*  {t.message}"
         attachments.append(
             SlackAttachment(
                 color=_color_for(t),
