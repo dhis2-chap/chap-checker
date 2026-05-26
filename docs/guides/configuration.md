@@ -16,6 +16,7 @@ concurrency = 5                     # how many instances to check in parallel
 
 # One [instances.<name>] block per DHIS2 server to monitor.
 [instances.prod]
+# name = "Production"              # optional human label for TUI / dashboard / Slack body
 url = "https://dhis2.example.com"
 username = "ops"
 password = "REPLACE_ME"            # OR set password_env, not both
@@ -47,6 +48,32 @@ The file carries passwords and webhook URLs — treat it like any other secret.
   or `webhook_url`.
 - Prefer the `*_env` variants (`password_env`, `webhook_url_env`) and keep the
   actual secret in your shell, secrets manager, or systemd `EnvironmentFile`.
+
+## Instance display name
+
+Each `[instances.<key>]` block accepts an optional `name = "..."` field. When
+set, that value is rendered everywhere a human sees the instance — the TUI
+tile header, the browser dashboard card title, the `verify` Rich-table
+heading, and the bold target line in the Slack alert body. When unset, the
+section key is used (the historical behaviour).
+
+The section key is always the **stable identifier**: state-file dedup keys,
+React keys in the browser dashboard, and log lines all use the key, not the
+label. That means you can rename `name` whenever you like — the instance's
+transition history and any pending recovery alert survive the rename. It
+also means two different `[instances.<key>]` blocks can carry the same
+`name` if you want them to read the same on the dashboard while remaining
+distinct entities to the alerting state machine.
+
+```toml
+[instances.chap-modeling-platform]
+name = "CHAP Modeling Platform"
+url  = "https://chap.dhis2.org/chap-modeling-platform/"
+```
+
+The generic JSON output (`verify --json`, the `/api/state` endpoint, the
+webhook envelope) exposes both: `target_name` (section key) and
+`target_display_name` (the label, or `null` if unset).
 
 ## Per-instance check filter
 

@@ -12,6 +12,7 @@ from chap_checker.checks import (
     dhis2_chap_system_info,
     dhis2_ping,
     dhis2_system_info,
+    http_2xx,
 )
 from chap_checker.checks.base import (
     Check,
@@ -34,6 +35,7 @@ __all__ = [
     "dhis2_chap_system_info",
     "dhis2_ping",
     "dhis2_system_info",
+    "http_2xx",
     "register_check",
     "resolve_checks",
 ]

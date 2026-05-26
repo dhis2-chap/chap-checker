@@ -158,7 +158,7 @@ function Card({ inst, statusMode, density, centerViz, showUrl, showChecks, showM
           fontSize: wall ? 'clamp(48px, 7vw, 96px)' : tv ? 'clamp(28px, 3.2vw, 48px)' : 'var(--fs-title)',
           letterSpacing: '0.02em',
         }}>
-          {dot}{inst.name}
+          {dot}{inst.display_name || inst.name}
         </div>
         <div style={{ display:'flex', alignItems:'center', gap: tv ? 14 : 10 }}>
           <div style={{
@@ -271,7 +271,7 @@ function DownCard({ inst, density, showUrl, showChecks, showMetrics }) {
             marginRight: tv?14:8, verticalAlign:'middle',
             animation: 'pulseDown 0.8s ease-in-out infinite',
           }} />
-          {inst.name}
+          {inst.display_name || inst.name}
         </div>
         <div style={{ display:'flex', alignItems:'center', gap: tv ? 14 : 10 }}>
           <div style={{

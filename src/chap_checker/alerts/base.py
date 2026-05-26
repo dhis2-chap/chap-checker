@@ -28,6 +28,7 @@ class Transition(BaseModel):
 
     kind: TransitionKind
     target_name: str
+    target_display_name: str | None = None
     target_url: str
     check_name: str
     previous_status: Status

@@ -7,7 +7,13 @@
 # restrictive permissions (chmod 600 chap-checker.toml).
 
 # Production instance: opts in to Slack alerts on every transition.
+# Optional `name` sets a human-readable label shown in the TUI, the
+# browser dashboard, the verify table and the Slack message body. The
+# TOML section key (`example` here) stays the stable identifier used
+# for state-file dedup and logs, so changing `name` later doesn't reset
+# the instance's transition history.
 [instances.example]
+name = "Production"
 url = "https://dhis2.example.com"
 username = "REPLACE_ME"
 password = "REPLACE_ME"

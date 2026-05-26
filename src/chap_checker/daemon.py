@@ -82,9 +82,17 @@ class HistoryPointModel(BaseModel):
 
 
 class TileModel(BaseModel):
-    """One tile's data — the shared view model used by both surfaces."""
+    """One tile's data — the shared view model used by both surfaces.
+
+    ``name`` is the stable identifier (the TOML section key under
+    ``[instances.<name>]``) and is what state-file dedup, React keys,
+    and logs use. ``display_name`` is the optional human label set via
+    ``[instances.<name>].name``; both surfaces fall back to ``name`` when
+    it's ``None``.
+    """
 
     name: str
+    display_name: str | None = None
     url: str
     version: str | None = None
     worst_status: Status
@@ -275,6 +283,7 @@ class DashboardServer(BaseModel):
         if report is None:
             return TileModel(
                 name=entry.name,
+                display_name=entry.display_name,
                 url=url,
                 worst_status=Status.SKIPPED,
                 ok_count=0,
@@ -291,6 +300,7 @@ class DashboardServer(BaseModel):
         uptime_pct: float | None = (100 * t.ping_ok / t.ping_total) if t.ping_total > 0 else None
         return TileModel(
             name=entry.name,
+            display_name=entry.display_name,
             url=url,
             version=extract_dhis2_version(report.results),
             worst_status=w,
