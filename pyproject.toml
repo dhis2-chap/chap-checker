@@ -22,7 +22,8 @@ dependencies = [
   "pydantic>=2.9.0",
   "rich>=13.9.0",
   "textual>=8.0.0",
-  "fastapi>=0.115.0",
+  "fastapi>=0.136.3",
+  "starlette>=1.0.1",             # explicit floor; transitive via fastapi
   "uvicorn[standard]>=0.30.0",
   "dhis2w-client>=0.14.0",
 ]
