@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.8.3] — 2026-05-27
+
 ### Changed
 
 - **Bumped `fastapi` and `starlette` floors.** `fastapi>=0.136.3` (was `>=0.115.0`) and a new explicit `starlette>=1.0.1` direct dep alongside it. Lock now resolves to fastapi 0.136.3 and starlette 1.1.0 (was 0.136.1 and 1.0.0). Brings the API surface in line with the rest of the chap stack.
@@ -213,7 +215,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 For 0.1.x / 0.2.x release notes, see the [GitHub Releases page](https://github.com/dhis2-chap/chap-checker/releases).
 
-[Unreleased]: https://github.com/dhis2-chap/chap-checker/compare/v0.8.2...HEAD
+[Unreleased]: https://github.com/dhis2-chap/chap-checker/compare/v0.8.3...HEAD
+[0.8.3]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.8.3
 [0.8.2]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.8.2
 [0.8.1]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.8.1
 [0.8.0]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.8.0
