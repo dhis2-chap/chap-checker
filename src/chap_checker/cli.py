@@ -10,7 +10,6 @@ from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 
-import click
 import typer
 from pydantic import BaseModel, Field
 from rich.console import Console
@@ -45,6 +44,18 @@ from chap_checker.state_store import (
 )
 
 _log = get_logger("cli")
+
+
+def _from_commandline(ctx: typer.Context, name: str) -> bool:
+    """Return True if ``name`` was passed on the command line (not env/default).
+
+    Compares the parameter source by enum *name* rather than identity. Typer
+    vendors its own copy of click (``typer._click``), so its ``ParameterSource``
+    is a distinct enum from the public ``click.core.ParameterSource`` and an
+    ``is``/``==`` check against the latter is always False.
+    """
+    source = ctx.get_parameter_source(name)
+    return source is not None and source.name == "COMMANDLINE"
 
 
 class AlertTestResult(BaseModel):
@@ -341,8 +352,7 @@ def verify_command(
     # check below doesn't fire on a passive `DHIS2_PASSWORD` leaking
     # into a `--token-env` invocation.
     cli_source = {
-        name: ctx.get_parameter_source(name) == click.core.ParameterSource.COMMANDLINE
-        for name in ("password", "password_env", "token", "token_env", "username")
+        name: _from_commandline(ctx, name) for name in ("password", "password_env", "token", "token_env", "username")
     }
     targets, cfg, config_path = _resolve_run_context(
         config=config,
@@ -462,11 +472,11 @@ def tui_command(
         # `--config`, `--state`, and `--alerts` only apply to local mode.
         # In connect mode the daemon owns those concerns.
         conflicts: list[str] = []
-        if ctx.get_parameter_source("config") == click.core.ParameterSource.COMMANDLINE:
+        if _from_commandline(ctx, "config"):
             conflicts.append("--config")
-        if ctx.get_parameter_source("state") == click.core.ParameterSource.COMMANDLINE:
+        if _from_commandline(ctx, "state"):
             conflicts.append("--state")
-        if ctx.get_parameter_source("alerts_enabled") == click.core.ParameterSource.COMMANDLINE:
+        if _from_commandline(ctx, "alerts_enabled"):
             conflicts.append("--alerts/--no-alerts")
         if conflicts:
             raise typer.BadParameter(
@@ -499,10 +509,7 @@ def tui_command(
 
     # `--token` / `--token-env` only make sense with --connect; flag the
     # combination early instead of silently dropping the credential.
-    if (
-        ctx.get_parameter_source("token") == click.core.ParameterSource.COMMANDLINE
-        or ctx.get_parameter_source("token_env") == click.core.ParameterSource.COMMANDLINE
-    ):
+    if _from_commandline(ctx, "token") or _from_commandline(ctx, "token_env"):
         raise typer.BadParameter(
             "--token / --token-env only apply with --connect URL. Drop the flag for local-mode runs.",
         )

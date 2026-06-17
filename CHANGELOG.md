@@ -6,6 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Fixed
+
+- **CLI flag-source detection no longer silently no-ops under typer 0.26.** typer 0.26 vendors its own copy of click (`typer._click`), so `Context.get_parameter_source()` now returns a `typer._click.core.ParameterSource` enum that is never equal to the public `click.core.ParameterSource`. Every `== click.core.ParameterSource.COMMANDLINE` comparison in `cli.py` had quietly become always-False, disabling the `verify` auth-flag mutex (`--password`/`--token`/...) and the `tui --connect` conflict checks (`--config`/`--state`/`--alerts`/`--token`). Comparisons now match on the enum *name* via a `_from_commandline()` helper, independent of which click each value comes from.
+
+### Changed
+
+- **Bumped dependencies to current releases.** Direct deps now declare `typer>=0.26.7`, `textual>=8.2.7`, `fastapi>=0.137.1`, `starlette>=1.3.1`, `uvicorn[standard]>=0.49.0`, and `dhis2w-client>=0.22.0`; dev tooling moves to `pytest>=9.1.0`, `pytest-asyncio>=1.4.0`, `ruff>=0.15.17`, `pyright>=1.1.410`, `playwright>=1.60.0`, and `coverage>=7.14.1`. Lockfile refreshed across all transitive packages.
+- **Added `httpx2` to the dev group.** starlette 1.3's `TestClient` prefers `httpx2` and emits a deprecation warning when it falls back to plain `httpx`; installing it for tests silences the warning. Runtime code still uses `httpx` directly.
+
 ## [0.8.3] — 2026-05-27
 
 ### Changed
