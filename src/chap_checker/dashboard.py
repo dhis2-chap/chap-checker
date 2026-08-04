@@ -574,15 +574,16 @@ class InstanceTile(Container):
     }
     """
 
-    def __init__(self, name: str, url: str) -> None:
+    def __init__(self, name: str, url: str, display_name: str | None = None) -> None:
         super().__init__()
         self.tile_name = name
+        self.tile_display_name = display_name or name
         self.tile_url = url
         self._model: TileModel | None = None
 
     def compose(self) -> ComposeResult:
         with Horizontal(classes="row"):
-            yield Static(self.tile_name.upper(), classes="tile-name")
+            yield Static(self.tile_display_name.upper(), classes="tile-name")
             yield Static("", classes="tile-version", id="version")
         yield Static(f"⊕ {self.tile_url}", classes="tile-url")
         with Horizontal(classes="row"):
@@ -951,7 +952,7 @@ class DashboardApp(App[None]):
         grid.styles.grid_size_rows = rows
         with grid:
             for tile_model in self._initial_state.tiles:
-                tile = InstanceTile(tile_model.name, tile_model.url)
+                tile = InstanceTile(tile_model.name, tile_model.url, tile_model.display_name)
                 tile.apply_model(tile_model)
                 self.tiles[tile_model.name] = tile
                 yield tile
@@ -1117,7 +1118,7 @@ class DashboardApp(App[None]):
             await tile.remove()
         for name, tile_model in incoming.items():
             if name not in self.tiles:
-                new_tile = InstanceTile(name, tile_model.url)
+                new_tile = InstanceTile(name, tile_model.url, tile_model.display_name)
                 self.tiles[name] = new_tile
                 await grid.mount(new_tile)
             self.tiles[name].apply_model(tile_model)

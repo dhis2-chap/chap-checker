@@ -92,10 +92,12 @@ Pair them: run `chap-checker serve` somewhere persistent (a small VM, the TV mac
 
 ## Built-in checks
 
-Two namespaces — `dhis2_*` probes DHIS2 itself, `dhis2_chap_*` probes
-chap-core through the DHIS2 route. Each tile in the dashboard, each row in
+Three namespaces — `http_*` is a transport-level reachability probe,
+`dhis2_*` probes DHIS2 itself, `dhis2_chap_*` probes chap-core through the
+DHIS2 route. Each tile in the dashboard, each row in
 `chap-checker checks list`, each entry in the JSON output:
 
+- `http_2xx` — unauthenticated `GET <base_url>`, asserts the final response is 2xx (follows redirects)
 - `dhis2_ping` — `/api/me`
 - `dhis2_system_info` — `/api/system/info`
 - `dhis2_chap_route` — `/api/routes?filter=code:eq:chap`

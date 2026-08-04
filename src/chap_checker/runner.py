@@ -28,6 +28,7 @@ class TargetEntry(BaseModel):
     """
 
     name: str
+    display_name: str | None = None
     target: Dhis2Target
     check_names: list[str] | None = None
     alerts: list[str] = Field(default_factory=list)
@@ -47,6 +48,7 @@ class RunReport(BaseModel):
     """Results for a single target."""
 
     target_name: str
+    target_display_name: str | None = None
     target_url: str
     results: list[CheckResult] = Field(default_factory=list)
 
@@ -141,6 +143,7 @@ async def run_targets(targets: list[TargetEntry], concurrency: int = 5) -> list[
             results = await run_checks(entry.target, checks)
             return RunReport(
                 target_name=entry.name,
+                target_display_name=entry.display_name,
                 target_url=str(entry.target.base_url),
                 results=results,
             )

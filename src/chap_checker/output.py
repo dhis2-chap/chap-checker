@@ -48,7 +48,7 @@ def _render_tables(reports: list[RunReport]) -> None:
     # is simpler than pre-scanning the reports and produces identical
     # column layout across all per-target tables.
     for report in reports:
-        title = f"chap-checker - {report.target_name} - {report.target_url}"
+        title = f"chap-checker - {report.target_display_name or report.target_name} - {report.target_url}"
         # `expand=True` makes the table fill the terminal; without
         # `ratio=1` on Message, Rich distributes the extra width across
         # every column proportionally and the fixed `width=` values get

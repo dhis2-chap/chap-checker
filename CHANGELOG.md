@@ -6,6 +6,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+
+- **New built-in check `http_2xx`** — unauthenticated `GET` on the instance's configured `url`, follows redirects up to five hops, reports `OK` when the final response is `2xx`. Sends no credentials and runs before `dhis2_ping` (`order = 5`), with no `requires` so it stays decoupled from the DHIS2-specific chain. Distinguishes a TLS / reverse-proxy / load-balancer outage (`http_2xx` FAIL, `dhis2_ping` ERROR) from an auth or DHIS2-level failure (`http_2xx` OK, `dhis2_ping` FAIL). Implemented in `src/chap_checker/checks/http_2xx.py` using a stand-alone `httpx.AsyncClient` instead of routing through `Dhis2Client`. Docs and the README built-in-checks list updated; tests in `tests/test_http_2xx.py`.
+- **Optional `name` field on `[instances.<key>]`** — sets a human-readable label shown in the TUI tile header, browser dashboard card, `verify` Rich-table heading, and the Slack alert body. The TOML section key remains the stable identifier (state-file dedup keys off it, so renaming `name` later doesn't reset the instance's transition history). The JSON surfaces (`verify --json`, `/api/state`, the webhook envelope) expose both `target_name` (key) and `target_display_name` (label). New field threaded through `InstanceConfig` → `TargetEntry.display_name` → `RunReport.target_display_name` → `TileModel.display_name` → `Transition.target_display_name`, and through `_state.js`'s `/api/state` → view-model mapping so the browser card receives it. Tests in `tests/test_display_name.py`.
+
 ### Fixed
 
 - **CLI flag-source detection no longer silently no-ops under typer 0.26.** typer 0.26 vendors its own copy of click (`typer._click`), so `Context.get_parameter_source()` now returns a `typer._click.core.ParameterSource` enum that is never equal to the public `click.core.ParameterSource`. Every `== click.core.ParameterSource.COMMANDLINE` comparison in `cli.py` had quietly become always-False, disabling the `verify` auth-flag mutex (`--password`/`--token`/...) and the `tui --connect` conflict checks (`--config`/`--state`/`--alerts`/`--token`). Comparisons now match on the enum *name* via a `_from_commandline()` helper, independent of which click each value comes from.
