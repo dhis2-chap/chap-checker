@@ -6,10 +6,10 @@ import re
 from enum import StrEnum
 from typing import Any, ClassVar, Protocol, TypeVar, cast, runtime_checkable
 
-from dhis2w_client import Dhis2, Dhis2Client
+from dhis2w_client import Dhis2
 from pydantic import BaseModel, ConfigDict, Field
 
-from chap_checker.client import Dhis2Target
+from chap_checker.client import BaseTarget
 
 _VERSION_RE = re.compile(r"^(\d+)\.(\d+)")
 
@@ -101,9 +101,7 @@ def diagnose_status(
             msg = f"Forbidden (403) on {path} - authenticated but the user lacks the required authority."
         return msg, details
     if status_code == 404:
-        msg = not_found_meaning or (
-            f"{path} returned 404 - the endpoint is missing on this server (unexpected on DHIS2)."
-        )
+        msg = not_found_meaning or (f"{path} returned 404 - the endpoint is missing on this server.")
         return msg, details
     return f"Unexpected status {status_code} on {path}.", details
 
@@ -149,13 +147,17 @@ class CheckContext(BaseModel):
     context in place between checks, so a check should treat its
     contents as a snapshot at the moment `run()` was called.
 
+    `target` is the :class:`~chap_checker.client.BaseTarget` subclass for
+    the instance's kind (`Dhis2Target` or `OcsTarget`). Every kind carries
+    `base_url`, `timeout_s` and `verify_tls`.
+
     Custom checks that don't need any of this can ignore the `ctx`
     argument entirely - it's there for the checks that do.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    target: Dhis2Target
+    target: BaseTarget
     dhis2_version: Dhis2 | None = None
     prior_results: dict[str, CheckResult] = Field(default_factory=dict)
 
@@ -173,9 +175,19 @@ class Check(Protocol):
     this check and records :attr:`Status.SKIPPED`, suppressing cascade noise
     when a foundational check fails.
 
-    The runner passes both an opened ``Dhis2Client`` and a
-    :class:`CheckContext`. Most checks only need ``client``; the context
-    is there for checks that want to:
+    The runner passes both an opened client and a :class:`CheckContext`.
+    The client is whatever the target's ``open()`` returns: a
+    ``Dhis2Client`` for DHIS2 instances, an ``httpx2.AsyncClient`` rooted
+    at the server for OCS instances.
+
+    A check declares which instance kinds it applies to with an optional
+    ``kinds: ClassVar[frozenset[str]]`` attribute (read through
+    :func:`check_kinds`). It is deliberately not part of this Protocol so
+    custom checks written before kinds existed keep satisfying
+    ``isinstance(obj, Check)``; a check without it applies to DHIS2 only.
+
+    Most checks only need ``client``; the context is there for checks
+    that want to:
 
     - read the detected DHIS2 version (`ctx.dhis2_version`) to pick a
       version-typed payload parser from `dhis2w_client.generated.v4*`,
@@ -189,7 +201,7 @@ class Check(Protocol):
     order: ClassVar[int]
     requires: ClassVar[list[str]]
 
-    async def run(self, client: Dhis2Client, ctx: CheckContext) -> CheckResult:
+    async def run(self, client: Any, ctx: CheckContext) -> CheckResult:
         """Execute the check against `client` and return a result.
 
         `ctx` is mutable shared state for the target's run. Reading
@@ -198,6 +210,15 @@ class Check(Protocol):
         `/api/system/info`) is a deliberate signal to later checks.
         """
         ...
+
+
+DEFAULT_CHECK_KINDS: frozenset[str] = frozenset({"dhis2"})
+
+
+def check_kinds(check: Check) -> frozenset[str]:
+    """Return the instance kinds ``check`` applies to (default: DHIS2 only)."""
+    kinds: frozenset[str] = getattr(check, "kinds", DEFAULT_CHECK_KINDS)
+    return kinds
 
 
 _REGISTRY: list[Check] = []
@@ -234,18 +255,21 @@ def all_checks() -> list[Check]:
     return sorted(_REGISTRY, key=lambda c: (c.order, c.name))
 
 
-def resolve_checks(names: list[str] | None) -> list[Check]:
-    """Resolve check ``names`` into :class:`Check` instances.
+def resolve_checks(names: list[str] | None, kind: str = "dhis2") -> list[Check]:
+    """Resolve check ``names`` into :class:`Check` instances for a ``kind`` of instance.
 
-    Returns every registered check when ``names`` is ``None``. Otherwise
-    returns the named checks plus the transitive closure of their
-    ``requires``, so a partial selection always has its prerequisites
-    available. Output is in the canonical ``(order, name)`` order.
+    Returns every registered check that applies to ``kind`` when ``names``
+    is ``None``. Otherwise returns the named checks plus the transitive
+    closure of their ``requires``, so a partial selection always has its
+    prerequisites available. Named checks that don't apply to ``kind`` are
+    dropped (config validation rejects them up front; this keeps the CLI's
+    cross-instance ``--check`` override from running a DHIS2 check against
+    an OCS server). Output is in the canonical ``(order, name)`` order.
 
     Raises ``KeyError`` if any name doesn't match a registered check.
     """
     if names is None:
-        return all_checks()
+        return [c for c in all_checks() if kind in check_kinds(c)]
 
     by_name = {c.name: c for c in all_checks()}
     selected: set[str] = set()
@@ -262,6 +286,8 @@ def resolve_checks(names: list[str] | None) -> list[Check]:
         selected.add(name)
 
     for n in names:
+        if n in by_name and kind not in check_kinds(by_name[n]):
+            continue
         _add(n)
 
     return [c for c in all_checks() if c.name in selected]

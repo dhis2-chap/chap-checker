@@ -58,7 +58,7 @@ src/chap_checker/
 
 ## Adding things
 
-- **A new check** — see `docs/guides/custom-checks.md`. Short version: subclass `Check` (Protocol), decorate with `@register_check`, add the module import to `src/chap_checker/checks/__init__.py`.
+- **A new check** — see `docs/guides/custom-checks.md`. Short version: subclass `Check` (Protocol), set `kinds` if it isn't DHIS2-only, decorate with `@register_check`, add the module import to `src/chap_checker/checks/__init__.py`.
 - **A new alerter** — see `docs/guides/alerts.md`. Short version: subclass `WebhookAlerter` if it's an HTTP receiver (just override `_build_payload`), or implement `Alerter` directly otherwise. Decorate with `@register_alerter("name")`, add a `[alerts.<name>]` config model in `config.py`, and add the module import to `src/chap_checker/alerts/__init__.py`. Ship a `toml_example` ClassVar so `chap-checker alerts list` can show your alerter to operators.
 
 ## Pull requests

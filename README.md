@@ -7,7 +7,9 @@
 [![Documentation](https://img.shields.io/badge/docs-mkdocs-blue.svg)](https://dhis2-chap.github.io/chap-checker/)
 
 A small command-line health-check and alerting tool for DHIS2 instances that
-integrate with `chap-core` via a DHIS2 route. Cron-friendly, with optional
+integrate with `chap-core` via a DHIS2 route, and for
+[Open Climate Service](https://github.com/dhis2/open-climate-service)
+deployments (`kind = "ocs"`). Cron-friendly, with optional
 Slack / generic-webhook alerts on status transitions, a long-running
 daemon that exposes a browser dashboard (designed for a TV / kiosk) and a
 JSON state API, and a Textual TUI for the operator-at-a-desk view (locally
@@ -92,10 +94,12 @@ Pair them: run `chap-checker serve` somewhere persistent (a small VM, the TV mac
 
 ## Built-in checks
 
-Three namespaces — `http_*` is a transport-level reachability probe,
-`dhis2_*` probes DHIS2 itself, `dhis2_chap_*` probes chap-core through the
-DHIS2 route. Each tile in the dashboard, each row in
-`chap-checker checks list`, each entry in the JSON output:
+Four namespaces — `http_*` is a transport-level reachability probe for
+every instance kind, `dhis2_*` probes DHIS2 itself, `dhis2_chap_*` probes
+chap-core through the DHIS2 route, and `ocs_*` probes an Open Climate
+Service deployment. An instance only runs the checks for its `kind`. Each
+tile in the dashboard, each row in `chap-checker checks list`, each entry in
+the JSON output:
 
 - `http_2xx` — unauthenticated `GET <base_url>`, asserts the final response is 2xx (follows redirects)
 - `dhis2_ping` — `/api/me`
@@ -105,6 +109,8 @@ DHIS2 route. Each tile in the dashboard, each row in
 - `dhis2_chap_system_info` — `/api/routes/chap/run/system/info`
 - `dhis2_chap_modeling_app` — `/api/apps` (matched by `app_hub_id`)
 - `dhis2_chap_climate_app` — `/api/apps` (matched by `app_hub_id`)
+- `ocs_health` — `/health` (liveness only)
+- `ocs_info` — `/info` + `/` (version and openEO capabilities)
 
 Full reference + endpoint details: [Checks](https://dhis2-chap.github.io/chap-checker/guides/checks/).
 

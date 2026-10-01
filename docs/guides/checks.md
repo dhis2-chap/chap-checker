@@ -5,23 +5,45 @@ checks are recorded as `SKIPPED` and don't contact the server — so a single
 unreachable URL produces one alert (ping FAIL) instead of six cascading
 failures.
 
-Three namespaces:
+Each check applies to one or more instance kinds (see
+[Instance kinds](configuration.md#instance-kinds)). An instance only runs the
+checks for its kind; `chap-checker checks list` shows the kinds per check.
 
-- `http_*` — transport-level reachability probes that don't speak DHIS2.
-- `dhis2_*` — probes against DHIS2 itself.
+Four namespaces:
+
+- `http_*` — transport-level reachability probes that don't speak DHIS2. Apply
+  to every kind.
+- `dhis2_*` — probes against DHIS2 itself (`kind = "dhis2"`).
 - `dhis2_chap_*` — probes against the `chap-core` service behind the DHIS2
-  `chap` route.
+  `chap` route (`kind = "dhis2"`).
+- `ocs_*` — probes against an Open Climate Service deployment
+  (`kind = "ocs"`).
 
-| Check                       | Endpoint                                          | Requires             |
-| --------------------------- | ------------------------------------------------- | -------------------- |
-| `http_2xx`                 | `GET <base_url>` (unauthenticated, follows redirects) | —                |
-| `dhis2_ping`                | `/api/me`                                         | —                    |
-| `dhis2_system_info`         | `/api/system/info`                                | `dhis2_ping`         |
-| `dhis2_chap_route`          | `/api/routes?filter=code:eq:chap`                 | `dhis2_ping`         |
-| `dhis2_chap_ping`           | `/api/routes/chap/run/health`                     | `dhis2_chap_route`   |
-| `dhis2_chap_system_info`    | `/api/routes/chap/run/system/info` (parsed)       | `dhis2_chap_ping`    |
-| `dhis2_chap_modeling_app`   | `/api/apps` (matched by `app_hub_id`)             | `dhis2_chap_route`   |
-| `dhis2_chap_climate_app`    | `/api/apps` (matched by `app_hub_id`)             | `dhis2_chap_route`   |
+| Check                       | Kinds        | Endpoint                                              | Requires             |
+| --------------------------- | ------------ | ----------------------------------------------------- | -------------------- |
+| `http_2xx`                  | dhis2, ocs   | `GET <base_url>` (unauthenticated, follows redirects) | —                    |
+| `dhis2_ping`                | dhis2        | `/api/me`                                             | —                    |
+| `dhis2_system_info`         | dhis2        | `/api/system/info`                                    | `dhis2_ping`         |
+| `dhis2_chap_route`          | dhis2        | `/api/routes?filter=code:eq:chap`                     | `dhis2_ping`         |
+| `dhis2_chap_ping`           | dhis2        | `/api/routes/chap/run/health`                         | `dhis2_chap_route`   |
+| `dhis2_chap_system_info`    | dhis2        | `/api/routes/chap/run/system/info` (parsed)           | `dhis2_chap_ping`    |
+| `dhis2_chap_modeling_app`   | dhis2        | `/api/apps` (matched by `app_hub_id`)                 | `dhis2_chap_route`   |
+| `dhis2_chap_climate_app`    | dhis2        | `/api/apps` (matched by `app_hub_id`)                 | `dhis2_chap_route`   |
+| `ocs_health`                | ocs          | `/health`                                             | —                    |
+| `ocs_info`                  | ocs          | `/info` + `/` (openEO capabilities)                   | `ocs_health`         |
+
+### Open Climate Service checks
+
+- **`ocs_health`** is a liveness signal only. OCS's `/health` reports that the
+  API process is up; it does not probe storage, the job service or the
+  scheduler. `degraded` maps to `WARN`, anything other than `healthy` to
+  `FAIL`, and a 404 is reported as "does not look like an Open Climate
+  Service" (a common sign of a wrong URL).
+- **`ocs_info`** reads the service version from `/info` (`app_version`) and the
+  openEO capabilities document from `/` (`api_version`, backend `id`). The
+  version feeds the dashboard tile label (`OCS 0.1.0`), and `read_only` is
+  reported in the message because public demo deployments run read-only on
+  purpose.
 
 List them at runtime:
 

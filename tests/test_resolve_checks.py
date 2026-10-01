@@ -3,8 +3,26 @@ import pytest
 from chap_checker.checks import all_checks, resolve_checks
 
 
-def test_none_returns_every_registered_check() -> None:
-    assert {c.name for c in resolve_checks(None)} == {c.name for c in all_checks()}
+def test_none_returns_every_check_for_the_kind() -> None:
+    dhis2 = {c.name for c in resolve_checks(None)}
+    ocs = {c.name for c in resolve_checks(None, kind="ocs")}
+    assert dhis2 | ocs == {c.name for c in all_checks()}
+    assert dhis2 & ocs == {"http_2xx"}
+    assert {c.name for c in resolve_checks(None, kind="dhis2")} == dhis2
+
+
+def test_names_for_another_kind_are_dropped() -> None:
+    assert [c.name for c in resolve_checks(["dhis2_ping", "ocs_info"], kind="ocs")] == ["ocs_health", "ocs_info"]
+    assert [c.name for c in resolve_checks(["dhis2_ping", "ocs_info"], kind="dhis2")] == ["dhis2_ping"]
+
+
+def test_only_other_kind_names_resolve_to_empty() -> None:
+    assert resolve_checks(["dhis2_system_info"], kind="ocs") == []
+
+
+def test_shared_check_resolves_for_both_kinds() -> None:
+    assert [c.name for c in resolve_checks(["http_2xx"], kind="ocs")] == ["http_2xx"]
+    assert [c.name for c in resolve_checks(["http_2xx"], kind="dhis2")] == ["http_2xx"]
 
 
 def test_named_subset_returns_only_those() -> None:

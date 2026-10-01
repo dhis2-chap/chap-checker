@@ -7,8 +7,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, computed_field
 
-from chap_checker.checks.base import Check, CheckContext, CheckResult, Status, all_checks, resolve_checks
-from chap_checker.client import Dhis2Target
+from chap_checker.checks.base import Check, CheckContext, CheckResult, Status, resolve_checks
+from chap_checker.client import BaseTarget
 from chap_checker.logging import get_logger
 
 _log = get_logger("runner")
@@ -18,7 +18,8 @@ class TargetEntry(BaseModel):
     """A named target ready to be checked.
 
     ``check_names`` lets the caller restrict which checks run against this
-    target. ``None`` means "every registered check". A non-empty list is
+    target. ``None`` means "every registered check for the target's kind".
+    A non-empty list is
     resolved via :func:`chap_checker.checks.base.resolve_checks`, which
     also pulls in any transitive ``requires``.
 
@@ -29,7 +30,7 @@ class TargetEntry(BaseModel):
 
     name: str
     display_name: str | None = None
-    target: Dhis2Target
+    target: BaseTarget
     check_names: list[str] | None = None
     alerts: list[str] = Field(default_factory=list)
 
@@ -49,6 +50,7 @@ class RunReport(BaseModel):
 
     target_name: str
     target_display_name: str | None = None
+    target_kind: str = "dhis2"
     target_url: str
     results: list[CheckResult] = Field(default_factory=list)
 
@@ -83,15 +85,15 @@ class VerifyReport(BaseModel):
         return all(r.ok for r in self.runs)
 
 
-async def run_checks(target: Dhis2Target, checks: list[Check] | None = None) -> list[CheckResult]:
-    """Run ``checks`` (default: all registered) against ``target`` sequentially.
+async def run_checks(target: BaseTarget, checks: list[Check] | None = None) -> list[CheckResult]:
+    """Run ``checks`` (default: all registered for its kind) against ``target`` sequentially.
 
     A check whose ``requires`` includes any prior result that is not ``OK``
     is skipped (status :attr:`Status.SKIPPED`) without contacting the server.
     This stops the cascade where one failed foundational check produces N
     inevitable downstream failures.
     """
-    selected = checks if checks is not None else all_checks()
+    selected = checks if checks is not None else resolve_checks(None, kind=target.kind)
     results: list[CheckResult] = []
     results_by_name: dict[str, CheckResult] = {}
     ctx = CheckContext(target=target)
@@ -125,9 +127,9 @@ async def run_targets(targets: list[TargetEntry], concurrency: int = 5) -> list[
     """Run each :class:`TargetEntry`'s checks, up to ``concurrency`` in parallel.
 
     If ``entry.check_names`` is set, it picks the checks (and their transitive
-    ``requires``); otherwise every registered check runs. Each target uses
-    its own upstream ``Dhis2Client`` so there is no shared HTTP state between
-    parallel runs. Reports come back in the input order (``asyncio.gather``
+    ``requires``); otherwise every registered check for the target's kind
+    runs. Each target opens its own client so there is no shared HTTP
+    state between parallel runs. Reports come back in the input order (``asyncio.gather``
     preserves it), so per-target tables render in the same order the
     instances appear in the config.
     """
@@ -139,11 +141,12 @@ async def run_targets(targets: list[TargetEntry], concurrency: int = 5) -> list[
     async def _bounded(entry: TargetEntry) -> RunReport:
         async with sem:
             _log.debug("running target %s", entry.name)
-            checks = resolve_checks(entry.check_names)
+            checks = resolve_checks(entry.check_names, kind=entry.target.kind)
             results = await run_checks(entry.target, checks)
             return RunReport(
                 target_name=entry.name,
                 target_display_name=entry.display_name,
+                target_kind=entry.target.kind,
                 target_url=str(entry.target.base_url),
                 results=results,
             )

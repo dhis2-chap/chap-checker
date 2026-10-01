@@ -43,6 +43,15 @@ url = "https://dhis2.example.net"
 # Recommended:
 token_env = "EXAMPLE_DHIS2_TOKEN"
 
+# Open Climate Service (openEO backend) deployment. `kind` defaults to
+# "dhis2"; set it to "ocs" for OCS servers. OCS has no auth, so there are
+# no credential fields (setting one is a validation error), the top-level
+# [retry] block does not apply, and only the http_2xx / ocs_* checks run.
+[instances.nepal-ocs]
+kind = "ocs"
+name = "Nepal climate service"
+url = "https://ocs-demo-nepal.dhis2.org"
+
 # Optional per-instance overrides (shown with their defaults):
 # timeout_s = 10.0
 # verify_tls = true

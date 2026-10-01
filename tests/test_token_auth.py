@@ -19,7 +19,7 @@ from typer.testing import CliRunner
 
 from chap_checker.cli import _resolve_adhoc_token, app
 from chap_checker.client import Dhis2Target
-from chap_checker.config import InstanceConfig
+from chap_checker.config import Dhis2InstanceConfig
 
 runner = CliRunner()
 
@@ -93,7 +93,7 @@ def test_client_sends_apitoken_header() -> None:
 
 
 def test_instance_token_inline() -> None:
-    cfg = InstanceConfig(url=cast(HttpUrl, "https://x.example"), token="t0k3n")
+    cfg = Dhis2InstanceConfig(url=cast(HttpUrl, "https://x.example"), token="t0k3n")
     target = cfg.to_target()
     assert target.token == "t0k3n"
     assert target.username is None
@@ -101,19 +101,19 @@ def test_instance_token_inline() -> None:
 
 def test_instance_token_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MY_DHIS_TOKEN", "from-env")
-    cfg = InstanceConfig(url=cast(HttpUrl, "https://x.example"), token_env="MY_DHIS_TOKEN")
+    cfg = Dhis2InstanceConfig(url=cast(HttpUrl, "https://x.example"), token_env="MY_DHIS_TOKEN")
     target = cfg.to_target()
     assert target.token == "from-env"
 
 
 def test_instance_both_token_sources_raises() -> None:
     with pytest.raises(ValidationError, match="set exactly one of 'token' or 'token_env'"):
-        InstanceConfig(url=cast(HttpUrl, "https://x.example"), token="t", token_env="ENV")
+        Dhis2InstanceConfig(url=cast(HttpUrl, "https://x.example"), token="t", token_env="ENV")
 
 
 def test_instance_token_and_password_raises() -> None:
     with pytest.raises(ValidationError, match="not both"):
-        InstanceConfig(
+        Dhis2InstanceConfig(
             url=cast(HttpUrl, "https://x.example"),
             username="u",
             password="p",
@@ -123,12 +123,12 @@ def test_instance_token_and_password_raises() -> None:
 
 def test_instance_no_auth_raises() -> None:
     with pytest.raises(ValidationError, match="set exactly one of"):
-        InstanceConfig(url=cast(HttpUrl, "https://x.example"), username="u")
+        Dhis2InstanceConfig(url=cast(HttpUrl, "https://x.example"), username="u")
 
 
 def test_instance_password_still_requires_username() -> None:
     with pytest.raises(ValidationError, match="requires 'username'"):
-        InstanceConfig(url=cast(HttpUrl, "https://x.example"), password="p")
+        Dhis2InstanceConfig(url=cast(HttpUrl, "https://x.example"), password="p")
 
 
 # ---------- CLI --token / --token-env resolver ----------

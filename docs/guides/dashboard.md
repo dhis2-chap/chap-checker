@@ -7,7 +7,7 @@ chap-checker tui
 A Textual-based dashboard with one tile per configured instance. Designed to
 be left on a TV / second monitor so the operator sees at a glance what's up.
 
-![chap-checker tui against five DHIS2 play servers](../assets/dashboard.svg)
+![chap-checker tui against two DHIS2 play servers and an Open Climate Service deployment](../assets/dashboard.svg)
 
 The `dhis2` theme (light mode, DHIS2 blue strip) for embedding in a DHIS2
 ops environment:

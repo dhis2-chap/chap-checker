@@ -3,14 +3,11 @@
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import Any, ClassVar
 
 import httpx2 as httpx
 
 from chap_checker.checks.base import CheckContext, CheckResult, Status, format_request_error, register_check
-
-if TYPE_CHECKING:
-    from dhis2w_client import Dhis2Client
 
 
 @register_check
@@ -28,6 +25,9 @@ class Http2xxCheck:
     OSI-layer protocol, not the scheme). Runs before `dhis2_ping` for
     readability (`order = 5`) but has no `requires` link, so disabling
     either check leaves the other working.
+
+    Applies to every instance kind: it only reads `base_url`, `timeout_s`
+    and `verify_tls`, which all targets share.
     """
 
     name: ClassVar[str] = "http_2xx"
@@ -36,8 +36,9 @@ class Http2xxCheck:
     )
     order: ClassVar[int] = 5
     requires: ClassVar[list[str]] = []
+    kinds: ClassVar[frozenset[str]] = frozenset({"dhis2", "ocs"})
 
-    async def run(self, client: Dhis2Client, ctx: CheckContext) -> CheckResult:  # noqa: ARG002 - probe is unauthenticated, doesn't use the typed client
+    async def run(self, client: Any, ctx: CheckContext) -> CheckResult:  # noqa: ARG002 - probe is unauthenticated, builds its own client
         url = str(ctx.target.base_url)
         start = time.perf_counter()
         try:

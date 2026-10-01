@@ -165,7 +165,8 @@
       // Optional `name = "..."` from the instance's TOML block. Uppercased to
       // match `name` above; card.jsx falls back to `name` when it is null.
       display_name: tile.display_name ? tile.display_name.toUpperCase() : null,
-      platform: "DHIS2",
+      // "DHIS2" or "OCS" from the instance kind; older daemons omit it.
+      platform: tile.platform || "DHIS2",
       version: tile.version || "—",
       url: tile.url,
       status,
