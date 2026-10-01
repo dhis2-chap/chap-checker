@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-10-01
+
 ### Added
 
 - **Open Climate Service (OCS) instances.** A new optional `kind` field on `[instances.<key>]` picks the server type: `"dhis2"` (the default, so existing configs are unchanged) or `"ocs"` for [Open Climate Service](https://github.com/dhis2/open-climate-service) deployments such as `https://ocs-demo-nepal.dhis2.org`. An OCS instance takes only the shared fields (`name`, `url`, `timeout_s`, `verify_tls`, `checks`, `alerts`). OCS has no auth, so credentials on it are a validation error, and `[retry]` / `retry_policy` don't apply. Each instance runs only the checks for its kind; `checks = [...]` naming a check for another kind is rejected at config load. Documented in `docs/guides/configuration.md#instance-kinds`; `chap-checker.toml.example` and the `init` template gain an OCS block.
@@ -250,7 +252,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 For 0.1.x / 0.2.x release notes, see the [GitHub Releases page](https://github.com/dhis2-chap/chap-checker/releases).
 
-[Unreleased]: https://github.com/dhis2-chap/chap-checker/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/dhis2-chap/chap-checker/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.10.0
 [0.9.0]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.9.0
 [0.8.3]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.8.3
 [0.8.2]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.8.2

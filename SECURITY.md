@@ -39,7 +39,7 @@ Out of scope:
 
 We patch the latest `0.x` release. Pre-1.0 alpha releases below the current one don't get backports — please upgrade to the latest version before reporting against an older one.
 
-| Version | Supported |
-|---------|-----------|
-| 0.9.x   | Yes       |
-| < 0.9.0 | No        |
+| Version  | Supported |
+|----------|-----------|
+| 0.10.x   | Yes       |
+| < 0.10.0 | No        |
