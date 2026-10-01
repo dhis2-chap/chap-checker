@@ -1,4 +1,4 @@
-import httpx
+import httpx2 as httpx
 from dhis2w_client import Dhis2
 
 from chap_checker.checks import all_checks

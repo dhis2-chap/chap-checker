@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import cast
 
-import httpx
+import httpx2 as httpx
 import pytest
 import typer
 from pydantic import HttpUrl, ValidationError

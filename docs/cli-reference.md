@@ -43,7 +43,7 @@ $ chap-checker init [OPTIONS]
 
 **Options**:
 
-* `-o, --output PATH`: Where to write the new config (default: ./chap-checker.toml).  [default: chap-checker.toml]
+* `-o, --output <path>`: Where to write the new config (default: ./chap-checker.toml).  [default: chap-checker.toml]
 * `-f, --force`: Overwrite the file if it already exists.
 * `--help`: Show this message and exit.
 
@@ -82,20 +82,20 @@ $ chap-checker verify [OPTIONS]
 
 **Options**:
 
-* `-c, --config PATH`: Path to a TOML config (defaults to ./chap-checker.toml if present).  [env var: CHAP_CHECKER_CONFIG]
-* `-i, --instance TEXT`: Run only this named instance from the config.
-* `--url TEXT`: Ad-hoc DHIS2 base URL (bypasses config).  [env var: DHIS2_URL]
-* `-u, --username TEXT`: DHIS2 username (ad-hoc mode).  [env var: DHIS2_USERNAME]
-* `-p, --password TEXT`: DHIS2 password (ad-hoc mode). Prefer --password-env or the interactive prompt - inline passwords end up in shell history and `ps` output.  [env var: DHIS2_PASSWORD]
-* `--password-env TEXT`: Name of the env var holding the DHIS2 password (ad-hoc mode). Recommended over --password.
-* `--token TEXT`: DHIS2 Personal Access Token (ad-hoc mode). Mutually exclusive with --password / --password-env. Prefer --token-env to keep the value out of shell history.  [env var: DHIS2_TOKEN]
-* `--token-env TEXT`: Name of the env var holding the DHIS2 PAT (ad-hoc mode). Recommended over --token.
-* `--timeout FLOAT`: HTTP timeout per request (seconds, ad-hoc mode).  [default: 10.0]
+* `-c, --config <path>`: Path to a TOML config (defaults to ./chap-checker.toml if present).  [env var: CHAP_CHECKER_CONFIG]
+* `-i, --instance <str>`: Run only this named instance from the config.
+* `--url <str>`: Ad-hoc DHIS2 base URL (bypasses config).  [env var: DHIS2_URL]
+* `-u, --username <str>`: DHIS2 username (ad-hoc mode).  [env var: DHIS2_USERNAME]
+* `-p, --password <str>`: DHIS2 password (ad-hoc mode). Prefer --password-env or the interactive prompt - inline passwords end up in shell history and `ps` output.  [env var: DHIS2_PASSWORD]
+* `--password-env <str>`: Name of the env var holding the DHIS2 password (ad-hoc mode). Recommended over --password.
+* `--token <str>`: DHIS2 Personal Access Token (ad-hoc mode). Mutually exclusive with --password / --password-env. Prefer --token-env to keep the value out of shell history.  [env var: DHIS2_TOKEN]
+* `--token-env <str>`: Name of the env var holding the DHIS2 PAT (ad-hoc mode). Recommended over --token.
+* `--timeout <float>`: HTTP timeout per request (seconds, ad-hoc mode).  [default: 10.0]
 * `--insecure`: Skip TLS certificate verification (ad-hoc mode).
-* `--check, --checks TEXT`: Restrict to these check names (transitive `requires` are pulled in). Repeat the flag for multiple. Mirrors the per-instance `checks = [...]` config field.
+* `--check, --checks <str>`: Restrict to these check names (transitive `requires` are pulled in). Repeat the flag for multiple. Mirrors the per-instance `checks = [...]` config field.
 * `--no-alerts, --no-alert`: Skip alert dispatch even if configured.
-* `--state PATH`: Path to the persisted state file (default: ./chap-checker.state.json next to the config).  [env var: CHAP_CHECKER_STATE]
-* `--concurrency INTEGER RANGE`: Number of targets to check in parallel. Overrides the config value if given. Default 5.  [1&lt;=x&lt;=100]
+* `--state <path>`: Path to the persisted state file (default: ./chap-checker.state.json next to the config).  [env var: CHAP_CHECKER_STATE]
+* `--concurrency <int range>`: Number of targets to check in parallel. Overrides the config value if given. Default 5.  [1&lt;=x&lt;=100]
 * `--help`: Show this message and exit.
 
 ## `chap-checker tui`
@@ -128,13 +128,13 @@ $ chap-checker tui [OPTIONS]
 
 **Options**:
 
-* `-c, --config PATH`: Path to a TOML config (defaults to ./chap-checker.toml if present).  [env var: CHAP_CHECKER_CONFIG]
-* `--interval FLOAT RANGE`: Refresh interval in seconds.  [default: 30.0; x&gt;=2.0]
+* `-c, --config <path>`: Path to a TOML config (defaults to ./chap-checker.toml if present).  [env var: CHAP_CHECKER_CONFIG]
+* `--interval <float range>`: Refresh interval in seconds.  [default: 30.0; x&gt;=2.0]
 * `--alerts / --no-alerts`: Dispatch alerts (Slack, webhook, ...) from refresh cycles. Off by default - the TUI is usually all you need; flip this on if you want it to also page.  [default: no-alerts]
-* `--state PATH`: State file path (default: ./chap-checker.state.json next to the config).  [env var: CHAP_CHECKER_STATE]
-* `--connect TEXT`: Render a remote `chap-checker serve` daemon instead of running checks locally. Pass the base URL (e.g. http://tv-host:8765). Mutually exclusive with --config / --state / --alerts.
-* `--token TEXT`: Bearer token for an authenticated remote `chap-checker serve` (--connect mode only). Discouraged inline - the value lands in shell history and `ps` output; prefer --token-env.  [env var: CHAP_CHECKER_TOKEN]
-* `--token-env TEXT`: Name of the env var holding the bearer token for --connect. Recommended over --token. Only meaningful with --connect; ignored otherwise.
+* `--state <path>`: State file path (default: ./chap-checker.state.json next to the config).  [env var: CHAP_CHECKER_STATE]
+* `--connect <str>`: Render a remote `chap-checker serve` daemon instead of running checks locally. Pass the base URL (e.g. http://tv-host:8765). Mutually exclusive with --config / --state / --alerts.
+* `--token <str>`: Bearer token for an authenticated remote `chap-checker serve` (--connect mode only). Discouraged inline - the value lands in shell history and `ps` output; prefer --token-env.  [env var: CHAP_CHECKER_TOKEN]
+* `--token-env <str>`: Name of the env var holding the bearer token for --connect. Recommended over --token. Only meaningful with --connect; ignored otherwise.
 * `--help`: Show this message and exit.
 
 ## `chap-checker serve`
@@ -162,12 +162,12 @@ $ chap-checker serve [OPTIONS]
 
 **Options**:
 
-* `-c, --config PATH`: Path to a TOML config (defaults to ./chap-checker.toml if present).  [env var: CHAP_CHECKER_CONFIG]
-* `--interval FLOAT RANGE`: Server-side check refresh interval (seconds).  [default: 30.0; x&gt;=2.0]
+* `-c, --config <path>`: Path to a TOML config (defaults to ./chap-checker.toml if present).  [env var: CHAP_CHECKER_CONFIG]
+* `--interval <float range>`: Server-side check refresh interval (seconds).  [default: 30.0; x&gt;=2.0]
 * `--alerts / --no-alerts`: Dispatch alerts (Slack, webhook, ...) from refresh cycles. Off by default - the dashboard is usually all you need; flip this on if you want the daemon to also page.  [default: no-alerts]
-* `--state PATH`: State file path (default: ./chap-checker.state.json next to the config).  [env var: CHAP_CHECKER_STATE]
-* `--host TEXT`: Bind address. Use 0.0.0.0 to expose on the local network (e.g. for a TV).  [default: 127.0.0.1]
-* `--port INTEGER RANGE`: Port to listen on.  [default: 8765; 1&lt;=x&lt;=65535]
+* `--state <path>`: State file path (default: ./chap-checker.state.json next to the config).  [env var: CHAP_CHECKER_STATE]
+* `--host <str>`: Bind address. Use 0.0.0.0 to expose on the local network (e.g. for a TV).  [default: 127.0.0.1]
+* `--port <int range>`: Port to listen on.  [default: 8765; 1&lt;=x&lt;=65535]
 * `--ui / --no-ui`: Serve the browser dashboard at `/`. Pass `--no-ui` for a headless deployment where only `chap-checker tui --connect` clients or external scrapers consume `/api/state`.  [default: ui]
 * `--help`: Show this message and exit.
 
@@ -242,9 +242,9 @@ $ chap-checker alerts test [OPTIONS]
 
 **Options**:
 
-* `-n, --name TEXT`: Send only to this alerter (must be a configured alerter name). Default: every configured alerter.
-* `-k, --kind [failure|recovery|both]`: Which synthetic transition(s) to send: failure (default), recovery, or both.  [default: failure]
-* `-c, --config PATH`: Path to a TOML config (defaults to ./chap-checker.toml if present).  [env var: CHAP_CHECKER_CONFIG]
+* `-n, --name <str>`: Send only to this alerter (must be a configured alerter name). Default: every configured alerter.
+* `-k, --kind <failure|recovery|both>`: Which synthetic transition(s) to send: failure (default), recovery, or both.  [default: failure]
+* `-c, --config <path>`: Path to a TOML config (defaults to ./chap-checker.toml if present).  [env var: CHAP_CHECKER_CONFIG]
 * `--help`: Show this message and exit.
 
 ## `chap-checker checks`

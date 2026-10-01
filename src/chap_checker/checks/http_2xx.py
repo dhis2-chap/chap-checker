@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING, Any, ClassVar
 
-import httpx
+import httpx2 as httpx
 
 from chap_checker.checks.base import CheckContext, CheckResult, Status, format_request_error, register_check
 

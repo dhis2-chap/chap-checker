@@ -165,7 +165,7 @@ The `@register_check` decorator looks like this:
 
 ```python
 def register_check(cls: type[Check]) -> type[Check]:
-    register(cls())     # instantiate once, add to the registry
+    register(cls())  # instantiate once, add to the registry
     return cls
 ```
 

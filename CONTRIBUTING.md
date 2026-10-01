@@ -36,7 +36,7 @@ These come up in code review every time, so they're worth stating once:
    - Branch names: `<type>/<short-description>` (e.g. `feat/makefile-and-ci`, `fix/sqlite-path`).
 4. **`uv` only.** `uvx chap-checker ...` for one-shots, `uv tool install / upgrade chap-checker` for persistent installs, `uv add chap-checker` for embedding in another project. Don't write `pip install` in code, docs, or chat output.
 5. **`pydantic` for every data class.** No `@dataclass`, no `attrs`, no `NamedTuple` / `TypedDict` for things that hold data.
-6. **`httpx` for every HTTP call.** No `requests`, no `urllib`, no `aiohttp`.
+6. **`httpx2` for every HTTP call**, imported as `import httpx2 as httpx` (same API). Never depend on or import plain `httpx`. No `requests`, no `urllib`, no `aiohttp`.
 7. **Strict typing.** `mypy --strict` and `pyright --strict` both run on every `make check`. New code should pass both. Use `ClassVar[...]` on Protocol implementations (`Check`, `Alerter`) so the decorator-style registration type-checks cleanly.
 
 ## Where things live

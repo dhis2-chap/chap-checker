@@ -2,7 +2,7 @@ import asyncio
 import json
 from datetime import UTC, datetime
 
-import httpx
+import httpx2 as httpx
 
 from chap_checker.alerts.base import Transition
 from chap_checker.alerts.slack import SlackAlerter

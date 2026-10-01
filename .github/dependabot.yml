@@ -1,13 +1,14 @@
-# Dependabot config. Watches pyproject.toml + the GitHub Actions workflows.
-# uv-managed projects still surface their deps in pyproject.toml, so the `pip`
-# ecosystem works (Dependabot reads pyproject; it doesn't run `pip` itself).
+# Dependabot config. Watches uv.lock + pyproject.toml and the GitHub Actions
+# workflows. The `uv` ecosystem updates the lockfile itself; the older `pip`
+# ecosystem only read pyproject's `>=` floors, which the latest releases always
+# satisfy, so it never opened a PR and uv.lock silently went stale.
 #
 # Conventional Commits prefixes are wired into the commit messages so the
 # PRs land cleanly in the release-notes generator.
 
 version: 2
 updates:
-  - package-ecosystem: "pip"
+  - package-ecosystem: "uv"
     directory: "/"
     schedule:
       interval: "weekly"
