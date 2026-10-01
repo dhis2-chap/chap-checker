@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, ClassVar
 
-import httpx
+import httpx2 as httpx
 from pydantic import BaseModel
 
 from chap_checker import __version__

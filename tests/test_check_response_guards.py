@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import Callable
 from typing import cast
 
-import httpx
+import httpx2 as httpx
 import pytest
 from dhis2w_client import Dhis2Client
 from pydantic import HttpUrl

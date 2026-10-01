@@ -71,7 +71,8 @@ src/chap_checker/
 
 - **pydantic for every data class**. No `@dataclass`, no `attrs`, no
   `NamedTuple` / `TypedDict` for things that hold data.
-- **httpx for every HTTP call**. No `requests`, no `urllib`.
+- **httpx2 for every HTTP call**, imported as `import httpx2 as httpx` (same
+  API). Never depend on or import plain `httpx`. No `requests`, no `urllib`.
 - **No emojis** in code, comments, commit messages, PR descriptions.
 - **No Claude / AI attribution** on commits or PRs.
 - **Conventional Commits** — `feat(scope): ...`, `fix(scope): ...`,

@@ -17,8 +17,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Changed
 
-- **Bumped dependencies to current releases.** Direct deps now declare `typer>=0.26.7`, `textual>=8.2.7`, `fastapi>=0.137.1`, `starlette>=1.3.1`, `uvicorn[standard]>=0.49.0`, and `dhis2w-client>=0.22.0`; dev tooling moves to `pytest>=9.1.0`, `pytest-asyncio>=1.4.0`, `ruff>=0.15.17`, `pyright>=1.1.410`, `playwright>=1.60.0`, and `coverage>=7.14.1`. Lockfile refreshed across all transitive packages.
-- **Added `httpx2` to the dev group.** starlette 1.3's `TestClient` prefers `httpx2` and emits a deprecation warning when it falls back to plain `httpx`; installing it for tests silences the warning. Runtime code still uses `httpx` directly.
+- **Bumped dependencies to current releases.** Direct deps now declare `typer>=0.27.2`, `pydantic>=2.13.5`, `textual>=8.2.8`, `fastapi>=0.142.2`, `starlette>=1.7.0`, `uvicorn[standard]>=0.54.0`, and `dhis2w-client>=1.30.1` (was `>=0.22.0`; the 1.x line moved its HTTP layer to `httpx2`); dev tooling moves to `pytest>=9.1.1`, `pytest-asyncio>=1.4.0`, `ruff>=0.16.9`, `mypy>=2.3.1`, `pyright>=1.1.414`, `playwright>=1.63.0`, `mkdocs-material>=9.7.7`, and `coverage>=7.16.2`; `mkdocs` is capped at `<2` because MkDocs 2.0 removes the plugin and theming system mkdocs-material relies on. Lockfile refreshed across all transitive packages.
+- **Switched from `httpx` to `httpx2`** (**breaking** for custom checks / alerters that catch `httpx` exceptions). `httpx2>=2.13.1` replaces `httpx` as a runtime dependency and every module imports it as `import httpx2 as httpx`, so the API is unchanged. Plain `httpx` is no longer installed at all, which keeps exception types consistent with dhis2w-client 1.x: an out-of-tree check doing `except httpx.TimeoutException` against a `Dhis2Client` call must import `httpx2` instead.
+- **Dependabot now uses the `uv` ecosystem.** The `pip` ecosystem only read `pyproject.toml`'s `>=` floors, which the newest releases always satisfy, so it never proposed an update and `uv.lock` went months without a refresh.
+
+### Security
+
+- **Lockfile refresh clears known advisories.** Runtime: `anyio` 4.14.0 -> 4.15.1 (CVE-2026-63374, CVE-2026-64847, CVE-2026-63349). Dev/docs only: `httpx2` / `httpcore2` 2.4.0 -> 2.13.1, `urllib3` 2.7.0 -> 2.8.0, `pymdown-extensions` 10.21.3 -> 12.1, `mkdocs-material` 9.7.6 -> 9.7.7. `pip-audit` against the new lock reports no known vulnerabilities.
 
 ## [0.8.3] — 2026-05-27
 

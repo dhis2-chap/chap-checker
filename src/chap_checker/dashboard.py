@@ -28,7 +28,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-import httpx
+import httpx2 as httpx
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
