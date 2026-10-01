@@ -6,7 +6,8 @@ add one:
 1. Drop a new file under `src/chap_checker/checks/`.
 2. Define a class with `name`, `description`, `order`, `requires`, and an
    `async def run(self, client, ctx)` method (`ctx: CheckContext` carries
-   per-target state like `target_name`).
+   per-target state: the `target`, `prior_results` and `dhis2_version`).
+   Add `kinds` if the check is not DHIS2-only (see the field reference).
 3. Decorate the class with `@register_check` — the decorator instantiates it
    once and adds it to the registry.
 4. Import the new module from `src/chap_checker/checks/__init__.py` so the
@@ -108,10 +109,23 @@ re-issuing the request.
 
 | Field         | Type             | Notes |
 | ------------- | ---------------- | ----- |
-| `name`        | `ClassVar[str]`  | Unique. Pick `dhis2_*` for DHIS2-level probes, `dhis2_chap_*` for chap-stack probes. The dashboard / JSON output use this name. |
+| `name`        | `ClassVar[str]`  | Unique. Pick `dhis2_*` for DHIS2-level probes, `dhis2_chap_*` for chap-stack probes, `ocs_*` for Open Climate Service probes. The dashboard / JSON output use this name. |
 | `description` | `ClassVar[str]`  | Shown in `chap-checker checks list`. |
 | `order`       | `ClassVar[int]`  | Lower runs first. Built-in checks use multiples of 10 so there's room to slot custom checks between them. |
 | `requires`    | `ClassVar[list[str]]` | Names of checks that must be `OK` before this one runs. If any required check is not `OK`, the runner records `SKIPPED` and never calls `run()`. |
+| `kinds`       | `ClassVar[frozenset[str]]` | Optional. Instance kinds the check applies to; defaults to `frozenset({"dhis2"})`. Use `frozenset({"ocs"})` for an Open Climate Service check (name it `ocs_*`), or both for a kind-agnostic probe like `http_2xx`. |
+
+### What `client` is, per kind
+
+The runner hands `run()` whatever the instance's target opens:
+
+- **`kind = "dhis2"`**: a `dhis2w_client.Dhis2Client` with the instance's
+  credentials. Call `client.get_response(path)` for the raw response.
+- **`kind = "ocs"`**: an `httpx2.AsyncClient` with `base_url` set to the
+  deployment, so `await client.get("/health")` works. No credentials.
+
+`ctx.target` is the matching `Dhis2Target` or `OcsTarget`; both carry
+`base_url`, `timeout_s` and `verify_tls`.
 
 ## Conventions
 

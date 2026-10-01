@@ -15,7 +15,7 @@ from pydantic import HttpUrl
 
 from chap_checker.checks.base import CheckResult, Status
 from chap_checker.client import Dhis2Target
-from chap_checker.config import CheckerConfig, InstanceConfig
+from chap_checker.config import CheckerConfig, Dhis2InstanceConfig
 from chap_checker.daemon import (
     DashboardServer,
     DashboardState,
@@ -49,7 +49,7 @@ def _server(name: str = "test") -> DashboardServer:
     """Build a DashboardServer with one target, no real config dependencies."""
     cfg = CheckerConfig(
         instances={
-            name: InstanceConfig(
+            name: Dhis2InstanceConfig(
                 url=cast(HttpUrl, f"https://{name}.example"),
                 username="u",
                 password="p",
@@ -297,7 +297,7 @@ def test_dashboard_app_mounts_under_every_theme(theme: str) -> None:
     from chap_checker.dashboard import DashboardApp
 
     cfg = CheckerConfig(
-        instances={"x": InstanceConfig(url=cast(HttpUrl, "https://x.example"), username="u", password="p")},
+        instances={"x": Dhis2InstanceConfig(url=cast(HttpUrl, "https://x.example"), username="u", password="p")},
         ui=UiConfig(theme=theme),  # type: ignore[arg-type]
     )
 

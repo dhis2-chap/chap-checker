@@ -10,7 +10,7 @@ from typer.testing import CliRunner
 from chap_checker.checks.base import CheckResult, Status
 from chap_checker.cli import app
 from chap_checker.client import Dhis2Target
-from chap_checker.config import DEFAULT_CONCURRENCY, CheckerConfig, InstanceConfig
+from chap_checker.config import DEFAULT_CONCURRENCY, CheckerConfig, Dhis2InstanceConfig
 from chap_checker.runner import TargetEntry, run_targets
 
 
@@ -86,7 +86,7 @@ def test_concurrency_must_be_positive_in_config() -> None:
     with pytest.raises(ValueError, match="greater than 0"):
         CheckerConfig(
             instances={
-                "x": InstanceConfig(
+                "x": Dhis2InstanceConfig(
                     url=cast(HttpUrl, "https://x.test"),
                     username="u",
                     password="p",
@@ -100,7 +100,7 @@ def test_concurrency_upper_bound_in_config() -> None:
     with pytest.raises(ValueError, match="less than or equal"):
         CheckerConfig(
             instances={
-                "x": InstanceConfig(
+                "x": Dhis2InstanceConfig(
                     url=cast(HttpUrl, "https://x.test"),
                     username="u",
                     password="p",

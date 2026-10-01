@@ -40,7 +40,7 @@ def _run_with_transport(handler: Callable[[httpx.Request], httpx.Response]) -> o
         original = httpx.AsyncClient
         httpx.AsyncClient = _factory  # type: ignore[misc, assignment]
         try:
-            return await Http2xxCheck().run(cast(object, None), CheckContext(target=target))  # type: ignore[arg-type]
+            return await Http2xxCheck().run(cast(object, None), CheckContext(target=target))
         finally:
             httpx.AsyncClient = original  # type: ignore[misc]
 

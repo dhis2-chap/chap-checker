@@ -19,7 +19,7 @@ from chap_checker import __version__
 from chap_checker.alerts.base import AlerterBinding, Transition
 from chap_checker.alerts.slack import SlackAlerter
 from chap_checker.checks import all_checks
-from chap_checker.checks.base import Status, resolve_checks
+from chap_checker.checks.base import Status, check_kinds, resolve_checks
 from chap_checker.client import Dhis2Target
 from chap_checker.config import (
     DEFAULT_CONCURRENCY,
@@ -76,7 +76,8 @@ class AlertTestReport(BaseModel):
 app = typer.Typer(
     name="chap-checker",
     help=(
-        "Health-check CLI for DHIS2 instances integrated with chap-core. "
+        "Health-check CLI for DHIS2 instances integrated with chap-core and "
+        "Open Climate Service deployments. "
         "Cron-friendly with Slack/webhook alerts on status transitions and "
         "a TUI dashboard for at-a-glance monitoring."
     ),
@@ -157,6 +158,14 @@ checks = ["dhis2_ping", "dhis2_system_info"]
 # [instances.token-example]
 # url = "https://dhis2.example.net"
 # token_env = "MY_DHIS2_TOKEN"
+
+# Open Climate Service (openEO backend) deployment. `kind` defaults to
+# "dhis2"; set it to "ocs" for OCS servers. OCS has no auth, so there are
+# no credential fields, and only the http_2xx / ocs_* checks run.
+# [instances.nepal-ocs]
+# kind = "ocs"
+# name = "Nepal climate service"
+# url = "https://ocs-demo-nepal.dhis2.org"
 
 # Optional per-instance overrides (shown with their defaults):
 # timeout_s = 10.0
@@ -897,7 +906,7 @@ checks_app = typer.Typer(
 
 
 def _checks_list_impl(ctx: typer.Context) -> None:
-    """List every registered check with order, prerequisites, and description."""
+    """List every registered check with the instance kinds it applies to, order, prerequisites, and description."""
     state_obj = _state(ctx)
     checks = all_checks()
 
@@ -911,6 +920,7 @@ def _checks_list_impl(ctx: typer.Context) -> None:
                 "description": c.description,
                 "order": c.order,
                 "requires": c.requires,
+                "kinds": sorted(check_kinds(c)),
             }
             for c in checks
         ]
@@ -920,11 +930,14 @@ def _checks_list_impl(ctx: typer.Context) -> None:
     console = Console()
     table = Table(title="Registered checks")
     table.add_column("Name", style="cyan", no_wrap=True)
+    table.add_column("Kinds", no_wrap=True)
     table.add_column("Order", justify="right", style="dim")
     table.add_column("Requires", style="dim")
     table.add_column("Description", overflow="fold")
     for c in checks:
-        table.add_row(c.name, str(c.order), ", ".join(c.requires) or "-", c.description)
+        table.add_row(
+            c.name, ", ".join(sorted(check_kinds(c))), str(c.order), ", ".join(c.requires) or "-", c.description
+        )
     console.print(table)
 
 
@@ -1144,14 +1157,35 @@ def _resolve_run_context(
         except KeyError as exc:
             raise typer.BadParameter(str(exc)) from exc
         target_entry = entry.to_target_entry(instance, default_retry_policy=cfg.retry)
-        if check_names:
-            target_entry = target_entry.model_copy(update={"check_names": check_names})
-        return [target_entry], cfg, config_path
-
-    targets = [entry.to_target_entry(name, default_retry_policy=cfg.retry) for name, entry in cfg.instances.items()]
+        targets = [target_entry]
+    else:
+        targets = [entry.to_target_entry(name, default_retry_policy=cfg.retry) for name, entry in cfg.instances.items()]
     if check_names:
-        targets = [t.model_copy(update={"check_names": check_names}) for t in targets]
+        targets = _apply_check_override(targets, check_names)
     return targets, cfg, config_path
+
+
+def _apply_check_override(targets: list[TargetEntry], check_names: list[str]) -> list[TargetEntry]:
+    """Apply a ``--check`` selection across targets of possibly different kinds.
+
+    Names that don't apply to a target's kind are ignored for that target
+    (e.g. ``--check dhis2_ping`` never runs against an OCS instance). A
+    target left with nothing to run is dropped with a note rather than
+    reported as an empty, vacuously-OK run.
+    """
+    kept: list[TargetEntry] = []
+    for t in targets:
+        if resolve_checks(check_names, kind=t.target.kind):
+            kept.append(t.model_copy(update={"check_names": check_names}))
+        else:
+            typer.echo(
+                f"note: skipping instance '{t.name}' (kind '{t.target.kind}'): "
+                f"none of {', '.join(check_names)} apply to it.",
+                err=True,
+            )
+    if not kept:
+        raise typer.BadParameter(f"none of {', '.join(check_names)} apply to the selected instance(s).")
+    return kept
 
 
 def _build_alerters(cfg: AlertsConfig) -> list[AlerterBinding]:

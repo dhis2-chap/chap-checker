@@ -1,7 +1,7 @@
 import httpx2 as httpx
 from dhis2w_client import Dhis2
 
-from chap_checker.checks import all_checks
+from chap_checker.checks import all_checks, check_kinds, resolve_checks
 from chap_checker.checks.base import diagnose_status, format_request_error, parse_dhis2_version
 
 
@@ -35,7 +35,7 @@ def test_builtin_requires_reference_known_checks() -> None:
 
 
 def test_builtin_checks_run_in_dependency_order() -> None:
-    names = [c.name for c in all_checks()]
+    names = [c.name for c in resolve_checks(None, kind="dhis2")]
     expected = [
         "http_2xx",
         "dhis2_ping",
@@ -124,3 +124,14 @@ def test_diagnose_status_other_4xx_5xx_carries_status_in_details() -> None:
     msg, details = diagnose_status(503, path="/api/system/info")  # type: ignore[misc]
     assert "503" in msg
     assert details == {"http_status": 503, "path": "/api/system/info"}
+
+
+def test_builtin_ocs_checks_run_in_dependency_order() -> None:
+    names = [c.name for c in resolve_checks(None, kind="ocs")]
+    assert names == ["http_2xx", "ocs_health", "ocs_info"]
+
+
+def test_every_builtin_check_declares_a_known_kind() -> None:
+    for check in all_checks():
+        assert check_kinds(check) <= {"dhis2", "ocs"}, check.name
+        assert check_kinds(check), check.name

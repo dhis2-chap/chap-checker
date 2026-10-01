@@ -1,6 +1,6 @@
 # CLI reference
 
-Health-check CLI for DHIS2 instances integrated with chap-core. Cron-friendly with Slack/webhook alerts on status transitions and a TUI dashboard for at-a-glance monitoring.
+Health-check CLI for DHIS2 instances integrated with chap-core and Open Climate Service deployments. Cron-friendly with Slack/webhook alerts on status transitions and a TUI dashboard for at-a-glance monitoring.
 
 **Usage**:
 
@@ -264,7 +264,7 @@ $ chap-checker checks [OPTIONS] COMMAND [ARGS]...
 **Commands**:
 
 * `list`: List registered checks.
-* `ls`: List every registered check with order,...
+* `ls`: List every registered check with the...
 
 ### `chap-checker checks list`
 
@@ -282,7 +282,7 @@ $ chap-checker checks list [OPTIONS]
 
 ### `chap-checker checks ls`
 
-List every registered check with order, prerequisites, and description.
+List every registered check with the instance kinds it applies to, order, prerequisites, and description.
 
 **Usage**:
 

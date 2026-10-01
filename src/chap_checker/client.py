@@ -1,20 +1,74 @@
-"""Configuration model + factory for the DHIS2 client checks use.
+"""Configuration models + client factories for the targets checks run against.
 
-chap-checker doesn't ship its own DHIS2 client anymore — it uses
-:class:`dhis2w_client.Dhis2Client` directly. This module's job is to
-turn a :class:`Dhis2Target` (the validated config a CLI or a TOML
-section produces) into a configured upstream client via
-:meth:`Dhis2Target.open`. Checks then call ``client.get_response(...)``
-exactly like every other dhis2w-client consumer.
+A target is one server under test. Every target kind shares
+:class:`BaseTarget` (URL, timeout, TLS verification) and knows how to open
+the client its checks expect:
+
+- :class:`Dhis2Target` (``kind = "dhis2"``) opens a
+  :class:`dhis2w_client.Dhis2Client`. Checks call
+  ``client.get_response(...)`` exactly like every other dhis2w-client
+  consumer.
+- :class:`OcsTarget` (``kind = "ocs"``) opens a plain ``httpx2.AsyncClient``
+  rooted at an Open Climate Service deployment. OCS has no auth, so the
+  client carries no credentials.
 """
 
 from __future__ import annotations
 
+from typing import Any, ClassVar, Literal
+
+import httpx2 as httpx
 from dhis2w_client import AuthProvider, BasicAuth, Dhis2, Dhis2Client, PatAuth, RetryPolicy
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
+TargetKind = Literal["dhis2", "ocs"]
 
-class Dhis2Target(BaseModel):
+# Human-readable platform label per kind, shown on dashboard tiles.
+PLATFORM_LABELS: dict[str, str] = {"dhis2": "DHIS2", "ocs": "OCS"}
+
+
+class BaseTarget(BaseModel):
+    """Fields every target kind shares.
+
+    ``kind`` is a class-level constant on each subclass; it picks which
+    checks apply (see :func:`chap_checker.checks.base.check_kinds`) and
+    which client :meth:`open` returns.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    kind: ClassVar[TargetKind]
+
+    base_url: HttpUrl
+    timeout_s: float = 10.0
+    verify_tls: bool = True
+
+    def open(self) -> Any:
+        """Return the async-context-managed client this kind's checks expect."""
+        raise NotImplementedError
+
+
+class OcsTarget(BaseTarget):
+    """An Open Climate Service (openEO backend) deployment under test.
+
+    OCS exposes its API without authentication, so there are no
+    credential fields. Retries are not supported for this kind yet.
+    """
+
+    kind: ClassVar[TargetKind] = "ocs"
+
+    def open(self) -> httpx.AsyncClient:
+        """Return an ``httpx2.AsyncClient`` rooted at the deployment; use as ``async with``."""
+        return httpx.AsyncClient(
+            base_url=str(self.base_url).rstrip("/"),
+            timeout=self.timeout_s,
+            verify=self.verify_tls,
+            follow_redirects=True,
+            max_redirects=5,
+        )
+
+
+class Dhis2Target(BaseTarget):
     """The DHIS2 instance under test.
 
     Auth is one of:
@@ -35,14 +89,11 @@ class Dhis2Target(BaseModel):
     over them - opt in per-instance or globally via the TOML.
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    kind: ClassVar[TargetKind] = "dhis2"
 
-    base_url: HttpUrl
     username: str | None = None
     password: str | None = Field(default=None, repr=False)
     token: str | None = Field(default=None, repr=False)
-    timeout_s: float = 10.0
-    verify_tls: bool = True
     retry_policy: RetryPolicy | None = None
 
     @model_validator(mode="after")

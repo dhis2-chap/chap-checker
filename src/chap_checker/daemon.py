@@ -17,6 +17,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 
 from chap_checker.checks.base import CheckResult, Status
+from chap_checker.client import PLATFORM_LABELS
 from chap_checker.config import CheckerConfig, load_config
 from chap_checker.logging import get_logger
 from chap_checker.runner import RunReport, TargetEntry, run_targets
@@ -49,14 +50,27 @@ def worst(statuses: list[Status]) -> Status:
     return Status.OK
 
 
-def extract_dhis2_version(results: list[CheckResult]) -> str | None:
-    """Pull the DHIS2 server version out of the dhis2_system_info check details."""
+# Per instance kind: which check's `details["version"]` feeds the tile's
+# version label, and which check counts as the "ping" behind the tile's
+# ping line and uptime percentage.
+VERSION_CHECK: dict[str, str] = {"dhis2": "dhis2_system_info", "ocs": "ocs_info"}
+PING_CHECK: dict[str, str] = {"dhis2": "dhis2_ping", "ocs": "ocs_health"}
+
+
+def extract_version(results: list[CheckResult], kind: str = "dhis2") -> str | None:
+    """Pull the server version out of the version check for ``kind`` (see `VERSION_CHECK`)."""
+    source = VERSION_CHECK.get(kind)
     for r in results:
-        if r.name == "dhis2_system_info":
+        if r.name == source:
             v = r.details.get("version")
             if v:
                 return str(v)
     return None
+
+
+def extract_dhis2_version(results: list[CheckResult]) -> str | None:
+    """Pull the DHIS2 server version out of the dhis2_system_info check details."""
+    return extract_version(results, "dhis2")
 
 
 class CheckRowModel(BaseModel):
@@ -94,6 +108,7 @@ class TileModel(BaseModel):
     name: str
     display_name: str | None = None
     url: str
+    platform: str = "DHIS2"
     version: str | None = None
     worst_status: Status
     ok_count: int
@@ -241,7 +256,8 @@ class DashboardServer(BaseModel):
             t = self.trackers.setdefault(r.target_name, TileTracker())
             t.last_report = r
             t.last_refresh = now
-            ping = next((c for c in r.results if c.name == "dhis2_ping"), None)
+            ping_name = PING_CHECK.get(r.target_kind)
+            ping = next((c for c in r.results if c.name == ping_name), None)
             if ping is not None and ping.status is not Status.SKIPPED:
                 t.ping_total += 1
                 if ping.status is Status.OK:
@@ -280,11 +296,14 @@ class DashboardServer(BaseModel):
         t = self.trackers.get(entry.name) or TileTracker()
         report = t.last_report
         url = str(entry.target.base_url).rstrip("/")
+        kind = entry.target.kind
+        platform = PLATFORM_LABELS.get(kind, kind.upper())
         if report is None:
             return TileModel(
                 name=entry.name,
                 display_name=entry.display_name,
                 url=url,
+                platform=platform,
                 worst_status=Status.SKIPPED,
                 ok_count=0,
                 total_count=0,
@@ -302,7 +321,8 @@ class DashboardServer(BaseModel):
             name=entry.name,
             display_name=entry.display_name,
             url=url,
-            version=extract_dhis2_version(report.results),
+            platform=platform,
+            version=extract_version(report.results, kind),
             worst_status=w,
             ok_count=ok_n,
             total_count=len(statuses),
@@ -313,7 +333,7 @@ class DashboardServer(BaseModel):
             last_refresh=t.last_refresh,
             checks=[
                 CheckRowModel(
-                    name=r.name.removeprefix("dhis2_"),
+                    name=r.name.removeprefix("dhis2_").removeprefix("ocs_"),
                     status=r.status,
                     symbol=_STATUS_SYMBOL.get(r.status, "?"),
                     message=r.message,
@@ -333,5 +353,6 @@ __all__ = [
     "TileModel",
     "TileTracker",
     "extract_dhis2_version",
+    "extract_version",
     "worst",
 ]

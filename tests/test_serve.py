@@ -17,7 +17,7 @@ from pydantic import HttpUrl
 
 from chap_checker.checks.base import CheckResult, Status
 from chap_checker.client import Dhis2Target
-from chap_checker.config import CheckerConfig, InstanceConfig
+from chap_checker.config import CheckerConfig, Dhis2InstanceConfig
 from chap_checker.daemon import DashboardServer, TileTracker
 from chap_checker.runner import RunReport, TargetEntry
 from chap_checker.serve import make_app
@@ -26,7 +26,7 @@ from chap_checker.serve import make_app
 def _cfg() -> CheckerConfig:
     return CheckerConfig(
         instances={
-            "prod": InstanceConfig(
+            "prod": Dhis2InstanceConfig(
                 url=cast(HttpUrl, "https://prod.example"),
                 username="u",
                 password="p",

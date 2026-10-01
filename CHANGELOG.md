@@ -6,6 +6,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+
+- **Open Climate Service (OCS) instances.** A new optional `kind` field on `[instances.<key>]` picks the server type: `"dhis2"` (the default, so existing configs are unchanged) or `"ocs"` for [Open Climate Service](https://github.com/dhis2/open-climate-service) deployments such as `https://ocs-demo-nepal.dhis2.org`. An OCS instance takes only the shared fields (`name`, `url`, `timeout_s`, `verify_tls`, `checks`, `alerts`). OCS has no auth, so credentials on it are a validation error, and `[retry]` / `retry_policy` don't apply. Each instance runs only the checks for its kind; `checks = [...]` naming a check for another kind is rejected at config load. Documented in `docs/guides/configuration.md#instance-kinds`; `chap-checker.toml.example` and the `init` template gain an OCS block.
+- **New built-in checks `ocs_health` and `ocs_info`.** `ocs_health` reads `GET /health` (`healthy` is OK, `degraded` WARN, anything else FAIL). It is liveness only, because OCS's own `/health` does not probe storage. `ocs_info` (requires `ocs_health`) reads `/info` and the openEO capabilities at `/` and reports the service version, openEO API version, backend id and read-only flag. `http_2xx` now applies to both kinds.
+- **`kinds` attribute on checks.** Custom checks can declare `kinds: ClassVar[frozenset[str]]`; without it a check stays DHIS2-only, so existing custom checks keep working. `chap-checker checks list` gains a *Kinds* column (`kinds` in `--json`).
+- **`target_kind` in run reports** (`verify --json`, `/api/state`), and a per-tile `platform` label in the TUI and browser dashboard (`DHIS2 2.42.3`, `OCS 0.1.0`). OCS tiles count `ocs_health` toward ping and uptime and take their version from `ocs_info`.
+
+### Changed
+
+- **`--check` across mixed instance kinds.** Names that don't apply to an instance's kind are ignored for it. An instance left with no checks is skipped with a note on stderr instead of reporting an empty run.
+- **`InstanceConfig` is now a discriminated union** of `Dhis2InstanceConfig` and `OcsInstanceConfig`. Code that constructed `InstanceConfig(...)` directly must use `Dhis2InstanceConfig(...)`. Loading TOML is unaffected.
+- **`CheckContext.target` is typed `BaseTarget`** (`Dhis2Target` or `OcsTarget`), and `Check.run`'s `client` parameter is now `Any`. DHIS2 checks still receive a `Dhis2Client`; OCS checks receive an `httpx2.AsyncClient`.
+- **The generic 404 message from `diagnose_status` no longer says "unexpected on DHIS2"**, since it is shared across kinds.
+
 ## [0.9.0] — 2026-10-01
 
 ### Added

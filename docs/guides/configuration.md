@@ -14,7 +14,8 @@ ansible-managed deploy, or systemd unit.
 # Top-level (optional)
 concurrency = 5                     # how many instances to check in parallel
 
-# One [instances.<name>] block per DHIS2 server to monitor.
+# One [instances.<name>] block per server to monitor. `kind` defaults to
+# "dhis2"; see "Instance kinds" below for Open Climate Service servers.
 [instances.prod]
 # name = "Production"              # optional human label for TUI / dashboard / Slack body
 url = "https://dhis2.example.com"
@@ -23,7 +24,7 @@ password = "REPLACE_ME"            # OR set password_env, not both
 # password_env = "PROD_PASS"
 # timeout_s = 10.0                 # default 10s, must be > 0
 # verify_tls = true                # default true
-# checks = ["dhis2_ping", ...]     # subset; omit to run every registered check
+# checks = ["dhis2_ping", ...]     # subset; omit to run every check for the instance's kind
 # alerts = ["slack"]               # opt-in per alerter; omit / [] = no alerts
 
 # One [alerts.<name>] block per transport. Built-in: `slack`, `webhook`.
@@ -75,6 +76,34 @@ The generic JSON output (`verify --json`, the `/api/state` endpoint, the
 webhook envelope) exposes both: `target_name` (section key) and
 `target_display_name` (the label, or `null` if unset).
 
+## Instance kinds
+
+Each `[instances.<name>]` block has a `kind` that decides which fields are
+valid and which checks run. It defaults to `"dhis2"`, so configs written
+before kinds existed keep working unchanged.
+
+| `kind`    | Server                                                                                   | Auth                                        | Checks                    |
+| --------- | ---------------------------------------------------------------------------------------- | ------------------------------------------- | ------------------------- |
+| `"dhis2"` | DHIS2 (optionally with the chap-core integration)                                         | required: password or token (see above)     | `http_2xx`, `dhis2_*`     |
+| `"ocs"`   | [Open Climate Service](https://github.com/dhis2/open-climate-service) (openEO backend)    | none                                        | `http_2xx`, `ocs_*`       |
+
+```toml
+[instances.nepal-ocs]
+kind = "ocs"
+name = "Nepal climate service"
+url = "https://ocs-demo-nepal.dhis2.org"
+alerts = ["slack"]
+```
+
+An OCS instance accepts the shared fields only: `name`, `url`, `timeout_s`,
+`verify_tls`, `checks`, `alerts`. OCS has no authentication, so setting
+`username` / `password` / `token` on it is a validation error, and neither
+the top-level `[retry]` block nor a per-instance `retry_policy` applies to it.
+
+Alerts, the state file, `verify --json` and the dashboard treat every kind the
+same way. JSON output carries a `target_kind` field per run, and dashboard
+tiles show the platform (`DHIS2 2.42.3`, `OCS 0.1.0`).
+
 ## Per-instance check filter
 
 Add `checks = [...]` on an instance to restrict which checks fire against it.
@@ -97,8 +126,13 @@ password_env = "DHIS2_PASS"
 checks = ["dhis2_chap_system_info"]   # pulls in dhis2_ping, dhis2_chap_route, dhis2_chap_ping
 ```
 
-Unknown names are rejected at config load. There is no "exclude" syntax — list
-the checks you want.
+Unknown names, and names that don't apply to the instance's kind (for example
+`dhis2_ping` on an OCS instance), are rejected at config load. There is no
+"exclude" syntax — list the checks you want.
+
+The CLI's `--check` flag overrides every instance's list for one run. Names
+that don't apply to an instance's kind are ignored for that instance, and an
+instance left with nothing to run is skipped with a note.
 
 See [Built-in checks](checks.md) for the names and dependency graph.
 

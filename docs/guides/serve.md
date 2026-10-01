@@ -18,7 +18,7 @@ and by default serves a browser dashboard at `/`. Both the [TUI in
 `--connect` mode](dashboard.md#connect-mode-cross-machine-consistency)
 and any browser pointed at this server consume the same snapshot.
 
-![chap-checker browser dashboard against four DHIS2 play servers](../assets/web-dashboard.png)
+![chap-checker browser dashboard against two DHIS2 play servers and an Open Climate Service deployment](../assets/web-dashboard.png)
 
 The `dhis2` theme (light mode, DHIS2 blue strip) for embedding in a DHIS2
 operations setup:

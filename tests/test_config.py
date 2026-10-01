@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from chap_checker.config import DEFAULT_UI_TITLE, CheckerConfig, InstanceConfig, UiConfig, load_config
+from chap_checker.config import DEFAULT_UI_TITLE, CheckerConfig, Dhis2InstanceConfig, UiConfig, load_config
 
 
 @pytest.fixture(autouse=True)
@@ -39,6 +39,7 @@ password = "district"
     )
     cfg = load_config(path)
     play = cfg.get("play")
+    assert isinstance(play, Dhis2InstanceConfig)
     assert play.username == "admin"
     assert play.resolve_password() == "district"
 
@@ -54,8 +55,9 @@ username = "u"
 password_env = "MY_PASS"
 """,
     )
-    cfg = load_config(path)
-    assert cfg.get("x").resolve_password() == "secret"
+    x = load_config(path).get("x")
+    assert isinstance(x, Dhis2InstanceConfig)
+    assert x.resolve_password() == "secret"
 
 
 def test_password_env_missing_raises(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -69,13 +71,15 @@ username = "u"
 password_env = "MY_PASS"
 """,
     )
+    x = load_config(path).get("x")
+    assert isinstance(x, Dhis2InstanceConfig)
     with pytest.raises(RuntimeError, match="MY_PASS"):
-        load_config(path).get("x").resolve_password()
+        x.resolve_password()
 
 
 def test_both_password_sources_rejected() -> None:
     with pytest.raises(ValueError, match="exactly one"):
-        InstanceConfig(
+        Dhis2InstanceConfig(
             url="https://x.test",  # type: ignore[arg-type]
             username="u",
             password="p",
@@ -85,14 +89,14 @@ def test_both_password_sources_rejected() -> None:
 
 def test_neither_password_source_rejected() -> None:
     with pytest.raises(ValueError, match="exactly one"):
-        InstanceConfig(url="https://x.test", username="u")  # type: ignore[arg-type]
+        Dhis2InstanceConfig(url="https://x.test", username="u")  # type: ignore[arg-type]
 
 
 def test_unknown_instance_lists_available() -> None:
     cfg = CheckerConfig(
         instances={
-            "a": InstanceConfig(url="https://a.test", username="u", password="p"),  # type: ignore[arg-type]
-            "b": InstanceConfig(url="https://b.test", username="u", password="p"),  # type: ignore[arg-type]
+            "a": Dhis2InstanceConfig(url="https://a.test", username="u", password="p"),  # type: ignore[arg-type]
+            "b": Dhis2InstanceConfig(url="https://b.test", username="u", password="p"),  # type: ignore[arg-type]
         }
     )
     with pytest.raises(KeyError, match="a, b"):
@@ -101,7 +105,7 @@ def test_unknown_instance_lists_available() -> None:
 
 def test_zero_timeout_rejected() -> None:
     with pytest.raises(ValueError, match="greater than 0"):
-        InstanceConfig(
+        Dhis2InstanceConfig(
             url="https://x.test",  # type: ignore[arg-type]
             username="u",
             password="p",
@@ -111,7 +115,7 @@ def test_zero_timeout_rejected() -> None:
 
 def test_negative_timeout_rejected() -> None:
     with pytest.raises(ValueError, match="greater than 0"):
-        InstanceConfig(
+        Dhis2InstanceConfig(
             url="https://x.test",  # type: ignore[arg-type]
             username="u",
             password="p",

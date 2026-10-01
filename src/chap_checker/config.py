@@ -6,13 +6,13 @@ import os
 import stat
 import tomllib
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Self
 
 from dhis2w_client import RetryPolicy
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
+from pydantic import BaseModel, ConfigDict, Discriminator, Field, HttpUrl, Tag, model_validator
 
 from chap_checker.checks.base import Status
-from chap_checker.client import Dhis2Target
+from chap_checker.client import BaseTarget, Dhis2Target, OcsTarget
 from chap_checker.logging import get_logger
 
 if TYPE_CHECKING:
@@ -26,7 +26,7 @@ _log = get_logger("config")
 def _resolve_value_or_env(value: str | None, env_var: str | None, *, source_label: str) -> str:
     """Return `value` if set, otherwise read `env_var` from the environment.
 
-    The "one of literal or env var" pattern repeats across `InstanceConfig`,
+    The "one of literal or env var" pattern repeats across `Dhis2InstanceConfig`,
     `SlackAlertConfig`, `WebhookAlertConfig`, and `AuthConfig`. Centralising
     it here keeps the error message shape consistent and avoids the
     pre-condition `assert` dance each caller used to do.
@@ -44,8 +44,68 @@ def _resolve_value_or_env(value: str | None, env_var: str | None, *, source_labe
     return resolved
 
 
-class InstanceConfig(BaseModel):
-    """One DHIS2 instance to check.
+class BaseInstanceConfig(BaseModel):
+    """Fields every ``[instances.<key>]`` block shares, whatever its ``kind``."""
+
+    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
+
+    name: str | None = None
+    url: HttpUrl
+    timeout_s: float = Field(default=10.0, gt=0)
+    verify_tls: bool = True
+    checks: list[str] | None = Field(default=None, min_length=1)
+    alerts: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _checks_must_exist(self) -> Self:
+        if self.checks is None:
+            return self
+        # Late import: triggers chap_checker.checks.__init__ which registers
+        # every built-in check, populating the registry we validate against.
+        from chap_checker.checks.base import all_checks, check_kinds
+
+        kind: str = getattr(self, "kind")
+        by_name = {c.name: c for c in all_checks()}
+        unknown = [c for c in self.checks if c not in by_name]
+        if unknown:
+            raise ValueError(f"unknown check name(s): {', '.join(unknown)}. Known: {', '.join(sorted(by_name))}")
+        wrong_kind = [c for c in self.checks if kind not in check_kinds(by_name[c])]
+        if wrong_kind:
+            applicable = sorted(n for n, c in by_name.items() if kind in check_kinds(c))
+            raise ValueError(
+                f"check(s) {', '.join(wrong_kind)} do not apply to kind '{kind}'. "
+                f"Checks for '{kind}': {', '.join(applicable)}"
+            )
+        return self
+
+    def has_inline_secret(self) -> bool:
+        """Return True if this block carries a credential inline in the TOML."""
+        return False
+
+    def to_target(self, *, default_retry_policy: RetryPolicy | None = None) -> BaseTarget:
+        """Build the runtime target for this block."""
+        raise NotImplementedError
+
+    def to_target_entry(
+        self,
+        name: str,
+        *,
+        default_retry_policy: RetryPolicy | None = None,
+    ) -> "TargetEntry":
+        """Build a runtime :class:`TargetEntry` (with optional check filter and opt-in alerters)."""
+        from chap_checker.runner import TargetEntry
+
+        return TargetEntry(
+            name=name,
+            display_name=self.name,
+            target=self.to_target(default_retry_policy=default_retry_policy),
+            check_names=self.checks,
+            alerts=list(self.alerts),
+        )
+
+
+class Dhis2InstanceConfig(BaseInstanceConfig):
+    """One DHIS2 instance to check (``kind = "dhis2"``, the default).
 
     Two auth modes are supported:
 
@@ -58,23 +118,16 @@ class InstanceConfig(BaseModel):
     on the wire in token mode.
     """
 
-    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
-
-    name: str | None = None
-    url: HttpUrl
+    kind: Literal["dhis2"] = "dhis2"
     username: str | None = None
     password: str | None = None
     password_env: str | None = None
     token: str | None = None
     token_env: str | None = None
-    timeout_s: float = Field(default=10.0, gt=0)
-    verify_tls: bool = True
-    checks: list[str] | None = Field(default=None, min_length=1)
-    alerts: list[str] = Field(default_factory=list)
     retry_policy: RetryPolicy | None = None
 
     @model_validator(mode="after")
-    def _exactly_one_auth_mode(self) -> "InstanceConfig":
+    def _exactly_one_auth_mode(self) -> "Dhis2InstanceConfig":
         has_password = self.password is not None or self.password_env is not None
         has_token = self.token is not None or self.token_env is not None
         if has_password and has_token:
@@ -94,19 +147,9 @@ class InstanceConfig(BaseModel):
             raise ValueError("set exactly one of 'token' or 'token_env'")
         return self
 
-    @model_validator(mode="after")
-    def _checks_must_exist(self) -> "InstanceConfig":
-        if self.checks is None:
-            return self
-        # Late import: triggers chap_checker.checks.__init__ which registers
-        # every built-in check, populating the registry we validate against.
-        from chap_checker.checks.base import all_checks
-
-        known = {c.name for c in all_checks()}
-        unknown = [c for c in self.checks if c not in known]
-        if unknown:
-            raise ValueError(f"unknown check name(s): {', '.join(unknown)}. Known: {', '.join(sorted(known))}")
-        return self
+    def has_inline_secret(self) -> bool:
+        """Return True if a password or token is written inline."""
+        return self.password is not None or self.token is not None
 
     def resolve_password(self) -> str:
         """Return the password, reading from env if ``password_env`` is set."""
@@ -153,22 +196,34 @@ class InstanceConfig(BaseModel):
             retry_policy=retry_policy,
         )
 
-    def to_target_entry(
-        self,
-        name: str,
-        *,
-        default_retry_policy: RetryPolicy | None = None,
-    ) -> "TargetEntry":
-        """Build a runtime :class:`TargetEntry` (with optional check filter and opt-in alerters)."""
-        from chap_checker.runner import TargetEntry
 
-        return TargetEntry(
-            name=name,
-            display_name=self.name,
-            target=self.to_target(default_retry_policy=default_retry_policy),
-            check_names=self.checks,
-            alerts=list(self.alerts),
-        )
+class OcsInstanceConfig(BaseInstanceConfig):
+    """One Open Climate Service deployment to check (``kind = "ocs"``).
+
+    OCS has no authentication, so there are no credential fields; setting
+    one is a validation error. The top-level ``[retry]`` block does not
+    apply to this kind.
+    """
+
+    kind: Literal["ocs"]
+
+    def to_target(self, *, default_retry_policy: RetryPolicy | None = None) -> OcsTarget:  # noqa: ARG002
+        """Build a runtime :class:`OcsTarget` from this entry."""
+        return OcsTarget(base_url=self.url, timeout_s=self.timeout_s, verify_tls=self.verify_tls)
+
+
+def _instance_kind(value: Any) -> str:
+    """Discriminate ``[instances.<key>]`` blocks on ``kind``, defaulting to DHIS2."""
+    if isinstance(value, dict):
+        return str(value.get("kind", "dhis2"))
+    return str(getattr(value, "kind", "dhis2"))
+
+
+InstanceConfig = Annotated[
+    Annotated[Dhis2InstanceConfig, Tag("dhis2")] | Annotated[OcsInstanceConfig, Tag("ocs")],
+    Discriminator(_instance_kind),
+]
+"""Any ``[instances.<key>]`` block. ``kind`` picks the variant; omitted means ``"dhis2"``."""
 
 
 class SlackAlertConfig(BaseModel):
@@ -374,7 +429,7 @@ def _has_inline_secret(cfg: CheckerConfig) -> bool:
     server `[auth]` token. Env-var indirections are skipped - they
     don't make the file itself sensitive.
     """
-    if any(i.password is not None or i.token is not None for i in cfg.instances.values()):
+    if any(i.has_inline_secret() for i in cfg.instances.values()):
         return True
     if cfg.alerts is not None:
         if cfg.alerts.slack is not None and cfg.alerts.slack.webhook_url is not None:
