@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-10-01
+
 ### Added
 
 - **New built-in check `http_2xx`** — unauthenticated `GET` on the instance's configured `url`, follows redirects up to five hops, reports `OK` when the final response is `2xx`. Sends no credentials and runs before `dhis2_ping` (`order = 5`), with no `requires` so it stays decoupled from the DHIS2-specific chain. Distinguishes a TLS / reverse-proxy / load-balancer outage (`http_2xx` FAIL, `dhis2_ping` ERROR) from an auth or DHIS2-level failure (`http_2xx` OK, `dhis2_ping` FAIL). Implemented in `src/chap_checker/checks/http_2xx.py` using a stand-alone `httpx.AsyncClient` instead of routing through `Dhis2Client`. Docs and the README built-in-checks list updated; tests in `tests/test_http_2xx.py`.
@@ -234,7 +236,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 For 0.1.x / 0.2.x release notes, see the [GitHub Releases page](https://github.com/dhis2-chap/chap-checker/releases).
 
-[Unreleased]: https://github.com/dhis2-chap/chap-checker/compare/v0.8.3...HEAD
+[Unreleased]: https://github.com/dhis2-chap/chap-checker/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.9.0
 [0.8.3]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.8.3
 [0.8.2]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.8.2
 [0.8.1]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.8.1
