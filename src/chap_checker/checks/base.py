@@ -18,10 +18,11 @@ def parse_dhis2_version(version_str: str) -> Dhis2 | None:
     """Map a DHIS2 `/api/system/info` `version` field to a `Dhis2` enum.
 
     DHIS2 reports its version as e.g. `"2.42.3"` or `"2.44-SNAPSHOT"`. We
-    pull the minor number and map it to `Dhis2.V41`, `Dhis2.V42`, or
-    `Dhis2.V43` (the versions dhis2w-client 0.14 ships generated modules
-    for). Unrecognised or out-of-range versions return None so the caller
-    can skip version-typed work without crashing the run.
+    pull the minor number and map it to the matching `Dhis2` member
+    (`Dhis2.V42` for 2.42, and so on, for whichever versions the installed
+    dhis2w-client ships generated modules for). Unrecognised or out-of-range
+    versions return None so the caller can skip version-typed work without
+    crashing the run.
 
     Mirrors dhis2w-client's internal `_pick_version_key` semantics without
     relying on a private API.

@@ -78,11 +78,15 @@ def test_parse_dhis2_version_maps_supported_minors() -> None:
     assert parse_dhis2_version("2.41.0") is Dhis2.V41
     assert parse_dhis2_version("2.42.4-1") is Dhis2.V42
     assert parse_dhis2_version("2.43.0") is Dhis2.V43
+    assert parse_dhis2_version("2.44-SNAPSHOT") is Dhis2.V44
 
 
 def test_parse_dhis2_version_returns_none_for_unsupported_or_garbage() -> None:
     """An out-of-range minor or non-version string returns None, no crash."""
-    assert parse_dhis2_version("2.44-SNAPSHOT") is None  # past the generated v43 ceiling
+    # One past the newest version dhis2w-client generates, so a client bump that
+    # adds a version does not break this test.
+    ceiling = max(int(member.value.removeprefix("v")) for member in Dhis2)
+    assert parse_dhis2_version(f"2.{ceiling + 1}-SNAPSHOT") is None
     assert parse_dhis2_version("garbage") is None
     assert parse_dhis2_version("") is None
 
