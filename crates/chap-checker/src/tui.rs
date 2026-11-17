@@ -156,7 +156,7 @@ async fn connect(
     loop {
         poll(&http, &base, &url, token.as_deref(), prompted, &shared).await;
         let ask = tokio::select! {
-            () = tokio::time::sleep(Duration::from_secs_f64(interval)) => None,
+            () = tokio::time::sleep(crate::http::seconds(interval)) => None,
             ask = asks.recv() => match ask { None => return, a => a },
         };
         let send = |method: reqwest::Method, path: &str| {
@@ -170,11 +170,30 @@ async fn connect(
             None => {}
             Some(Ask::Refresh) => {
                 lock(&shared).busy = true;
-                let _ = send(reqwest::Method::POST, "/api/refresh")
+                let outcome = send(reqwest::Method::POST, "/api/refresh")
                     .timeout(Duration::from_secs(300))
                     .send()
                     .await;
                 lock(&shared).busy = false;
+                // A 401 is the poll's to report (prompt or banner); anything else failing says so.
+                match outcome {
+                    Ok(r)
+                        if r.status().is_success()
+                            || r.status() == reqwest::StatusCode::UNAUTHORIZED => {}
+                    Ok(r) => notice(
+                        &shared,
+                        BannerTone::Critical,
+                        format!("refresh failed: status {}", r.status().as_u16()),
+                    ),
+                    Err(e) => notice(
+                        &shared,
+                        BannerTone::Critical,
+                        format!(
+                            "refresh failed: {}",
+                            crate::http::RequestError::from_reqwest(&e).describe(None)
+                        ),
+                    ),
+                }
             }
             Some(Ask::Reload) => match send(reqwest::Method::POST, "/api/reload").send().await {
                 Ok(r) => {

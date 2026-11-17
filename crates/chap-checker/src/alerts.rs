@@ -113,7 +113,7 @@ impl Alerter {
             return Ok(());
         }
         let http = reqwest::Client::builder()
-            .timeout(Duration::from_secs_f64(self.timeout_s))
+            .timeout(crate::http::seconds(self.timeout_s))
             .redirect(Policy::none())
             .user_agent(concat!("chap-checker/", env!("CARGO_PKG_VERSION")))
             .build()

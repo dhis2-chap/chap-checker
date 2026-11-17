@@ -192,8 +192,18 @@ fn min_interval(text: &str) -> Result<f64, String> {
     let value: f64 = text
         .parse()
         .map_err(|_| format!("'{text}' is not a number"))?;
-    if value < 2.0 {
+    if !(value.is_finite() && value >= 2.0) {
         return Err(format!("{value} is not in the range x>=2.0"));
+    }
+    Ok(value)
+}
+
+fn positive_seconds(text: &str) -> Result<f64, String> {
+    let value: f64 = text
+        .parse()
+        .map_err(|_| format!("'{text}' is not a number"))?;
+    if !(value.is_finite() && value > 0.0) {
+        return Err(format!("{value} is not in the range x>0"));
     }
     Ok(value)
 }
@@ -227,7 +237,7 @@ struct VerifyArgs {
     #[arg(long)]
     token_env: Option<String>,
     /// HTTP timeout per request (seconds, ad-hoc mode).
-    #[arg(long, default_value_t = 10.0)]
+    #[arg(long, default_value_t = 10.0, value_parser = positive_seconds)]
     timeout: f64,
     /// Skip TLS certificate verification (ad-hoc mode).
     #[arg(long)]
@@ -508,18 +518,25 @@ fn verify(global: &Global, args: VerifyArgs, matches: &ArgMatches) -> Outcome {
         .map(usize::from)
         .or(cfg.as_ref().map(|c| c.concurrency))
         .unwrap_or(DEFAULT_CONCURRENCY);
+    // Alerters resolve their `*_env` URLs before any check runs, like instance credentials, so a
+    // missing variable is a usage error up front rather than a lost report after the checks.
+    let alerting = match (&cfg, &config_file, args.no_alerts) {
+        (Some(cfg), Some(path), false) => match &cfg.alerts {
+            Some(alerts_cfg) => Some((
+                build_alerters(alerts_cfg)?,
+                state_path(args.state.clone(), path),
+            )),
+            None => None,
+        },
+        _ => None,
+    };
     let rt = runtime();
     let started_at = Utc::now();
     let reports = rt.block_on(run_targets(&targets, concurrency));
     let finished_at = Utc::now();
 
-    if !args.no_alerts
-        && let (Some(cfg), Some(path)) = (&cfg, &config_file)
-        && let Some(alerts_cfg) = &cfg.alerts
-    {
-        let alerters = build_alerters(alerts_cfg)?;
-        let state = state_path(args.state.clone(), path);
-        rt.block_on(dispatch(&reports, &targets, &alerters, &state));
+    if let Some((alerters, state)) = &alerting {
+        rt.block_on(dispatch(&reports, &targets, alerters, state));
     }
 
     let report = VerifyReport::new(started_at, finished_at, reports);

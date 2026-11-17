@@ -89,7 +89,8 @@ pub struct CheckState {
 /// written before the ledger existed (0.10.x and earlier); see [`receiver_ledger`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StateFile {
-    #[serde(deserialize_with = "version_one")]
+    /// Always 1; a file without the key is read as version 1, as before.
+    #[serde(default = "one", deserialize_with = "version_one")]
     pub version: u8,
     #[serde(default)]
     pub states: BTreeMap<String, CheckState>,
@@ -105,6 +106,10 @@ impl Default for StateFile {
             receivers: None,
         }
     }
+}
+
+fn one() -> u8 {
+    1
 }
 
 fn version_one<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<u8, D::Error> {
@@ -222,7 +227,9 @@ pub struct StateLock {
 
 impl StateLock {
     pub async fn acquire(state_path: &Path, timeout: Duration) -> Result<Self, StateLockTimeout> {
-        let lock_path = PathBuf::from(format!("{}.lock", state_path.display()));
+        let mut lock_path = state_path.as_os_str().to_owned();
+        lock_path.push(".lock");
+        let lock_path = PathBuf::from(lock_path);
         if let Some(parent) = lock_path.parent().filter(|p| !p.as_os_str().is_empty()) {
             let _ = std::fs::create_dir_all(parent);
         }
@@ -581,6 +588,17 @@ mod tests {
             compute_receiver_transitions(&state, &[report("a", &[("c", Ok)])], &other, now(1));
         assert_eq!(state.states["b::c"].status, Fail);
         assert_eq!(state.receivers.as_ref().unwrap()["r"].len(), 2);
+    }
+
+    #[test]
+    fn a_file_without_version_is_version_one() {
+        let state: StateFile = serde_json::from_str(
+            r#"{"states": {"prod::ping": {"status": "fail", "since": "2026-01-01T00:00:00Z"}}}"#,
+        )
+        .unwrap();
+        assert_eq!(state.version, 1);
+        assert_eq!(state.states["prod::ping"].status, Status::Fail);
+        assert!(serde_json::from_str::<StateFile>(r#"{"version": 2}"#).is_err());
     }
 
     #[test]
