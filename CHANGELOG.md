@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-11-17
+
 ### Added
 
 - **`scripts/capture_browser.py` gains `--states`, `--palette`, `--suffix` and `--color-scheme`.** `--states` captures the loading, unreachable, reconnecting, stale (disconnected) and stale (stalled daemon) states by intercepting `/api/state` in the browser, and checks that the page recovers to live. `--suffix=-dhis2` names the dhis2-theme captures.
@@ -288,7 +290,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 For 0.1.x / 0.2.x release notes, see the [GitHub Releases page](https://github.com/dhis2-chap/chap-checker/releases).
 
-[Unreleased]: https://github.com/dhis2-chap/chap-checker/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/dhis2-chap/chap-checker/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.11.0
 [0.10.0]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.10.0
 [0.9.0]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.9.0
 [0.8.3]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.8.3
