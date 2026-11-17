@@ -1,4 +1,4 @@
-"""Dashboard tiles for OCS instances: platform label, version source, ping/uptime source."""
+"""Dashboard tiles for OGS instances: platform label, version source, ping/uptime source."""
 
 from typing import Any
 
@@ -66,7 +66,7 @@ async def test_ocs_tile_uses_ocs_platform_version_and_ping(monkeypatch: pytest.M
     tiles = {t.name: t for t in server.snapshot().tiles}
 
     nepal = tiles["nepal"]
-    assert nepal.platform == "OCS"
+    assert nepal.platform == "OGS"
     assert nepal.display_name == "Nepal"
     assert (nepal.ping_ok, nepal.ping_total) == (1, 2)
     assert nepal.uptime_pct == 50.0
@@ -91,5 +91,5 @@ async def test_ocs_tile_version_from_ocs_info(monkeypatch: pytest.MonkeyPatch) -
 
 def test_tile_before_first_refresh_has_platform() -> None:
     tiles = {t.name: t for t in _server().snapshot().tiles}
-    assert tiles["nepal"].platform == "OCS"
+    assert tiles["nepal"].platform == "OGS"
     assert tiles["play"].platform == "DHIS2"

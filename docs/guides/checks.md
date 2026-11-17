@@ -16,7 +16,7 @@ Four namespaces:
 - `dhis2_*` — probes against DHIS2 itself (`kind = "dhis2"`).
 - `dhis2_chap_*` — probes against the `chap-core` service behind the DHIS2
   `chap` route (`kind = "dhis2"`).
-- `ocs_*` — probes against an Open Climate Service deployment
+- `ocs_*` — probes against an Open Geo Service deployment
   (`kind = "ocs"`).
 
 | Check                       | Kinds        | Endpoint                                              | Requires             |
@@ -32,16 +32,16 @@ Four namespaces:
 | `ocs_health`                | ocs          | `/health`                                             | —                    |
 | `ocs_info`                  | ocs          | `/info` + `/` (openEO capabilities)                   | `ocs_health`         |
 
-### Open Climate Service checks
+### Open Geo Service checks
 
-- **`ocs_health`** is a liveness signal only. OCS's `/health` reports that the
+- **`ocs_health`** is a liveness signal only. OGS's `/health` reports that the
   API process is up; it does not probe storage, the job service or the
   scheduler. `degraded` maps to `WARN`, anything other than `healthy` to
   `FAIL`, and a 404 is reported as "does not look like an Open Climate
   Service" (a common sign of a wrong URL).
 - **`ocs_info`** reads the service version from `/info` (`app_version`) and the
   openEO capabilities document from `/` (`api_version`, backend `id`). The
-  version feeds the dashboard tile label (`OCS 0.1.0`), and `read_only` is
+  version feeds the dashboard tile label (`OGS 0.1.0`), and `read_only` is
   reported in the message because public demo deployments run read-only on
   purpose.
 

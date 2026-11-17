@@ -80,7 +80,7 @@ app = typer.Typer(
     name="chap-checker",
     help=(
         "Health-check CLI for DHIS2 instances integrated with chap-core and "
-        "Open Climate Service deployments. "
+        "Open Geo Service deployments. "
         "Cron-friendly with Slack/webhook alerts on status transitions and "
         "a TUI dashboard for at-a-glance monitoring."
     ),
@@ -162,8 +162,8 @@ checks = ["dhis2_ping", "dhis2_system_info"]
 # url = "https://dhis2.example.net"
 # token_env = "MY_DHIS2_TOKEN"
 
-# Open Climate Service (openEO backend) deployment. `kind` defaults to
-# "dhis2"; set it to "ocs" for OCS servers. OCS has no auth, so there are
+# Open Geo Service (openEO backend) deployment. `kind` defaults to
+# "dhis2"; set it to "ocs" for OGS servers. OGS has no auth, so there are
 # no credential fields, and only the http_2xx / ocs_* checks run.
 # [instances.nepal-ocs]
 # kind = "ocs"
@@ -1227,7 +1227,7 @@ def _apply_check_override(targets: list[TargetEntry], check_names: list[str]) ->
     """Apply a ``--check`` selection across targets of possibly different kinds.
 
     Names that don't apply to a target's kind are ignored for that target
-    (e.g. ``--check dhis2_ping`` never runs against an OCS instance). A
+    (e.g. ``--check dhis2_ping`` never runs against an OGS instance). A
     target left with nothing to run is dropped with a note rather than
     reported as an empty, vacuously-OK run.
     """

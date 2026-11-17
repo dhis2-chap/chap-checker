@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Changed
+
+- **Open Climate Service is now Open Geo Service** in help text, check messages, docs and the dashboard tile label (`OGS 0.1.0` instead of `OCS 0.1.0`), following the upstream rename. `kind = "ocs"` and the `ocs_health` / `ocs_info` check names are unchanged, so configs and state files need no edits.
+
 ## [0.11.0] — 2026-11-17
 
 ### Added

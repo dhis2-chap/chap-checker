@@ -1,4 +1,4 @@
-"""Open Climate Service checks: ocs_health, ocs_info, and running them through the runner."""
+"""Open Geo Service checks: ocs_health, ocs_info, and running them through the runner."""
 
 from collections.abc import Callable
 from typing import Any, cast
@@ -73,7 +73,7 @@ async def test_health_non_json_is_fail() -> None:
 async def test_health_404_says_not_ocs() -> None:
     result = await _run(OcsHealthCheck(), _routes({}))
     assert result.status is Status.FAIL
-    assert "does not look like an Open Climate Service" in result.message
+    assert "does not look like an Open Geo Service" in result.message
     assert result.details["http_status"] == 404
 
 
@@ -94,7 +94,7 @@ async def test_info_reports_version_and_capabilities() -> None:
         _routes({"/info": httpx2.Response(200, json=_INFO), "/": httpx2.Response(200, json=_CAPABILITIES)}),
     )
     assert result.status is Status.OK
-    assert result.message == "Open Climate Service 0.1.0 (openEO 1.2.0, read-only)."
+    assert result.message == "Open Geo Service 0.1.0 (openEO 1.2.0, read-only)."
     assert result.details == {
         "version": "0.1.0",
         "api_version": "1.2.0",
@@ -116,7 +116,7 @@ async def test_info_falls_back_to_backend_version() -> None:
     )
     assert result.status is Status.OK
     assert result.details["version"] == "0.1.0"
-    assert result.message == "Open Climate Service 0.1.0 (openEO 1.2.0)."
+    assert result.message == "Open Geo Service 0.1.0 (openEO 1.2.0)."
 
 
 @pytest.mark.asyncio

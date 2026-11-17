@@ -1,4 +1,4 @@
-"""Liveness check against an Open Climate Service deployment."""
+"""Liveness check against an Open Geo Service deployment."""
 
 from __future__ import annotations
 
@@ -21,16 +21,16 @@ _PATH = "/health"
 
 @register_check
 class OcsHealthCheck:
-    """Verify that the OCS service answers ``/health`` with ``{"status": "healthy"}``.
+    """Verify that the OGS service answers ``/health`` with ``{"status": "healthy"}``.
 
     This is a liveness signal only: upstream ``/health`` reports the API
     process is up and does not probe storage or the job service. ``degraded``
     maps to WARN and ``unhealthy`` (or any other value) to FAIL so the check
-    starts reporting more as soon as OCS does.
+    starts reporting more as soon as OGS does.
     """
 
     name: ClassVar[str] = "ocs_health"
-    description: ClassVar[str] = "Open Climate Service /health reports healthy (liveness only)."
+    description: ClassVar[str] = "Open Geo Service /health reports healthy (liveness only)."
     order: ClassVar[int] = 10
     requires: ClassVar[list[str]] = []
     kinds: ClassVar[frozenset[str]] = frozenset({"ocs"})
@@ -51,7 +51,7 @@ class OcsHealthCheck:
         diagnosis = diagnose_status(
             response.status_code,
             path=_PATH,
-            not_found_meaning=f"{_PATH} returned 404 - this server does not look like an Open Climate Service.",
+            not_found_meaning=f"{_PATH} returned 404 - this server does not look like an Open Geo Service.",
         )
         if diagnosis is not None:
             message, diag_details = diagnosis
@@ -65,7 +65,7 @@ class OcsHealthCheck:
             return CheckResult(
                 name=self.name,
                 status=Status.FAIL,
-                message=f"{_PATH} responded with a non-JSON body - a proxy or login page may be in front of OCS.",
+                message=f"{_PATH} responded with a non-JSON body - a proxy or login page may be in front of OGS.",
                 duration_ms=duration_ms,
             )
 

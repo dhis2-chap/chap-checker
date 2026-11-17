@@ -15,7 +15,7 @@ ansible-managed deploy, or systemd unit.
 concurrency = 5                     # how many instances to check in parallel
 
 # One [instances.<name>] block per server to monitor. `kind` defaults to
-# "dhis2"; see "Instance kinds" below for Open Climate Service servers.
+# "dhis2"; see "Instance kinds" below for Open Geo Service servers.
 [instances.prod]
 # name = "Production"              # optional human label for TUI / dashboard / Slack body
 url = "https://dhis2.example.com"
@@ -98,7 +98,12 @@ before kinds existed keep working unchanged.
 | `kind`    | Server                                                                                   | Auth                                        | Checks                    |
 | --------- | ---------------------------------------------------------------------------------------- | ------------------------------------------- | ------------------------- |
 | `"dhis2"` | DHIS2 (optionally with the chap-core integration)                                         | required: password or token (see above)     | `http_2xx`, `dhis2_*`     |
-| `"ocs"`   | [Open Climate Service](https://github.com/dhis2/open-climate-service) (openEO backend)    | none                                        | `http_2xx`, `ocs_*`       |
+| `"ocs"`   | [Open Geo Service](https://github.com/dhis2/open-geo-service) (openEO backend)           | none                                        | `http_2xx`, `ocs_*`       |
+
+Open Geo Service was called Open Climate Service (OCS) until late 2026. The
+`kind` value and the `ocs_*` check names keep the old abbreviation so
+existing configs and state files keep working; only the displayed name
+changed.
 
 ```toml
 [instances.nepal-ocs]
@@ -108,14 +113,14 @@ url = "https://ocs-demo-nepal.dhis2.org"
 alerts = ["slack"]
 ```
 
-An OCS instance accepts the shared fields only: `name`, `url`, `timeout_s`,
-`verify_tls`, `checks`, `alerts`. OCS has no authentication, so setting
+An OGS instance accepts the shared fields only: `name`, `url`, `timeout_s`,
+`verify_tls`, `checks`, `alerts`. OGS has no authentication, so setting
 `username` / `password` / `token` on it is a validation error, and neither
 the top-level `[retry]` block nor a per-instance `retry_policy` applies to it.
 
 Alerts, the state file, `verify --json` and the dashboard treat every kind the
 same way. JSON output carries a `target_kind` field per run, and dashboard
-tiles show the platform (`DHIS2 2.42.3`, `OCS 0.1.0`).
+tiles show the platform (`DHIS2 2.42.3`, `OGS 0.1.0`).
 
 ## Per-instance check filter
 
@@ -140,7 +145,7 @@ checks = ["dhis2_chap_system_info"]   # pulls in dhis2_ping, dhis2_chap_route, d
 ```
 
 Unknown names, and names that don't apply to the instance's kind (for example
-`dhis2_ping` on an OCS instance), are rejected at config load. There is no
+`dhis2_ping` on an OGS instance), are rejected at config load. There is no
 "exclude" syntax — list the checks you want.
 
 The CLI's `--check` flag overrides every instance's list for one run. Names

@@ -9,7 +9,7 @@ the client its checks expect:
   ``client.get_response(...)`` exactly like every other dhis2w-client
   consumer.
 - :class:`OcsTarget` (``kind = "ocs"``) opens a plain ``httpx2.AsyncClient``
-  rooted at an Open Climate Service deployment. OCS has no auth, so the
+  rooted at an Open Geo Service deployment. OGS has no auth, so the
   client carries no credentials.
 """
 
@@ -24,7 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 TargetKind = Literal["dhis2", "ocs"]
 
 # Human-readable platform label per kind, shown on dashboard tiles.
-PLATFORM_LABELS: dict[str, str] = {"dhis2": "DHIS2", "ocs": "OCS"}
+PLATFORM_LABELS: dict[str, str] = {"dhis2": "DHIS2", "ocs": "OGS"}
 
 
 class BaseTarget(BaseModel):
@@ -49,9 +49,9 @@ class BaseTarget(BaseModel):
 
 
 class OcsTarget(BaseTarget):
-    """An Open Climate Service (openEO backend) deployment under test.
+    """An Open Geo Service (openEO backend) deployment under test.
 
-    OCS exposes its API without authentication, so there are no
+    OGS exposes its API without authentication, so there are no
     credential fields. Retries are not supported for this kind yet.
     """
 
