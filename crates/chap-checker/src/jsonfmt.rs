@@ -1,17 +1,33 @@
 //! JSON text in the shape the Python implementation printed.
 //!
-//! `json.dump(..., indent=2, sort_keys=True)` with Python's defaults: keys sorted (serde_json's
-//! map is a `BTreeMap` without the `preserve_order` feature, so going through `Value` sorts every
-//! level, struct fields included), two-space indent, and non-ASCII escaped as `\uXXXX`
+//! `json.dump(..., indent=2, sort_keys=True)` with Python's defaults: keys sorted at every level,
+//! struct fields included, two-space indent, and non-ASCII escaped as `\uXXXX`
 //! (`ensure_ascii=True`). Scripts parsing `verify --json` see the same bytes as before.
+//!
+//! The keys are sorted here, explicitly: whether serde_json's map keeps insertion order depends
+//! on a feature any crate in the build can turn on (sokkel-tui does).
 
 use serde::Serialize;
 
 /// Serialize `value` as pretty, key-sorted, ASCII-only JSON.
 pub fn to_pretty_sorted<T: Serialize>(value: &T) -> serde_json::Result<String> {
-    let value = serde_json::to_value(value)?;
+    let value = sorted(serde_json::to_value(value)?);
     let text = serde_json::to_string_pretty(&value)?;
     Ok(escape_non_ascii(&text))
+}
+
+/// `value` with every object's keys in sorted order, at every depth.
+fn sorted(value: serde_json::Value) -> serde_json::Value {
+    use serde_json::Value;
+    match value {
+        Value::Object(map) => {
+            let mut entries: Vec<(String, Value)> = map.into_iter().collect();
+            entries.sort_by(|a, b| a.0.cmp(&b.0));
+            Value::Object(entries.into_iter().map(|(k, v)| (k, sorted(v))).collect())
+        }
+        Value::Array(items) => Value::Array(items.into_iter().map(sorted).collect()),
+        other => other,
+    }
 }
 
 /// Replace every non-ASCII character with its `\uXXXX` escape (surrogate pairs above U+FFFF).
