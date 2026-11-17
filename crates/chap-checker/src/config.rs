@@ -31,7 +31,15 @@ pub enum ConfigError {
 impl std::fmt::Display for ConfigError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ConfigError::Io(path, e) => write!(f, "{}: {e}", path.display()),
+            // Python's `OSError` text: `[Errno 2] No such file or directory: '/path'`.
+            ConfigError::Io(path, e) => {
+                let text = e.to_string();
+                let reason = text.split(" (os error").next().unwrap_or(&text);
+                match e.raw_os_error() {
+                    Some(code) => write!(f, "[Errno {code}] {reason}: '{}'", path.display()),
+                    None => write!(f, "{reason}: '{}'", path.display()),
+                }
+            }
             ConfigError::Toml(message) => f.write_str(message),
             ConfigError::Invalid(errors) => {
                 write!(f, "{} validation error(s) for CheckerConfig:", errors.len())?;
@@ -105,7 +113,7 @@ fn http_url(text: &str, userinfo_hint: &str) -> Result<Url, String> {
 
 fn reject_userinfo(url: &Url, hint: &str) -> Result<(), String> {
     if !url.username().is_empty() || url.password().is_some() {
-        return Err(format!("{USERINFO_MESSAGE} {hint}"));
+        return Err(format!("Value error, {USERINFO_MESSAGE} {hint}"));
     }
     Ok(())
 }
@@ -462,12 +470,13 @@ impl CheckerConfig {
         let value: toml::Value =
             toml::from_str(text).map_err(|e| ConfigError::Toml(toml_message(&e, text)))?;
         let raw: RawConfig = typed(value, "").map_err(|e| ConfigError::Invalid(vec![e]))?;
+        // Errors come in pydantic's order: each field in declaration order, and a table's own
+        // cross-field rules ("Value error, ...") only once its fields are valid.
         let mut errors: Vec<(String, String)> = Vec::new();
 
         let mut instances = IndexMap::new();
         for (key, value) in raw.instances {
-            let loc = format!("instances.{key}");
-            match instance(value, &loc) {
+            match instance(value, &format!("instances.{key}")) {
                 Ok(inst) => {
                     instances.insert(key, inst);
                 }
@@ -478,75 +487,92 @@ impl CheckerConfig {
         if let Some(alerts) = &raw.alerts {
             if let Some(slack) = &alerts.slack {
                 let loc = "alerts.slack";
-                if slack.webhook_url.is_some() == slack.webhook_url_env.is_some() {
-                    errors.push((
-                        loc.into(),
-                        "set exactly one of 'webhook_url' or 'webhook_url_env'".into(),
-                    ));
-                }
+                let before = errors.len();
                 if let Some(url) = &slack.webhook_url
                     && let Err(e) = http_url(url, SLACK_USERINFO_HINT)
                 {
                     errors.push((format!("{loc}.webhook_url"), e));
                 }
                 if slack.timeout_s <= 0.0 {
+                    errors.push((format!("{loc}.timeout_s"), GT_ZERO.into()));
+                }
+                if errors.len() == before
+                    && slack.webhook_url.is_some() == slack.webhook_url_env.is_some()
+                {
                     errors.push((
-                        format!("{loc}.timeout_s"),
-                        "Input should be greater than 0".into(),
+                        loc.into(),
+                        value_error("set exactly one of 'webhook_url' or 'webhook_url_env'"),
                     ));
                 }
             }
             if let Some(webhook) = &alerts.webhook {
                 let loc = "alerts.webhook";
-                if webhook.url.is_some() == webhook.url_env.is_some() {
-                    errors.push((loc.into(), "set exactly one of 'url' or 'url_env'".into()));
-                }
+                let before = errors.len();
                 if let Some(url) = &webhook.url
                     && let Err(e) = http_url(url, WEBHOOK_USERINFO_HINT)
                 {
                     errors.push((format!("{loc}.url"), e));
                 }
                 if webhook.timeout_s <= 0.0 {
+                    errors.push((format!("{loc}.timeout_s"), GT_ZERO.into()));
+                }
+                if errors.len() == before && webhook.url.is_some() == webhook.url_env.is_some() {
                     errors.push((
-                        format!("{loc}.timeout_s"),
-                        "Input should be greater than 0".into(),
+                        loc.into(),
+                        value_error("set exactly one of 'url' or 'url_env'"),
                     ));
                 }
             }
         }
 
         if let Some(auth) = &raw.auth {
+            let before = errors.len();
             if let Some(token) = &auth.token
                 && let Err(e) = validate_bearer_token(token, "auth.token")
             {
-                errors.push(("auth.token".into(), e));
+                errors.push(("auth.token".into(), value_error(&e)));
             }
-            if auth.token.is_some() == auth.token_env.is_some() {
+            if errors.len() == before && auth.token.is_some() == auth.token_env.is_some() {
                 errors.push((
                     "auth".into(),
-                    "set exactly one of 'token' or 'token_env' in [auth] (or omit the [auth] block entirely to disable auth)."
-                        .into(),
+                    value_error(
+                        "set exactly one of 'token' or 'token_env' in [auth] (or omit the [auth] block entirely to disable auth).",
+                    ),
                 ));
             }
         }
 
         let title_len = raw.ui.title.chars().count();
-        if !(1..=120).contains(&title_len) {
+        if title_len < 1 {
             errors.push((
                 "ui.title".into(),
-                "must be between 1 and 120 characters".into(),
+                "String should have at least 1 character".into(),
+            ));
+        } else if title_len > 120 {
+            errors.push((
+                "ui.title".into(),
+                "String should have at most 120 characters".into(),
             ));
         }
 
         let concurrency = raw.concurrency.unwrap_or(DEFAULT_CONCURRENCY as i64);
-        if !(1..=100).contains(&concurrency) {
-            errors.push(("concurrency".into(), "must be between 1 and 100".into()));
+        if concurrency < 1 {
+            errors.push(("concurrency".into(), GT_ZERO.into()));
+        } else if concurrency > 100 {
+            errors.push((
+                "concurrency".into(),
+                "Input should be less than or equal to 100".into(),
+            ));
         }
 
         if let Some(retry) = &raw.retry {
             for (field, problem) in retry.problems() {
                 errors.push((format!("retry.{field}"), problem));
             }
+        }
+
+        if !errors.is_empty() {
+            return Err(ConfigError::Invalid(errors));
         }
 
         let configured = raw
@@ -567,19 +593,16 @@ impl CheckerConfig {
                 } else {
                     configured.iter().copied().collect::<Vec<_>>().join(", ")
                 };
-                errors.push((
+                return Err(ConfigError::Invalid(vec![(
                     String::new(),
-                    format!(
+                    value_error(&format!(
                         "instance '{name}' references unconfigured alerter(s): {}. Configured alerters: {have}",
                         unknown.join(", ")
-                    ),
-                ));
+                    )),
+                )]));
             }
         }
 
-        if !errors.is_empty() {
-            return Err(ConfigError::Invalid(errors));
-        }
         Ok(Self {
             instances,
             alerts: raw.alerts,
@@ -620,39 +643,36 @@ impl CheckerConfig {
     }
 }
 
-/// Validate one `[instances.<key>]` table.
-fn instance(value: toml::Value, loc: &str) -> Result<InstanceConfig, Vec<(String, String)>> {
+/// Validate one `[instances.<key>]` table. Errors are located under its kind, as pydantic's
+/// tagged union located them: `instances.<key>.dhis2.url`.
+fn instance(value: toml::Value, key_loc: &str) -> Result<InstanceConfig, Vec<(String, String)>> {
     let kind = match value.get("kind") {
         None => TargetKind::Dhis2,
         Some(toml::Value::String(k)) if k == "dhis2" => TargetKind::Dhis2,
         Some(toml::Value::String(k)) if k == "ogs" => TargetKind::Ogs,
-        Some(_) => {
+        Some(other) => {
+            let tag = match other {
+                toml::Value::String(s) => s.clone(),
+                v => v.to_string(),
+            };
             return Err(vec![(
-                format!("{loc}.kind"),
-                "Input tag does not match any of the expected tags: 'dhis2', 'ogs'".into(),
+                key_loc.to_owned(),
+                format!(
+                    "Input tag '{tag}' found using _instance_kind() does not match any of the expected tags: 'dhis2', 'ogs'"
+                ),
             )]);
         }
     };
-    let mut errors = Vec::new();
+    let loc = format!("{key_loc}.{}", kind.as_str());
+    if !value.is_table() {
+        return Err(vec![(
+            loc,
+            "Input should be a valid dictionary or instance of Dhis2InstanceConfig".into(),
+        )]);
+    }
     let (name, url, timeout_s, verify_tls, check_names, alerts, dhis2) = match kind {
         TargetKind::Dhis2 => {
-            let d: Dhis2InstanceConfig = typed(value, loc).map_err(|e| vec![e])?;
-            for (field, literal) in [("password", &d.password), ("token", &d.token)] {
-                if literal.as_deref().is_some_and(|v| v.trim().is_empty()) {
-                    errors.push((
-                        format!("{loc}.{field}"),
-                        "must not be empty; remove the field or set a real value.".into(),
-                    ));
-                }
-            }
-            if let Err(e) = auth_mode(&d) {
-                errors.push((loc.to_owned(), e));
-            }
-            if let Some(retry) = &d.retry_policy {
-                for (field, problem) in retry.problems() {
-                    errors.push((format!("{loc}.retry_policy.{field}"), problem));
-                }
-            }
+            let d: Dhis2InstanceConfig = typed(value, &loc).map_err(|e| vec![e])?;
             (
                 d.name.clone(),
                 d.url.clone(),
@@ -664,7 +684,7 @@ fn instance(value: toml::Value, loc: &str) -> Result<InstanceConfig, Vec<(String
             )
         }
         TargetKind::Ogs => {
-            let o: OgsInstanceConfig = typed(value, loc).map_err(|e| vec![e])?;
+            let o: OgsInstanceConfig = typed(value, &loc).map_err(|e| vec![e])?;
             (
                 o.name,
                 o.url,
@@ -676,6 +696,9 @@ fn instance(value: toml::Value, loc: &str) -> Result<InstanceConfig, Vec<(String
             )
         }
     };
+
+    // Field rules, in declaration order.
+    let mut errors = Vec::new();
     let url = match http_url(
         &url,
         "Use the 'username' + 'password' / 'password_env' or 'token' / 'token_env' fields instead.",
@@ -687,35 +710,62 @@ fn instance(value: toml::Value, loc: &str) -> Result<InstanceConfig, Vec<(String
         }
     };
     if timeout_s <= 0.0 {
+        errors.push((format!("{loc}.timeout_s"), GT_ZERO.into()));
+    }
+    if check_names.as_ref().is_some_and(Vec::is_empty) {
         errors.push((
-            format!("{loc}.timeout_s"),
-            "Input should be greater than 0".into(),
+            format!("{loc}.checks"),
+            "List should have at least 1 item after validation, not 0".into(),
         ));
     }
-    if let Some(names) = &check_names {
-        if names.is_empty() {
-            errors.push((
-                format!("{loc}.checks"),
-                "List should have at least 1 item after validation".into(),
-            ));
-        } else if let Err(e) = checks_for_kind(names, kind) {
-            errors.push((loc.to_owned(), e));
+    if let Some(d) = &dhis2 {
+        for (field, literal) in [("password", &d.password), ("token", &d.token)] {
+            if literal.as_deref().is_some_and(|v| v.trim().is_empty()) {
+                errors.push((
+                    format!("{loc}.{field}"),
+                    value_error("must not be empty; remove the field or set a real value."),
+                ));
+            }
+        }
+        if let Some(retry) = &d.retry_policy {
+            for (field, problem) in retry.problems() {
+                errors.push((format!("{loc}.retry_policy.{field}"), problem));
+            }
         }
     }
-    match (errors.is_empty(), url) {
-        (true, Some(url)) => Ok(InstanceConfig {
-            kind,
-            name,
-            url,
-            timeout_s,
-            verify_tls,
-            checks: check_names,
-            alerts,
-            dhis2,
-        }),
-        _ => Err(errors),
+    let Some(url) = url.filter(|_| errors.is_empty()) else {
+        return Err(errors);
+    };
+
+    // Cross-field rules, once the fields are valid; the first one broken is reported.
+    if let Some(names) = &check_names
+        && let Err(e) = checks_for_kind(names, kind)
+    {
+        return Err(vec![(loc, value_error(&e))]);
     }
+    if let Some(d) = &dhis2
+        && let Err(e) = auth_mode(d)
+    {
+        return Err(vec![(loc, value_error(&e))]);
+    }
+    Ok(InstanceConfig {
+        kind,
+        name,
+        url,
+        timeout_s,
+        verify_tls,
+        checks: check_names,
+        alerts,
+        dhis2,
+    })
 }
+
+/// pydantic's message for a broken cross-field rule.
+fn value_error(message: &str) -> String {
+    format!("Value error, {message}")
+}
+
+const GT_ZERO: &str = "Input should be greater than 0";
 
 fn auth_mode(d: &Dhis2InstanceConfig) -> Result<(), String> {
     let has_password = d.password.is_some() || d.password_env.is_some();
@@ -781,20 +831,91 @@ fn checks_for_kind(names: &[String], kind: TargetKind) -> Result<(), String> {
 /// Deserialize `value` into `T`, reporting the failing field's dotted path under `prefix`.
 fn typed<T: DeserializeOwned>(value: toml::Value, prefix: &str) -> Result<T, (String, String)> {
     serde_path_to_error::deserialize(value).map_err(|e| {
-        let path = e.path().to_string();
+        // `a.b[0]` -> `a.b.0`, pydantic's spelling.
+        let path = e.path().to_string().replace('[', ".").replace(']', "");
         let path = if path == "." { String::new() } else { path };
-        let loc = match (prefix.is_empty(), path.is_empty()) {
-            (true, _) => path,
-            (false, true) => prefix.to_owned(),
-            (false, false) => format!("{prefix}.{path}"),
-        };
         // toml appends "\nin `field`" lines; the path already says where.
         let message = e.into_inner().to_string();
-        (
-            loc,
-            redact(message.lines().next().unwrap_or_default().trim()),
-        )
+        let (field, message) = pydantic_message(message.lines().next().unwrap_or_default().trim());
+        let mut loc: Vec<&str> = [prefix, path.as_str()]
+            .into_iter()
+            .filter(|p| !p.is_empty())
+            .collect();
+        if let Some(field) = &field
+            && !path
+                .split('.')
+                .next_back()
+                .is_some_and(|last| last == field)
+        {
+            loc.push(field);
+        }
+        (loc.join("."), message)
     })
+}
+
+/// Turn a serde message into pydantic's wording, never echoing the rejected value.
+///
+/// Returns the field the message names (for an unknown or missing field) and the message.
+fn pydantic_message(message: &str) -> (Option<String>, String) {
+    let backticked = |text: &str| -> Vec<String> {
+        text.split('`')
+            .skip(1)
+            .step_by(2)
+            .map(str::to_owned)
+            .collect()
+    };
+    if let Some(rest) = message.strip_prefix("unknown field ") {
+        return (
+            backticked(rest).into_iter().next(),
+            "Extra inputs are not permitted".into(),
+        );
+    }
+    if let Some(rest) = message.strip_prefix("missing field ") {
+        return (backticked(rest).into_iter().next(), "Field required".into());
+    }
+    if let Some(rest) = message.strip_prefix("unknown variant ") {
+        let options = backticked(rest)
+            .into_iter()
+            .skip(1)
+            .map(|o| format!("'{o}'"))
+            .collect::<Vec<_>>();
+        let listed = match options.split_last() {
+            Some((last, [])) => last.clone(),
+            Some((last, init)) => format!("{} or {last}", init.join(", ")),
+            None => String::new(),
+        };
+        return (None, format!("Input should be {listed}"));
+    }
+    if let Some(rest) = message.strip_prefix("invalid type: ") {
+        let (got, expected) = rest.split_once(", expected ").unwrap_or((rest, ""));
+        let from_string = got.starts_with("string");
+        let text = match expected {
+            "a string" => "Input should be a valid string".to_owned(),
+            "a boolean" => "Input should be a valid boolean".to_owned(),
+            "a sequence" => "Input should be a valid list".to_owned(),
+            e if e == "a map" || e.starts_with("struct ") || e.starts_with("a map") => {
+                "Input should be a valid dictionary".to_owned()
+            }
+            e if e.starts_with('f') || e.contains("float") => {
+                if from_string {
+                    "Input should be a valid number, unable to parse string as a number".to_owned()
+                } else {
+                    "Input should be a valid number".to_owned()
+                }
+            }
+            e if e.starts_with('i') || e.starts_with('u') || e.contains("integer") => {
+                if from_string {
+                    "Input should be a valid integer, unable to parse string as an integer"
+                        .to_owned()
+                } else {
+                    "Input should be a valid integer".to_owned()
+                }
+            }
+            _ => redact(message),
+        };
+        return (None, text);
+    }
+    (None, redact(message))
 }
 
 /// Drop the offending value from serde's "invalid type/value" messages; keep the rest.
@@ -912,7 +1033,7 @@ mod tests {
             token = "t""#,
         );
         assert!(
-            both.contains("instances.a: set either a password"),
+            both.contains("instances.a.dhis2: Value error, set either a password"),
             "{both}"
         );
         let none = errors("[instances.a]\nurl = \"https://x\"");
@@ -927,7 +1048,7 @@ mod tests {
             token = "t""#,
         );
         assert!(
-            text.contains("instances.a.url: credentials embedded"),
+            text.contains("instances.a.dhis2.url: Value error, credentials embedded"),
             "{text}"
         );
         assert!(!text.contains("hunter2"));
@@ -942,7 +1063,7 @@ mod tests {
             password = 123456"#,
         );
         assert!(
-            text.contains("instances.a.password: invalid type: integer, expected a string"),
+            text.contains("instances.a.dhis2.password: Input should be a valid string"),
             "{text}"
         );
         assert!(!text.contains("123456"));
@@ -950,7 +1071,7 @@ mod tests {
 
     #[test]
     fn unknown_fields_checks_and_alerters() {
-        assert!(errors("bogus = 1").contains("unknown field `bogus`"));
+        assert!(errors("bogus = 1").contains("bogus: Extra inputs are not permitted"));
         let text = errors(
             r#"[instances.a]
             kind = "ogs"
@@ -971,7 +1092,7 @@ mod tests {
         );
         assert!(
             errors("[instances.a]\nkind = \"ogs\"\nurl = \"https://x\"\npassword = \"p\"")
-                .contains("unknown field")
+                .contains("instances.a.ogs.password: Extra inputs are not permitted")
         );
     }
 

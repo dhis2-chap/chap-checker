@@ -10,9 +10,11 @@ use chap_checker::checks::{self, Status, resolve_checks};
 use chap_checker::config::{
     CheckerConfig, DEFAULT_CONCURRENCY, DEFAULT_CONFIG_FILENAME, default_config_path, load_config,
 };
+use chap_checker::daemon::Daemon;
 use chap_checker::http::{Auth, Target, TargetKind};
 use chap_checker::output::{new_table, render, styled};
 use chap_checker::runner::{TargetEntry, VerifyReport, run_targets};
+use chap_checker::serve::ServeOptions;
 use chap_checker::state_store::{DEFAULT_STATE_FILENAME, Transition, TransitionKind};
 use chap_checker::{VERSION, jsonfmt};
 use chrono::Utc;
@@ -78,6 +80,54 @@ enum Command {
     /// Inspect available checks.
     #[command(subcommand, arg_required_else_help = true)]
     Checks(ChecksCommand),
+    /// Launch the chap-checker server.
+    ///
+    /// A long-running daemon: it runs the check loop, dispatches alerts (with `--alerts`), serves
+    /// JSON state at `/api/state` and, unless `--no-ui`, a browser dashboard at `/`. The TUI's
+    /// `--connect` mode and any browser pointed at it see the same snapshot. Meant to run under
+    /// systemd on a TV machine or a small VM; see the Server guide for the unit file.
+    Serve(ServeArgs),
+}
+
+#[derive(clap::Args)]
+struct ServeArgs {
+    /// Path to a TOML config (defaults to ./chap-checker.toml if present).
+    #[arg(short, long, env = "CHAP_CHECKER_CONFIG")]
+    config: Option<PathBuf>,
+    /// Server-side check refresh interval (seconds).
+    #[arg(long, default_value_t = 30.0, value_parser = min_interval)]
+    interval: f64,
+    /// Dispatch alerts (Slack, webhook, ...) from refresh cycles. Off by default.
+    #[arg(long, overrides_with = "no_alerts")]
+    alerts: bool,
+    /// Don't dispatch alerts (the default).
+    #[arg(long, overrides_with = "alerts")]
+    no_alerts: bool,
+    /// State file path (default: ./chap-checker.state.json next to the config).
+    #[arg(long, env = "CHAP_CHECKER_STATE")]
+    state: Option<PathBuf>,
+    /// Bind address. Use 0.0.0.0 to expose on the local network (e.g. for a TV).
+    #[arg(long, default_value = "127.0.0.1")]
+    host: String,
+    /// Port to listen on.
+    #[arg(long, default_value_t = 8765, value_parser = clap::value_parser!(u16).range(1..))]
+    port: u16,
+    /// Serve the browser dashboard at `/` (the default).
+    #[arg(long, overrides_with = "no_ui")]
+    ui: bool,
+    /// API only: skip the browser dashboard; `/` returns 404, `/api/*` is unchanged.
+    #[arg(long, overrides_with = "ui")]
+    no_ui: bool,
+}
+
+fn min_interval(text: &str) -> Result<f64, String> {
+    let value: f64 = text
+        .parse()
+        .map_err(|_| format!("'{text}' is not a number"))?;
+    if value < 2.0 {
+        return Err(format!("{value} is not in the range x>=2.0"));
+    }
+    Ok(value)
 }
 
 #[derive(clap::Args)]
@@ -193,7 +243,9 @@ fn main() -> ExitCode {
         println!("chap-checker {VERSION}");
         return ExitCode::SUCCESS;
     }
-    init_logging(cli.debug);
+    // The daemon logs at info (startup lines, one per request, one per cycle); the rest at warn.
+    let daemon_mode = matches!(cli.command, Some(Command::Serve(_)));
+    init_logging(cli.debug, daemon_mode);
     let global = Global {
         json: cli.json,
         quiet: cli.quiet,
@@ -215,6 +267,7 @@ fn main() -> ExitCode {
             alerts_test(&global, name, kind, config)
         }
         Some(Command::Checks(ChecksCommand::List)) => checks_list(&global),
+        Some(Command::Serve(args)) => serve(args),
     };
     match outcome {
         Ok(code) => code,
@@ -226,15 +279,16 @@ fn main() -> ExitCode {
 }
 
 /// Logs go to stderr so `--json` on stdout stays machine-readable.
-fn init_logging(debug: bool) {
-    let level = if debug {
-        "chap_checker=debug"
-    } else {
-        "chap_checker=warn"
+fn init_logging(debug: bool, daemon: bool) {
+    let level = match (debug, daemon) {
+        (true, _) => "chap_checker=debug",
+        (false, true) => "chap_checker=info",
+        (false, false) => "chap_checker=warn",
     };
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::new(level))
         .with_writer(std::io::stderr)
+        .with_ansi(std::io::stderr().is_terminal())
         .with_target(true)
         .init();
 }
@@ -491,6 +545,46 @@ fn secret(
         return rpassword::prompt_password(format!("{prompt}: ")).map_err(|e| Usage(e.to_string()));
     }
     Err(missing.into())
+}
+
+fn serve(args: ServeArgs) -> Outcome {
+    let path = config_path(args.config.clone());
+    if !path.exists() {
+        return Err(format!(
+            "No config at {}. Provide --config <path> or create a ./{DEFAULT_CONFIG_FILENAME}.",
+            path.display()
+        )
+        .into());
+    }
+    let cfg = load_or_fail(&path)?;
+    if cfg.instances.is_empty() {
+        return Err(format!("{} contains no [instances.<name>] entries.", path.display()).into());
+    }
+    let targets = cfg.target_entries()?;
+    // Resolved up front so a missing or empty token_env is a clean error, not a 500 later.
+    let auth_token = match &cfg.auth {
+        Some(auth) => Some(auth.resolve_token()?),
+        None => None,
+    };
+    let state = state_path(args.state.clone(), &path);
+    let daemon = std::sync::Arc::new(Daemon::new(
+        targets,
+        cfg,
+        auth_token,
+        args.interval,
+        args.alerts && !args.no_alerts,
+        Some(state),
+        Some(path),
+    ));
+    let options = ServeOptions {
+        host: args.host,
+        port: args.port,
+        ui_enabled: !args.no_ui,
+    };
+    runtime()
+        .block_on(chap_checker::serve::run(daemon, options))
+        .map_err(|e| Usage(format!("could not serve: {e}")))?;
+    Ok(ExitCode::SUCCESS)
 }
 
 fn checks_list(global: &Global) -> Outcome {
