@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -10,9 +11,11 @@ from chap_checker.checks.base import CheckResult, Status
 from chap_checker.runner import RunReport
 from chap_checker.state_store import (
     CheckState,
+    ReceiverSpec,
     StateFile,
     StateLockTimeout,
     alert_state_lock,
+    compute_receiver_transitions,
     compute_transitions,
     load_state,
     save_state,
@@ -53,15 +56,52 @@ def test_save_is_atomic_no_leftover_tmp(tmp_path: Path) -> None:
     assert leftovers == []
 
 
-def test_concurrent_saves_use_unique_tmp_files(tmp_path: Path) -> None:
-    """Two save_state calls must not collide on a shared tmp path. We can't
-    truly race in a single test, but we can confirm mkstemp gives a unique
-    suffix by inspecting that two consecutive writes still leave only the
-    target file behind."""
+def test_concurrent_saves_use_unique_tmp_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Overlapping save_state calls must each write their own tmp file.
+
+    Both writer threads are held at ``os.replace`` until each has fully
+    written its tmp file, so the two writes genuinely overlap. A fixed
+    tmp filename would make both threads hand the same source path to
+    ``os.replace`` (and the second rename would then fail).
+    """
     path = tmp_path / "chap-checker.state.json"
-    save_state(path, StateFile())
-    save_state(path, StateFile())
-    assert path.exists()
+    real_replace = os.replace
+    barrier = threading.Barrier(2, timeout=10)
+    sources: list[str] = []
+    lock = threading.Lock()
+
+    def overlapping_replace(src: str | os.PathLike[str], dst: str | os.PathLike[str]) -> None:
+        with lock:
+            sources.append(str(src))
+        barrier.wait()  # both tmp files exist on disk at this point
+        real_replace(src, dst)
+
+    monkeypatch.setattr(os, "replace", overlapping_replace)
+
+    now = datetime.now(UTC)
+    states = [
+        StateFile(states={"a::ping": CheckState(status=Status.FAIL, since=now)}),
+        StateFile(states={"b::ping": CheckState(status=Status.OK, since=now)}),
+    ]
+    errors: list[BaseException] = []
+
+    def writer(state: StateFile) -> None:
+        try:
+            save_state(path, state)
+        except BaseException as exc:  # noqa: BLE001 - surfaced via the assertion below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=writer, args=(s,)) for s in states]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=15)
+
+    assert errors == []
+    assert len(sources) == 2
+    assert sources[0] != sources[1]
+    # The survivor is one of the two complete documents, never a mix.
+    assert load_state(path).states.keys() in ({"a::ping"}, {"b::ping"})
     assert list(tmp_path.glob("*.tmp")) == []
 
 
@@ -94,6 +134,62 @@ def test_load_schema_mismatch_returns_empty(tmp_path: Path) -> None:
     path.write_text(json.dumps({"version": 999, "states": "not a dict"}), encoding="utf-8")
     state = load_state(path)
     assert state.states == {}
+
+
+def test_load_invalid_utf8_returns_empty(tmp_path: Path) -> None:
+    """A binary-corrupted file (not UTF-8) follows the unreadable-state policy."""
+    path = tmp_path / "chap-checker.state.json"
+    path.write_bytes(b'{"version": 1, "states": {"\xff\xfe\x00\x80": 1}}')
+    state = load_state(path)
+    assert state.states == {}
+    # Left on disk for inspection.
+    assert path.exists()
+
+
+def test_load_legacy_format_without_receivers(tmp_path: Path) -> None:
+    """State files written before the per-receiver ledger still load."""
+    path = tmp_path / "chap-checker.state.json"
+    path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "states": {
+                    "prod::ping": {"status": "fail", "since": "2026-05-13T15:05:12Z"},
+                    "prod::route": {"status": "warn", "since": "2026-05-13T15:05:12Z"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    state = load_state(path)
+    assert state.receivers is None
+    assert state.states["prod::ping"].status is Status.FAIL
+
+    now = datetime.now(UTC)
+    reports = [_report("prod", _result("ping", Status.FAIL), _result("route", Status.FAIL))]
+    transitions, new_state = compute_transitions(state, reports, {Status.FAIL}, now, receiver="slack")
+    # ping was already FAIL under the old format: assumed announced, no re-alert.
+    # route was WARN (not selected) and is now FAIL: that entry is announced.
+    assert [(t.check_name, t.kind) for t in transitions] == [("route", "failure")]
+    assert new_state.receivers is not None
+    assert set(new_state.receivers["slack"]) == {"prod::ping", "prod::route"}
+
+    # The in-flight legacy outage still gets its recovery.
+    transitions, _ = compute_transitions(
+        new_state, [_report("prod", _result("ping", Status.OK))], {Status.FAIL}, now, receiver="slack"
+    )
+    assert [(t.check_name, t.kind) for t in transitions] == [("ping", "recovery")]
+
+
+def test_new_format_round_trips(tmp_path: Path) -> None:
+    now = datetime.now(UTC)
+    path = tmp_path / "chap-checker.state.json"
+    _, state = compute_transitions(StateFile(), [_report("prod", _result("ping", Status.FAIL))], {Status.FAIL}, now)
+    save_state(path, state)
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    assert raw["version"] == 1
+    assert raw["receivers"]["default"]["prod::ping"]["status"] == "fail"
+    assert load_state(path) == state
 
 
 def test_save_state_creates_missing_parent_dirs(tmp_path: Path) -> None:
@@ -274,6 +370,146 @@ def test_partial_run_does_not_resurrect_fail_as_new_first_failure() -> None:
     # Critical: no re-alert for staging - the partial run preserved its
     # FAIL state so the full run sees it as sustained, not fresh.
     assert transitions == []
+
+
+# ---------- per-receiver alert semantics ----------
+
+
+def _run_sequence(
+    statuses: list[Status],
+    receivers: dict[str, ReceiverSpec],
+    target: str = "prod",
+) -> list[dict[str, list[tuple[str, Status, Status]]]]:
+    """Feed one check through ``statuses``; return per-step (kind, prev, curr) per receiver."""
+    state = StateFile()
+    out: list[dict[str, list[tuple[str, Status, Status]]]] = []
+    for i, status in enumerate(statuses):
+        now = datetime(2026, 6, 1, 12, i, tzinfo=UTC)
+        by_receiver, state = compute_receiver_transitions(
+            state, [_report(target, _result("ping", status))], receivers, now
+        )
+        out.append(
+            {name: [(t.kind, t.previous_status, t.current_status) for t in ts] for name, ts in by_receiver.items()}
+        )
+    return out
+
+
+def _spec(*statuses: Status) -> ReceiverSpec:
+    return ReceiverSpec(notify_on=frozenset(statuses))
+
+
+def test_fail_only_filter_alerts_on_warn_then_fail() -> None:
+    """Regression: OK -> WARN -> FAIL -> OK with notify_on=["fail"] used to
+    swallow the failure (WARN -> FAIL was skipped as non-OK -> non-OK) and
+    then send a recovery for a failure that was never announced."""
+    steps = _run_sequence([Status.OK, Status.WARN, Status.FAIL, Status.OK], {"r": _spec(Status.FAIL)})
+    assert [s["r"] for s in steps] == [
+        [],
+        [],
+        [("failure", Status.WARN, Status.FAIL)],
+        [("recovery", Status.FAIL, Status.OK)],
+    ]
+
+
+def test_no_recovery_without_preceding_failure() -> None:
+    """OK -> WARN -> OK with notify_on=["fail"] is silent end to end."""
+    steps = _run_sequence([Status.OK, Status.WARN, Status.OK], {"r": _spec(Status.FAIL)})
+    assert [s["r"] for s in steps] == [[], [], []]
+
+
+def test_downgrade_out_of_selected_set_keeps_alert_open() -> None:
+    """FAIL -> WARN with only fail selected: quiet, alert stays open.
+
+    A later FAIL does not re-alert (the receiver was never told the outage
+    ended) and the eventual OK sends exactly one recovery.
+    """
+    steps = _run_sequence(
+        [Status.FAIL, Status.WARN, Status.FAIL, Status.WARN, Status.OK],
+        {"r": _spec(Status.FAIL)},
+    )
+    assert [s["r"] for s in steps] == [
+        [("failure", Status.OK, Status.FAIL)],
+        [],
+        [],
+        [],
+        [("recovery", Status.WARN, Status.OK)],
+    ]
+
+
+def test_two_receivers_with_different_filters() -> None:
+    """Each receiver's filter is applied to its own ledger; neither shadows the other."""
+    receivers = {
+        "slack": _spec(Status.FAIL, Status.ERROR, Status.WARN),
+        "webhook": _spec(Status.FAIL),
+    }
+    steps = _run_sequence([Status.OK, Status.WARN, Status.FAIL, Status.WARN, Status.OK], receivers)
+    assert [s["slack"] for s in steps] == [
+        [],
+        [("failure", Status.OK, Status.WARN)],
+        [],  # already alerting; WARN -> FAIL is a change inside the outage
+        [],
+        [("recovery", Status.WARN, Status.OK)],
+    ]
+    assert [s["webhook"] for s in steps] == [
+        [],
+        [],
+        [("failure", Status.WARN, Status.FAIL)],
+        [],
+        [("recovery", Status.WARN, Status.OK)],
+    ]
+
+
+def test_ok_in_notify_on_is_ignored() -> None:
+    """``ok`` in notify_on never opens an alert nor sends a stray recovery."""
+    steps = _run_sequence([Status.OK, Status.OK], {"r": _spec(Status.OK)})
+    assert [s["r"] for s in steps] == [[], []]
+
+
+def test_skipped_does_not_touch_receiver_ledger() -> None:
+    steps = _run_sequence([Status.FAIL, Status.SKIPPED, Status.OK], {"r": _spec(Status.FAIL)})
+    assert [s["r"] for s in steps] == [
+        [("failure", Status.OK, Status.FAIL)],
+        [],
+        [("recovery", Status.FAIL, Status.OK)],
+    ]
+
+
+def test_target_not_opted_in_has_no_open_alert() -> None:
+    """Opting in during an outage announces it rather than sending a lone recovery."""
+    now = datetime.now(UTC)
+    reports = [_report("prod", _result("ping", Status.FAIL))]
+    silent = {"r": ReceiverSpec(notify_on=frozenset({Status.FAIL}), targets=frozenset())}
+    opted = {"r": ReceiverSpec(notify_on=frozenset({Status.FAIL}), targets=frozenset({"prod"}))}
+
+    by_receiver, state = compute_receiver_transitions(StateFile(), reports, silent, now)
+    assert by_receiver == {"r": []}
+    assert state.states["prod::ping"].status is Status.FAIL
+
+    by_receiver, state = compute_receiver_transitions(state, reports, opted, now)
+    assert [t.kind for t in by_receiver["r"]] == ["failure"]
+
+    by_receiver, _ = compute_receiver_transitions(state, [_report("prod", _result("ping", Status.OK))], opted, now)
+    assert [t.kind for t in by_receiver["r"]] == ["recovery"]
+
+
+def test_newly_configured_receiver_is_told_about_ongoing_outage() -> None:
+    now = datetime.now(UTC)
+    reports = [_report("prod", _result("ping", Status.FAIL))]
+    _, state = compute_receiver_transitions(StateFile(), reports, {"slack": _spec(Status.FAIL)}, now)
+
+    both = {"slack": _spec(Status.FAIL), "webhook": _spec(Status.FAIL)}
+    by_receiver, state = compute_receiver_transitions(state, reports, both, now)
+    assert by_receiver["slack"] == []
+    assert [t.kind for t in by_receiver["webhook"]] == ["failure"]
+
+
+def test_unconfigured_receiver_ledger_is_carried_forward() -> None:
+    now = datetime.now(UTC)
+    reports = [_report("prod", _result("ping", Status.FAIL))]
+    _, state = compute_receiver_transitions(StateFile(), reports, {"slack": _spec(Status.FAIL)}, now)
+    _, state = compute_receiver_transitions(state, reports, {"webhook": _spec(Status.FAIL)}, now)
+    assert state.receivers is not None
+    assert "prod::ping" in state.receivers["slack"]
 
 
 # ---------- alert_state_lock ----------

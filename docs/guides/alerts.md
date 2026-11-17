@@ -19,9 +19,12 @@ configured alerter without waiting for a real outage.
 ## Per-instance opt-in
 
 `alerts = [...]` on an instance lists which configured alerters fire for
-it. The default is `[]` — no opt-in, no dispatch (the transition is
-still tracked in the state file, so flipping the opt-in on later doesn't
-backfill spurious "first failure" pings for sustained outages).
+it. The default is `[]` — no opt-in, no dispatch. The check's status is
+still tracked in the state file, but an alerter only keeps open alerts
+for instances opted into it: if you opt an instance in while one of its
+checks is already failing, the next run sends that alerter a failure for
+the ongoing outage (and later its recovery), rather than a lone recovery
+for a failure it was never told about.
 
 ```toml
 [instances.prod]                              # fans out to both alerters on every transition
@@ -78,7 +81,7 @@ Slack's own full guide on Incoming Webhooks lives at
 |---                |---              |---                            |---                                                                                                               |
 | `webhook_url`     | string          | —                             | Inline URL. Mutually exclusive with `webhook_url_env`. Must not contain `user:pass@` credentials.                |
 | `webhook_url_env` | string          | —                             | Name of an env var holding the URL. Recommended. Mutually exclusive with `webhook_url`.                          |
-| `notify_on`       | list of Status  | `["fail", "error", "warn"]`   | Which target statuses fire. Drop `"warn"` if you want only hard failures to page. `"ok"` would fire on recovery. |
+| `notify_on`       | list of Status  | `["fail", "error", "warn"]`   | Which statuses open an alert. Drop `"warn"` if you want only hard failures to page. `"ok"` has no effect: a recovery is always sent for a failure this alerter announced, and never otherwise. See [Transition semantics](#transition-semantics). |
 | `timeout_s`       | float           | `10.0`                        | HTTP timeout for the POST. Must be > 0.                                                                          |
 
 Exactly one of `webhook_url` / `webhook_url_env` must be set. Config load
@@ -151,6 +154,7 @@ opt-in key. Same pattern works for `webhook` (e.g.
 
 | Symptom                                                  | Most likely cause                                                                                                                                                         |
 |---                                                       |---                                                                                                                                                                        |
+| `HTTP 301 / 302 / 307 / 308`                             | The URL redirects somewhere else. Redirects are not followed, so this is a delivery failure (retried next tick). Use the final URL from the logged `Location`.            |
 | `HTTP 404` from the webhook                              | Slack revoked the webhook (app deleted, channel archived, workspace token rotated). Generate a new URL and update `SLACK_WEBHOOK_URL`.                                    |
 | `HTTP 429`                                               | Slack's per-webhook rate limit. The dispatcher will log the failure and retry on the next refresh tick — no special handling. If sustained, route to a less-busy channel. |
 | `HTTP 500 / 502 / 503` from `hooks.slack.com`            | Slack incident. Retried on next tick (see [Delivery failure retry](#delivery-failure-retry)).                                                                             |
@@ -205,10 +209,13 @@ Authorization: <whatever headers you set>   # only if `headers = {...}`
 <JSON body, see below>
 ```
 
-The alerter raises (and the dispatcher logs + skips the state save, so
-the transition is retried next run) when the response is `>= 400`.
-Anything else, including `2xx` with an unexpected body, is treated as
-delivered.
+Only a `2xx` response counts as delivered (including `2xx` with an
+unexpected body). Anything else raises, and the dispatcher logs it and
+skips the state save so the transition is retried next run. That
+includes `3xx`: redirects are **not** followed (a POST body isn't safely
+replayable across them), so a receiver that answers `301` / `302` /
+`307` / `308` never got the alert. The log line names the `Location`
+header; point `url` at the final endpoint.
 
 #### Canonical JSON envelope (stable across versions)
 
@@ -231,7 +238,7 @@ Every entry under `transitions[]` looks like this:
 
 | Field             | Type                                                       | Notes                                                                                                          |
 |---                |---                                                         |---                                                                                                             |
-| `kind`            | `"failure"` \| `"recovery"`                                | `failure` = OK → non-OK; `recovery` = non-OK → OK.                                                             |
+| `kind`            | `"failure"` \| `"recovery"`                                | `failure` = status entered this alerter's `notify_on` set; `recovery` = back to OK after a failure was sent.     |
 | `target_name`     | string                                                     | The `[instances.<name>]` key from the config.                                                                  |
 | `target_url`      | string                                                     | The DHIS2 base URL of the affected instance.                                                                   |
 | `check_name`      | string                                                     | Check that flipped, e.g. `dhis2_ping`, `dhis2_chap_route`. Run `chap-checker checks list` for the full set.   |
@@ -439,18 +446,53 @@ delivery success.
 
 State is persisted to `./chap-checker.state.json` (override with
 `--state <path>`). Every run computes the diff against the saved state
-and decides whether to dispatch.
+and decides, **separately for each configured alerter**, whether to
+dispatch.
 
-| Previous              | Current                | Fires?                          |
-|---                    |---                     |---                              |
-| OK                    | FAIL / ERROR / WARN    | yes (failure)                   |
-| FAIL / ERROR / WARN   | OK                     | yes (recovery)                  |
-| FAIL ↔ ERROR ↔ WARN   | (intra-failure flip)   | **no**                          |
-| any                   | SKIPPED                | **no** (SKIPPED never persists) |
-| SKIPPED               | any                    | depends on the *previous real* status |
+Each alerter has its own *alerting set*: the non-OK statuses in its
+`notify_on` (`"ok"` in `notify_on` is ignored). For every check on an
+instance opted into the alerter, the alerter either has an **open
+alert** (it was sent a failure and no recovery yet) or not:
 
-The "two-sided guard": at least one side of the transition must be `OK`,
-otherwise we're just relabeling an ongoing outage.
+| Current status                         | Open alert for this alerter? | Fires?                                       |
+|---                                     |---                           |---                                           |
+| in the alerting set                    | no                           | yes (failure), alert opens                   |
+| in the alerting set                    | yes                          | **no** (ongoing outage, e.g. FAIL → ERROR)   |
+| OK                                     | yes                          | yes (recovery), alert closes                 |
+| OK                                     | no                           | **no**                                       |
+| non-OK, *not* in the alerting set      | yes                          | **no**, alert stays open                     |
+| non-OK, *not* in the alerting set      | no                           | **no**                                       |
+| SKIPPED                                | either                       | **no** (SKIPPED never persists)              |
+
+Two guarantees follow:
+
+- **No entry into the alerting set is hidden.** It doesn't matter where
+  the check came from: with `notify_on = ["fail"]`, OK → WARN is silent
+  but the following WARN → FAIL fires a failure.
+- **No recovery without a failure.** A recovery only goes to an alerter
+  that was sent the matching failure. OK → WARN → OK is silent end to end
+  for an alerter on `["fail"]`.
+
+A check that drops out of the alerting set into another non-OK status
+(FAIL → WARN with only `fail` selected) keeps its alert open: the outage
+isn't over, so nothing is sent, a later FAIL doesn't re-alert, and the
+recovery fires once the check is back to OK.
+
+Because the bookkeeping is per alerter, two alerters with different
+filters see the same check history differently. With Slack on
+`["fail", "error", "warn"]` and a webhook on `["fail"]`, the sequence
+OK → WARN → FAIL → OK sends:
+
+| Step        | Slack                | Webhook              |
+|---          |---                   |---                   |
+| OK → WARN   | failure (WARN)       | —                    |
+| WARN → FAIL | —                    | failure (FAIL)       |
+| FAIL → OK   | recovery             | recovery             |
+
+An alerter that is added to the config while a check is already failing
+announces that outage on its first run. An instance opted into an
+alerter later behaves the same way (see
+[Per-instance opt-in](#per-instance-opt-in)).
 
 The "skip-through-SKIPPED" rule: `SKIPPED` results are not written to
 the state file. If `dhis2_chap_route` was `FAIL`, then upstream
@@ -460,7 +502,8 @@ remembered FAIL across the SKIPPED window).
 
 ## Delivery failure retry
 
-If an alerter throws (5xx response, transport error, malformed reply),
+If an alerter throws (any non-2xx response including a `3xx` redirect,
+transport error, malformed reply),
 the dispatcher swallows the exception so it can't change the run's exit
 code — **but it does not save the new state**. The next run recomputes
 the same transition and retries. Operationally this means: a Slack (or
@@ -484,13 +527,31 @@ Schema (you should rarely need to look at this):
   "states": {
     "prod::dhis2_ping": { "status": "ok", "since": "2026-05-13T15:00:00Z" },
     "prod::dhis2_chap_route": { "status": "fail", "since": "2026-05-13T15:05:12Z" }
+  },
+  "receivers": {
+    "slack": {
+      "prod::dhis2_chap_route": { "status": "fail", "since": "2026-05-13T15:05:12Z" }
+    },
+    "webhook": {}
   }
 }
 ```
 
-Corrupt or schema-mismatched files log a warning and are treated as
-empty — alert bookkeeping must not fail a cron run that is otherwise
-fine. The file is left on disk for human inspection.
+`states` is the last real status of every check. `receivers` lists, per
+alerter, the checks it currently has an open alert for, with the status
+and time the failure was sent.
+
+State files written by older versions have no `receivers` key. They
+still load: on the first run each alerter's open alerts are rebuilt from
+`states` (an alert is considered open when the stored status is in that
+alerter's `notify_on`), so outages in progress at upgrade time are not
+re-announced and still get their recovery. Older versions reading a new
+file ignore `receivers`.
+
+Corrupt files (invalid JSON, or bytes that aren't valid UTF-8) and
+schema-mismatched files log a warning and are treated as empty — alert
+bookkeeping must not fail a cron run that is otherwise fine. The file is
+left on disk for human inspection.
 
 The parent directory is created on save (`mkdir -p`) so `--state
 /var/lib/chap-checker/state.json` on a fresh host doesn't crash

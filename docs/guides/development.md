@@ -35,7 +35,7 @@ src/chap_checker/
 ├── runner.py              # parallel run_targets, RunReport, VerifyReport, TargetEntry
 ├── output.py              # Rich table + JSON renderers
 ├── state.py               # GlobalState (CLI flags container)
-├── state_store.py         # state file load/save + compute_transitions
+├── state_store.py         # state file load/save + per-alerter transitions
 │                          # + alert_state_lock (fcntl.flock async ctx mgr, POSIX-only)
 ├── logging.py             # stderr-only logger config
 ├── daemon.py              # DashboardServer (refresh loop + per-tile trackers + DashboardState)

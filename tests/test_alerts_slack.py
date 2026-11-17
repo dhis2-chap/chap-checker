@@ -93,6 +93,21 @@ def test_slack_raises_on_5xx() -> None:
         asyncio.run(alerter.notify([_failure()]))
 
 
+def test_slack_raises_on_3xx_redirect() -> None:
+    """A redirect isn't followed, so it must not count as delivered."""
+    import pytest
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(302, headers={"Location": "https://hooks.slack.com/elsewhere"})
+
+    alerter = SlackAlerter(
+        webhook_url="https://hooks.slack.com/x",
+        transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(RuntimeError, match="302"):
+        asyncio.run(alerter.notify([_failure()]))
+
+
 def test_slack_raises_on_transport_error() -> None:
     import pytest
 

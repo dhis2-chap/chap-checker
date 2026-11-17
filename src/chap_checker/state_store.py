@@ -1,9 +1,10 @@
 """Persisted check status and transition detection for stateful alerting.
 
 The state file is a small JSON document recording the most recent status of
-every ``(target, check)`` pair. On each run we diff the previous snapshot
-against the current results and emit :class:`Transition` objects only when a
-status flips, which keeps Slack quiet during sustained outages.
+every ``(target, check)`` pair, plus a per-receiver ledger of open alerts.
+On each run we diff the previous snapshot against the current results and
+emit :class:`Transition` objects per receiver only when that receiver's
+alert opens or closes, which keeps Slack quiet during sustained outages.
 """
 
 from __future__ import annotations
@@ -13,8 +14,9 @@ import json
 import os
 import tempfile
 import time
-from collections.abc import AsyncGenerator, Iterable
+from collections.abc import AsyncGenerator, Iterable, Mapping
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import IO, Literal
@@ -126,10 +128,51 @@ class CheckState(BaseModel):
 
 
 class StateFile(BaseModel):
-    """Top-level state-file schema."""
+    """Top-level state-file schema.
+
+    ``states`` holds the last real (non-SKIPPED) status of every
+    ``(target, check)`` pair, shared by all receivers.
+
+    ``receivers`` is the per-receiver alert ledger: for each alerter name,
+    the ``(target, check)`` keys that receiver currently has an *open*
+    alert for (a failure was sent and no recovery has followed yet). The
+    stored :class:`CheckState` records the status and time the failure was
+    announced.
+
+    ``receivers`` is ``None`` for state files written before the ledger
+    existed (chap-checker 0.10.x and earlier). Such files still load; the
+    first dispatch seeds each receiver's ledger from ``states`` (see
+    :func:`receiver_ledger`). Older chap-checker versions reading a newer
+    file ignore the extra key, so the format stays ``version: 1`` in both
+    directions.
+    """
 
     version: Literal[1] = 1
     states: dict[str, CheckState] = Field(default_factory=dict)
+    receivers: dict[str, dict[str, CheckState]] | None = None
+
+
+@dataclass(frozen=True)
+class ReceiverSpec:
+    """What one alert receiver (a configured alerter) listens to.
+
+    ``notify_on`` is the receiver's configured status filter. Only its
+    non-OK members (``warn`` / ``fail`` / ``error``) matter: they form the
+    receiver's *alerting set*. ``ok`` and ``skipped`` in ``notify_on`` are
+    ignored - a recovery is always sent for a failure the receiver was
+    told about, and never otherwise.
+
+    ``targets`` is the set of target names that opted into this receiver
+    (``alerts = [...]`` on the instance), or ``None`` for "every target".
+    """
+
+    notify_on: frozenset[Status]
+    targets: frozenset[str] | None = None
+
+    @property
+    def alerting_set(self) -> frozenset[Status]:
+        """Statuses that open an alert for this receiver."""
+        return self.notify_on - {Status.OK, Status.SKIPPED}
 
 
 def default_state_path() -> Path:
@@ -140,10 +183,10 @@ def default_state_path() -> Path:
 def load_state(path: Path) -> StateFile:
     """Load state from ``path``, or return an empty :class:`StateFile`.
 
-    A corrupt or schema-incompatible state file logs a warning and is treated
-    as empty - alert bookkeeping must not fail a cron run that is otherwise
-    fine. The file is left in place for human inspection; delete it manually
-    once you've checked.
+    A corrupt (invalid JSON or invalid UTF-8) or schema-incompatible state
+    file logs a warning and is treated as empty - alert bookkeeping must not
+    fail a cron run that is otherwise fine. The file is left in place for
+    human inspection; delete it manually once you've checked.
     """
     if not path.exists():
         return StateFile()
@@ -151,7 +194,7 @@ def load_state(path: Path) -> StateFile:
         with path.open("r", encoding="utf-8") as f:
             data = json.load(f)
         return StateFile.model_validate(data)
-    except (json.JSONDecodeError, ValidationError, OSError) as exc:
+    except (json.JSONDecodeError, UnicodeDecodeError, ValidationError, OSError) as exc:
         _log.warning(
             "state file %s is unreadable (%s); treating prior state as empty. "
             "Delete or move the file aside if this persists.",
@@ -194,26 +237,76 @@ def _state_key(target_name: str, check_name: str) -> str:
     return f"{target_name}::{check_name}"
 
 
-def compute_transitions(
+def receiver_ledger(previous: StateFile, name: str, spec: ReceiverSpec) -> dict[str, CheckState]:
+    """Return (a copy of) the open-alert ledger receiver ``name`` starts a run with.
+
+    - Receiver already tracked: its stored ledger.
+    - Receiver not tracked yet in a current-format file (newly configured
+      alerter): empty, so any check currently in its alerting set is
+      announced on the first run.
+    - Legacy state file (``receivers is None``, written before the ledger
+      existed): seeded from the shared ``states``. The old dispatcher
+      announced every entry into a status a receiver listened to, so the
+      best reconstruction is "an alert is open for every key whose last
+      status is in the receiver's alerting set". This keeps an in-flight
+      outage from re-alerting after an upgrade and still delivers its
+      recovery.
+    """
+    if previous.receivers is None:
+        alerting = spec.alerting_set
+        return {key: state for key, state in previous.states.items() if state.status in alerting}
+    return dict(previous.receivers.get(name, {}))
+
+
+def compute_receiver_transitions(
     previous: StateFile,
     reports: list[RunReport],
-    notify_on: Iterable[Status],
+    receivers: Mapping[str, ReceiverSpec],
     now: datetime,
-) -> tuple[list[Transition], StateFile]:
-    """Diff ``previous`` against ``reports``; return (transitions, new state).
+) -> tuple[dict[str, list[Transition]], StateFile]:
+    """Diff ``previous`` against ``reports`` per receiver.
 
-    A transition is emitted only when one side is ``OK`` and the other side is
-    a non-OK status in ``notify_on``. Intra-failure changes (FAIL<->ERROR<->WARN)
-    are tweaks to a sustained outage, not new alerts.
+    Returns ``({receiver_name: transitions}, new_state)``; every name in
+    ``receivers`` is a key of the returned dict (possibly with an empty
+    list).
 
-    ``SKIPPED`` is informational: it is never persisted to state (the last
-    known *real* status is preserved) and it never produces a transition.
-    Preserving the prior status across a transient SKIPPED run is what lets an
-    eventual OK still fire a recovery alert even when an upstream prereq
-    flapped in between.
+    Each receiver keeps its own ledger of open alerts, so receivers with
+    different ``notify_on`` filters never shadow each other. For one
+    receiver with alerting set ``A`` (see :class:`ReceiverSpec`) and one
+    observed ``(target, check)`` status ``s``:
+
+    - ``s`` in ``A`` and no open alert: send a **failure** and open an
+      alert. This covers entering ``A`` from OK *and* from a non-OK status
+      outside ``A`` (OK -> WARN -> FAIL with ``notify_on = ["fail"]``
+      alerts on the FAIL).
+    - ``s`` is OK and an alert is open: send a **recovery** and close it.
+    - Anything else is silent: a change inside ``A`` (FAIL -> ERROR), a
+      move from ``A`` to a non-OK status outside ``A`` (FAIL -> WARN with
+      only ``fail`` selected: the alert stays open and its recovery is sent
+      once the check returns to OK, so FAIL -> WARN -> FAIL does not
+      re-alert), OK -> OK, or a non-OK status outside ``A`` with no open
+      alert.
+    - ``SKIPPED`` never changes anything.
+
+    A recovery is therefore only ever sent to a receiver that was sent the
+    matching failure, and no entry into ``A`` without an open alert is
+    hidden.
+
+    Targets that did not opt into a receiver have their ledger entries
+    dropped for the checks observed in this run, so opting in later
+    announces an outage still in progress instead of sending a lone
+    recovery.
+
+    The shared ``states`` map tracks the last real status for every
+    ``(target, check)`` (``SKIPPED`` is never persisted) and supplies
+    ``previous_status`` on emitted transitions. Keys and receivers not
+    observed in this run are carried forward unchanged, so partial runs
+    (``--instance`` / ``--check``) never drop state.
     """
-    notify_set = set(notify_on)
-    transitions: list[Transition] = []
+    transitions: dict[str, list[Transition]] = {name: [] for name in receivers}
+    ledgers: dict[str, dict[str, CheckState]] = {
+        name: receiver_ledger(previous, name, spec) for name, spec in receivers.items()
+    }
     new_states: dict[str, CheckState] = {}
 
     for report in reports:
@@ -223,43 +316,48 @@ def compute_transitions(
             prev_status = prev.status if prev is not None else Status.OK
             curr_status = result.status
 
-            # SKIPPED is informational. Don't overwrite a real status with it;
-            # if there is no prior state, just don't track this entry yet.
+            # Shared status bookkeeping. SKIPPED is informational: don't
+            # overwrite a real status with it; with no prior state, don't
+            # track the entry yet.
             if curr_status is Status.SKIPPED:
                 if prev is not None:
                     new_states[key] = prev
-                continue
+            elif prev is not None and curr_status == prev.status:
+                new_states[key] = prev
+            else:
+                new_states[key] = CheckState(status=curr_status, since=now)
 
-            if curr_status == prev_status:
-                new_states[key] = prev if prev is not None else CheckState(status=curr_status, since=now)
-                continue
-
-            new_states[key] = CheckState(status=curr_status, since=now)
-
-            # Only OK <-> failure-family transitions are alert-worthy.
-            if curr_status is not Status.OK and prev_status is not Status.OK:
-                continue
-
-            # The non-OK side determines whether to alert.
-            non_ok = curr_status if curr_status is not Status.OK else prev_status
-            if non_ok not in notify_set:
-                continue
-
-            kind: TransitionKind = "recovery" if curr_status is Status.OK else "failure"
-            transitions.append(
-                Transition(
-                    kind=kind,
-                    target_name=report.target_name,
-                    target_display_name=report.target_display_name,
-                    target_url=report.target_url,
-                    check_name=result.name,
-                    previous_status=prev_status,
-                    current_status=curr_status,
-                    message=result.message,
-                    duration_ms=result.duration_ms,
-                    occurred_at=now,
+            for name, spec in receivers.items():
+                ledger = ledgers[name]
+                if spec.targets is not None and report.target_name not in spec.targets:
+                    ledger.pop(key, None)
+                    continue
+                if curr_status is Status.SKIPPED:
+                    continue
+                is_open = key in ledger
+                kind: TransitionKind
+                if curr_status in spec.alerting_set and not is_open:
+                    kind = "failure"
+                    ledger[key] = CheckState(status=curr_status, since=now)
+                elif curr_status is Status.OK and is_open:
+                    kind = "recovery"
+                    del ledger[key]
+                else:
+                    continue
+                transitions[name].append(
+                    Transition(
+                        kind=kind,
+                        target_name=report.target_name,
+                        target_display_name=report.target_display_name,
+                        target_url=report.target_url,
+                        check_name=result.name,
+                        previous_status=prev_status,
+                        current_status=curr_status,
+                        message=result.message,
+                        duration_ms=result.duration_ms,
+                        occurred_at=now,
+                    )
                 )
-            )
 
     # Carry forward state for (target, check) pairs not observed in this
     # run. Verify supports partial runs via ``--instance`` and ``--check``
@@ -272,4 +370,28 @@ def compute_transitions(
     for key, state in previous.states.items():
         new_states.setdefault(key, state)
 
-    return transitions, StateFile(states=new_states)
+    # Ledgers of receivers not configured in this run are carried forward
+    # as well, so an alerter that is commented out for a while keeps its
+    # open alerts and doesn't re-announce them when it comes back.
+    new_receivers: dict[str, dict[str, CheckState]] = dict(previous.receivers or {})
+    new_receivers.update(ledgers)
+
+    return transitions, StateFile(states=new_states, receivers=new_receivers)
+
+
+def compute_transitions(
+    previous: StateFile,
+    reports: list[RunReport],
+    notify_on: Iterable[Status],
+    now: datetime,
+    *,
+    receiver: str = "default",
+) -> tuple[list[Transition], StateFile]:
+    """Single-receiver convenience wrapper around :func:`compute_receiver_transitions`.
+
+    Every target counts as opted in; the receiver's ledger is stored under
+    ``receiver`` in the returned state.
+    """
+    spec = ReceiverSpec(notify_on=frozenset(notify_on))
+    by_receiver, new_state = compute_receiver_transitions(previous, reports, {receiver: spec}, now)
+    return by_receiver[receiver], new_state

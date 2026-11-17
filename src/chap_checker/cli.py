@@ -38,9 +38,10 @@ from chap_checker.runner import RunReport, TargetEntry, VerifyReport, run_target
 from chap_checker.state import GlobalState
 from chap_checker.state_store import (
     DEFAULT_STATE_FILENAME,
+    ReceiverSpec,
     StateLockTimeout,
     alert_state_lock,
-    compute_transitions,
+    compute_receiver_transitions,
     load_state,
     save_state,
 )
@@ -1285,11 +1286,18 @@ async def dispatch_alerts_async(
     if not bindings:
         return
 
-    target_alerts = {t.name: set(t.alerts) for t in targets}
-
-    notify_on_union: set[Status] = set()
-    for binding in bindings:
-        notify_on_union.update(binding.notify_on)
+    # One ReceiverSpec per configured alerter: its own notify_on filter and
+    # the targets that opted into it. Alerting state is tracked per
+    # receiver, so a Slack block on ["fail", "error", "warn"] and a webhook
+    # on ["fail"] each get exactly the failures/recoveries their filter
+    # implies (see compute_receiver_transitions for the rules).
+    specs: dict[str, ReceiverSpec] = {
+        binding.alerter.name: ReceiverSpec(
+            notify_on=frozenset(binding.notify_on),
+            targets=frozenset(t.name for t in targets if binding.alerter.name in t.alerts),
+        )
+        for binding in bindings
+    }
 
     now = datetime.now(UTC)
     # Hold the file lock across the entire load->compute->dispatch->save
@@ -1300,25 +1308,15 @@ async def dispatch_alerts_async(
     try:
         async with alert_state_lock(state_path):
             previous = load_state(state_path)
-            transitions, new_state = compute_transitions(previous, reports, notify_on_union, now)
-
-            if not transitions:
-                _safe_save_state(state_path, new_state)
-                return
+            by_receiver, new_state = compute_receiver_transitions(previous, reports, specs, now)
 
             all_ok = True
             for binding in bindings:
-                alerter_name = binding.alerter.name
-                filtered = [
-                    t
-                    for t in transitions
-                    if alerter_name in target_alerts.get(t.target_name, set())
-                    and (t.current_status in binding.notify_on or t.previous_status in binding.notify_on)
-                ]
-                if not filtered:
+                pending = by_receiver.get(binding.alerter.name, [])
+                if not pending:
                     continue
                 try:
-                    await binding.alerter.notify(filtered)
+                    await binding.alerter.notify(pending)
                 except Exception:  # noqa: BLE001 - alerts must not change exit code
                     all_ok = False
                     _log.exception("alerter %s failed", binding.alerter.name)
@@ -1363,12 +1361,13 @@ def _dispatch_alerts(
 
     Per-target opt-in: each ``TargetEntry.alerts`` lists which configured
     alerter names should fire for that target. A transition only reaches an
-    alerter when the source target opted into that alerter's name. State is
-    still tracked for every target (it's cheap and lets the operator flip an
-    instance from silent to alerting later without spurious "first failure"
-    pings for sustained outages).
+    alerter when the source target opted into that alerter's name. The
+    shared status is tracked for every target; each alerter's open-alert
+    ledger only covers targets opted into it, so opting in during an
+    ongoing outage announces it (and its later recovery) instead of
+    sending a lone recovery.
 
-    Delivery failures (alerter 5xx, transport errors) are caught so they
+    Delivery failures (alerter non-2xx, transport errors) are caught so they
     cannot change the run's exit code, but on failure the new state is
     *not* saved.
     Next run will recompute the same transitions and retry. With multiple

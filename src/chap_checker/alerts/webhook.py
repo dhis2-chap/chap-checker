@@ -86,8 +86,16 @@ headers = { "X-Custom-Header" = "value" }   # Optional literal HTTP headers (aut
         payload = self._build_payload(transitions)
         async with httpx.AsyncClient(timeout=self._timeout_s, transport=self._transport) as client:
             response = await client.post(self._url, json=payload, headers=self._headers or None)
-        if response.status_code >= 400:
-            raise RuntimeError(f"{self.name} webhook returned {response.status_code}: {response.text[:200]}")
+        # Only 2xx counts as delivered. Redirects are not followed (a POST
+        # body can't be safely replayed across them), so a 3xx means the
+        # receiver never got the alert - treat it like any other failure
+        # so the dispatcher keeps the state and retries next run.
+        if not 200 <= response.status_code < 300:
+            detail = response.text[:200]
+            if 300 <= response.status_code < 400:
+                location = response.headers.get("location", "<none>")
+                detail = f"redirect not followed (Location: {location}); point the URL at the final endpoint"
+            raise RuntimeError(f"{self.name} webhook returned {response.status_code}: {detail}")
 
     def _build_payload(self, transitions: list[Transition]) -> dict[str, Any]:
         """Return the JSON body to POST. Override in subclasses.

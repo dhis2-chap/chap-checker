@@ -28,6 +28,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - **`--token-env` / `--password-env` no longer conflict with an exported env var.** With `DHIS2_TOKEN` (or `CHAP_CHECKER_TOKEN` for `tui --connect`) or `DHIS2_PASSWORD` exported, `verify --token-env OTHER` / `--password-env OTHER` was rejected as "not both". The CLI now uses the parameter source, so an explicit flag beats the ambient env fallback and only two flags typed on the command line conflict.
 - **`dhis2_chap_ping` now validates the response body.** Any 2xx used to count as healthy, so an SSO or reverse proxy returning a 200 HTML login page passed. The check now requires chap-core's JSON health payload (`{"status": "success", ...}`); a non-JSON body, malformed JSON, an unexpected shape, or a `status` other than `success` is `FAIL`. The OK message reads `chap-core healthy (status 200).`, and `details` carries `health_status` / `health_message`.
 
+### Fixed
+
+- **`notify_on` filters no longer swallow outages.** A change between two non-OK statuses was always skipped, so with `notify_on = ["fail"]` the sequence OK → WARN → FAIL → OK never announced the FAIL but still sent a recovery for it. Alerting is now tracked per alerter: a failure is sent whenever the status enters that alerter's `notify_on` set without an alert already open (from OK or from a non-selected status such as WARN), and a recovery is sent only when the check returns to OK after a failure was sent to that alerter. Leaving the set for another non-OK status (FAIL → WARN with only `fail` selected) is silent and keeps the alert open until OK. Slack and webhook alerters with different `notify_on` no longer share one transition pass. Rules documented in `docs/guides/alerts.md#transition-semantics`.
+- **Webhook and Slack alerters treat `3xx` as a delivery failure.** Redirects are not followed, so a `301` / `302` / `307` / `308` reply used to be counted as delivered, the state was saved and the alert was lost. Only `2xx` now counts as delivered; anything else is logged with the `Location` header and retried on the next run.
+- **A state file that isn't valid UTF-8 no longer aborts alert dispatch.** It is handled like any other unreadable state file: a warning is logged and the prior state is treated as empty.
+
+### Changed
+
+- **State file gains a `receivers` key** holding each alerter's open alerts. Existing state files load unchanged; on the first run each alerter's open alerts are rebuilt from the stored statuses, so outages in progress at upgrade time are neither re-announced nor left without a recovery. Older versions ignore the new key.
+- **Opting an instance into an alerter (or adding a new alerter) during an ongoing outage now announces it.** Previously the alerter stayed silent and later sent a recovery for a failure it had never reported.
+
 ## [0.10.0] — 2026-10-01
 
 ### Added
