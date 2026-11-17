@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-11-17
+
 ### Changed
 
 - **Open Climate Service is now Open Geo Service, identifiers included** (**breaking**). `kind = "ocs"` is now `kind = "ogs"`, and the `ocs_health` / `ocs_info` checks are `ogs_health` / `ogs_info`. The old names are rejected at config load and by `--check`, so update `[instances.<key>]` blocks and any `checks = [...]` lists. State-file entries for the old check names are no longer matched, so an Open Geo Service outage that spans the upgrade gets no recovery message. Help text, check messages, docs and the dashboard tile label (`OGS 0.1.0`) use the new name too.
@@ -294,7 +296,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 For 0.1.x / 0.2.x release notes, see the [GitHub Releases page](https://github.com/dhis2-chap/chap-checker/releases).
 
-[Unreleased]: https://github.com/dhis2-chap/chap-checker/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/dhis2-chap/chap-checker/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/dhis2-chap/chap-checker/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.11.0
 [0.10.0]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.10.0
 [0.9.0]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.9.0
