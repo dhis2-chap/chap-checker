@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::alerts::{build_alerters, dispatch};
 use crate::checks::{CheckResult, Status};
@@ -84,7 +84,7 @@ fn identity(entry: &TargetEntry) -> Identity {
 }
 
 /// One per-check row on a tile.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CheckRow {
     pub name: String,
     pub status: Status,
@@ -93,14 +93,14 @@ pub struct CheckRow {
 }
 
 /// One past refresh: the worst status and the average latency of the checks that ran.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HistoryPoint {
     pub status: Status,
     pub latency_ms: Option<i64>,
 }
 
 /// One tile of the snapshot.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Tile {
     pub name: String,
     pub display_name: Option<String>,
@@ -114,23 +114,35 @@ pub struct Tile {
     pub ping_total: u64,
     pub latency_ms: Option<i64>,
     pub uptime_pct: Option<f64>,
-    #[serde(serialize_with = "opt_utc")]
+    #[serde(serialize_with = "opt_utc", deserialize_with = "opt_utc_in", default)]
     pub last_refresh: Option<DateTime<Utc>>,
     pub checks: Vec<CheckRow>,
     pub history: Vec<HistoryPoint>,
 }
 
 /// The whole dashboard: `GET /api/state`.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DashboardState {
     pub instance_count: usize,
     pub alerts_enabled: bool,
     pub interval_s: f64,
-    #[serde(serialize_with = "opt_utc")]
+    #[serde(serialize_with = "opt_utc", deserialize_with = "opt_utc_in", default)]
     pub last_refresh: Option<DateTime<Utc>>,
     pub tiles: Vec<Tile>,
     pub ui_title: String,
     pub ui_theme: String,
+}
+
+fn opt_utc_in<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<DateTime<Utc>>, D::Error> {
+    let text: Option<String> = Option::deserialize(deserializer)?;
+    text.map(|t| {
+        DateTime::parse_from_rfc3339(&t)
+            .map(|d| d.with_timezone(&Utc))
+            .map_err(serde::de::Error::custom)
+    })
+    .transpose()
 }
 
 fn opt_utc<S: serde::Serializer>(

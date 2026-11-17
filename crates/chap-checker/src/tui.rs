@@ -1,0 +1,1245 @@
+//! `chap-checker tui`: the dashboard in a terminal, drawn with sokkel-tui.
+//!
+//! The app is a [`ShellApp`] in sokkel's frame. The rail lists the instances, each with its
+//! worst status. The overview page leads with four summary tiles, then a panel per instance with
+//! its checks. Choosing an instance (the rail, a press on its panel, the palette) opens its page:
+//! its checks in full, its uptime and its latency over the last refreshes.
+//!
+//! The data comes from a background task on a tokio runtime, in one of two modes:
+//!
+//! - **Local**: the [`Daemon`] runs the checks in-process, as `serve` does.
+//! - **Connect** (`--connect URL`): polls a `chap-checker serve` daemon's `/api/state`. A failed
+//!   poll keeps the last data on screen, marked stale under a banner. A 401 opens a token prompt
+//!   once; after that, a rejected token is a banner.
+
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use chrono::{DateTime, Local, Utc};
+use ratatui::Frame;
+use ratatui::layout::Rect;
+use ratatui::widgets::Widget;
+use sokkel_tui::app::{self, Chrome, Cx, Flow, Ran, ShellApp};
+use sokkel_tui::cells::Width;
+use sokkel_tui::dashboard::grid;
+use sokkel_tui::{
+    BannerTone, Binding, Cell, Charset, Column, ColumnWidth, Command, CommandGroup, DashboardPanel,
+    Depth, Fact, KeyPress, Keys, Look, NoteTone, PageHeader, PanelRead, Pointer, PointerKind,
+    Prompt, PromptEvent, PromptState, Rail, RailEntry, RailGroup, Row, RowTone, Scheme, Span,
+    StatPanel, StatusLine, StatusTone, Table, TableState, Threshold, TopBar, snapshot,
+};
+use tokio::sync::mpsc;
+
+use crate::checks::Status;
+use crate::config::UiTheme;
+use crate::daemon::{Daemon, DashboardState, Tile};
+
+/// Where the dashboard's data comes from.
+pub enum Source {
+    Local(Arc<Daemon>),
+    Connect { url: String, token: Option<String> },
+}
+
+/// What the app asks of the background task.
+#[derive(Debug, Clone)]
+enum Ask {
+    Refresh,
+    Reload,
+    Token(String),
+    Cancel,
+}
+
+/// How the connection to the data stands.
+#[derive(Debug, Clone, PartialEq)]
+enum Conn {
+    /// No answer yet.
+    Waiting,
+    Live,
+    Disconnected(String),
+    /// A 401 with no token: the prompt opens (once).
+    NeedsToken,
+    Rejected(String),
+}
+
+/// What the background task shares with the app.
+struct Shared {
+    state: Option<DashboardState>,
+    conn: Conn,
+    busy: bool,
+    /// A passing word (a reload's outcome), until the given time.
+    notice: Option<(BannerTone, String, DateTime<Utc>)>,
+    last_contact: Option<DateTime<Utc>>,
+}
+
+type SharedRef = Arc<Mutex<Shared>>;
+
+fn lock(shared: &SharedRef) -> std::sync::MutexGuard<'_, Shared> {
+    shared.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+fn notice(shared: &SharedRef, tone: BannerTone, words: String) {
+    lock(shared).notice = Some((tone, words, Utc::now() + chrono::Duration::seconds(8)));
+}
+
+/// Local mode: run the daemon's loop, mirror its snapshot, and answer the app's asks.
+async fn local(daemon: Arc<Daemon>, shared: SharedRef, mut asks: mpsc::UnboundedReceiver<Ask>) {
+    tokio::spawn(Arc::clone(&daemon).run_loop());
+    let mut tick = tokio::time::interval(Duration::from_millis(250));
+    loop {
+        tokio::select! {
+            _ = tick.tick() => {
+                let snapshot = daemon.snapshot();
+                let mut s = lock(&shared);
+                if snapshot.last_refresh.is_some() {
+                    s.conn = Conn::Live;
+                    s.last_contact = snapshot.last_refresh;
+                }
+                s.state = Some(snapshot);
+            }
+            ask = asks.recv() => match ask {
+                None => return,
+                Some(Ask::Refresh) => {
+                    lock(&shared).busy = true;
+                    let (d, s) = (Arc::clone(&daemon), Arc::clone(&shared));
+                    tokio::spawn(async move {
+                        d.refresh_once().await;
+                        lock(&s).busy = false;
+                    });
+                }
+                Some(Ask::Reload) => match daemon.reload() {
+                    Ok(r) => notice(&shared, BannerTone::Good, reloaded(r.instance_count, &r.added, &r.removed)),
+                    Err(crate::daemon::ReloadError::NotFound(m) | crate::daemon::ReloadError::Invalid(m)) => {
+                        notice(&shared, BannerTone::Critical, format!("reload failed: {}", one_line(&m)));
+                    }
+                },
+                Some(Ask::Token(_) | Ask::Cancel) => {}
+            }
+        }
+    }
+}
+
+fn reloaded(count: usize, added: &[String], removed: &[String]) -> String {
+    let mut words = format!("config reloaded: {count} instance(s)");
+    if !added.is_empty() {
+        words.push_str(&format!("; added {}", added.join(", ")));
+    }
+    if !removed.is_empty() {
+        words.push_str(&format!("; removed {}", removed.join(", ")));
+    }
+    words
+}
+
+fn one_line(text: &str) -> String {
+    text.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Connect mode: poll `/api/state` every interval, and answer the app's asks.
+async fn connect(
+    url: String,
+    mut token: Option<String>,
+    interval: f64,
+    shared: SharedRef,
+    mut asks: mpsc::UnboundedReceiver<Ask>,
+) {
+    let http = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .user_agent(concat!("chap-checker/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .expect("an HTTP client");
+    let base = url.trim_end_matches('/').to_owned();
+    // The prompt opens on the first 401 only when no token was given.
+    let mut prompted = token.is_some();
+    loop {
+        poll(&http, &base, &url, token.as_deref(), prompted, &shared).await;
+        let ask = tokio::select! {
+            () = tokio::time::sleep(Duration::from_secs_f64(interval)) => None,
+            ask = asks.recv() => match ask { None => return, a => a },
+        };
+        let send = |method: reqwest::Method, path: &str| {
+            let mut request = http.request(method, format!("{base}{path}"));
+            if let Some(t) = &token {
+                request = request.bearer_auth(t);
+            }
+            request
+        };
+        match ask {
+            None => {}
+            Some(Ask::Refresh) => {
+                lock(&shared).busy = true;
+                let _ = send(reqwest::Method::POST, "/api/refresh")
+                    .timeout(Duration::from_secs(300))
+                    .send()
+                    .await;
+                lock(&shared).busy = false;
+            }
+            Some(Ask::Reload) => match send(reqwest::Method::POST, "/api/reload").send().await {
+                Ok(r) => {
+                    let ok = r.status().is_success();
+                    let body: serde_json::Value = r.json().await.unwrap_or_default();
+                    if ok {
+                        let names = |k: &str| -> Vec<String> {
+                            body[k]
+                                .as_array()
+                                .map(|a| {
+                                    a.iter()
+                                        .filter_map(|v| v.as_str().map(str::to_owned))
+                                        .collect()
+                                })
+                                .unwrap_or_default()
+                        };
+                        let count = body["instance_count"].as_u64().unwrap_or(0) as usize;
+                        notice(
+                            &shared,
+                            BannerTone::Good,
+                            reloaded(count, &names("added"), &names("removed")),
+                        );
+                    } else {
+                        let why = body["message"]
+                            .as_str()
+                            .or(body["detail"].as_str())
+                            .unwrap_or("no reason given");
+                        notice(
+                            &shared,
+                            BannerTone::Critical,
+                            format!("reload failed: {}", one_line(why)),
+                        );
+                    }
+                }
+                Err(e) => notice(&shared, BannerTone::Critical, format!("reload failed: {e}")),
+            },
+            Some(Ask::Token(t)) => {
+                token = Some(t);
+                prompted = true;
+            }
+            Some(Ask::Cancel) => {
+                prompted = true;
+                lock(&shared).conn = Conn::Rejected(format!(
+                    "auth rejected by {url}: set --token-env or sign in"
+                ));
+                continue;
+            }
+        }
+    }
+}
+
+async fn poll(
+    http: &reqwest::Client,
+    base: &str,
+    url: &str,
+    token: Option<&str>,
+    prompted: bool,
+    shared: &SharedRef,
+) {
+    let mut request = http.get(format!("{base}/api/state"));
+    if let Some(t) = token {
+        request = request.bearer_auth(t);
+    }
+    let outcome = match request.send().await {
+        Err(e) => Err(crate::http::RequestError::from_reqwest(&e).describe(None)),
+        Ok(r) if r.status() == reqwest::StatusCode::UNAUTHORIZED => {
+            let conn = match (token, prompted) {
+                (None, false) => Conn::NeedsToken,
+                (None, true) => Conn::Rejected(format!("auth rejected by {url}: set --token-env")),
+                (Some(_), _) => {
+                    Conn::Rejected(format!("auth rejected by {url}: check the token value"))
+                }
+            };
+            lock(shared).conn = conn;
+            return;
+        }
+        Ok(r) if !r.status().is_success() => Err(format!("status {}", r.status().as_u16())),
+        Ok(r) => r
+            .json::<DashboardState>()
+            .await
+            .map_err(|e| format!("unreadable state: {e}")),
+    };
+    let mut s = lock(shared);
+    match outcome {
+        Ok(state) => {
+            s.state = Some(state);
+            s.conn = Conn::Live;
+            s.last_contact = Some(Utc::now());
+        }
+        Err(why) => s.conn = Conn::Disconnected(format!("disconnected from {url}: {why}")),
+    }
+}
+
+/// A check status in sokkel's tones: the operator's words, the contract's colors.
+fn tone(status: Status) -> StatusTone {
+    match status {
+        Status::Ok => StatusTone::Good,
+        Status::Warn => StatusTone::Warning,
+        Status::Fail | Status::Error => StatusTone::Critical,
+        Status::Skipped => StatusTone::Quiet,
+    }
+}
+
+fn row_tone(status: Status) -> RowTone {
+    match status {
+        Status::Fail | Status::Error => RowTone::Critical,
+        Status::Warn => RowTone::Warning,
+        Status::Skipped => RowTone::Muted,
+        Status::Ok => RowTone::Plain,
+    }
+}
+
+/// The ping uptime's scale: critical below 95 %, warning below 99 %.
+fn uptime_scale() -> Vec<Threshold> {
+    vec![
+        Threshold::new(None, "critical"),
+        Threshold::new(Some(95.0), "warning"),
+        Threshold::new(Some(99.0), "good"),
+    ]
+}
+
+fn clock(t: Option<DateTime<Utc>>) -> String {
+    t.map(|t| t.with_timezone(&Local).format("%H:%M:%S").to_string())
+        .unwrap_or_else(|| "not yet".into())
+}
+
+fn label(tile: &Tile) -> &str {
+    tile.display_name.as_deref().unwrap_or(&tile.name)
+}
+
+/// "DHIS2 2.42.6", or the platform alone.
+fn platform(tile: &Tile) -> String {
+    match &tile.version {
+        Some(v) => format!("{} {v}", tile.platform),
+        None => tile.platform.clone(),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum Route {
+    Overview,
+    Instance(String),
+}
+
+/// The app sokkel's runtime drives.
+pub struct App {
+    shared: SharedRef,
+    asks: mpsc::UnboundedSender<Ask>,
+    source: String,
+    interval: f64,
+    kiosk: bool,
+    route: Route,
+    state: Option<DashboardState>,
+    conn: Conn,
+    busy: bool,
+    notice: Option<(BannerTone, String)>,
+    last_contact: Option<DateTime<Utc>>,
+    checks: TableState,
+    prompt: Option<PromptState>,
+    prompt_at: Rect,
+    /// The instances table's state, and where it stood, for keys and presses.
+    instances: TableState,
+    table_at: Rect,
+    panel_at: Rect,
+}
+
+impl App {
+    fn tiles(&self) -> &[Tile] {
+        self.state.as_ref().map_or(&[], |s| s.tiles.as_slice())
+    }
+
+    fn tile(&self, name: &str) -> Option<&Tile> {
+        self.tiles().iter().find(|t| t.name == name)
+    }
+
+    /// "since 12:04" while the data on screen is the last that came, before a lost connection.
+    fn stale(&self) -> Option<String> {
+        let lost = matches!(self.conn, Conn::Disconnected(_) | Conn::Rejected(_));
+        let since = self.last_contact.filter(|_| lost)?;
+        Some(format!(
+            "since {}",
+            since.with_timezone(&Local).format("%H:%M")
+        ))
+    }
+
+    /// Nothing has answered yet, and something stands in the way.
+    fn never_answered(&self) -> bool {
+        self.state.is_none() && matches!(self.conn, Conn::Disconnected(_) | Conn::Rejected(_))
+    }
+
+    fn token_prompt<'a>(&self, look: &'a Look, window: Rect) -> Prompt<'a> {
+        Prompt::new(look, format!("Sign in to {}", self.source), "Bearer token")
+            .description("The chap-checker daemon asks for a token ([auth] in its config).")
+            .field(|f| {
+                f.masked(true)
+                    .help("Paste works; Enter signs in, Escape cancels.")
+            })
+            .submit("Sign in")
+            .window(Width::of(window))
+    }
+
+    fn prompted(&mut self, event: PromptEvent, state: PromptState) {
+        match event {
+            PromptEvent::Submit(token) if !token.trim().is_empty() => {
+                let _ = self.asks.send(Ask::Token(token.trim().to_owned()));
+                lock(&self.shared).conn = Conn::Waiting;
+            }
+            PromptEvent::Submit(_) | PromptEvent::Cancel => {
+                let _ = self.asks.send(Ask::Cancel);
+            }
+            _ => self.prompt = Some(state),
+        }
+    }
+
+    fn overview_header<'a>(&self, look: &'a Look) -> PageHeader<'a> {
+        let title = self
+            .state
+            .as_ref()
+            .map_or("chap-checker", |s| s.ui_title.as_str());
+        let n = self.tiles().len();
+        let up = self
+            .tiles()
+            .iter()
+            .filter(|t| t.worst_status == Status::Ok)
+            .count();
+        let alerts = self.state.as_ref().is_some_and(|s| s.alerts_enabled);
+        if self.state.is_none() {
+            let words = if self.never_answered() {
+                format!("No answer from {} yet.", self.source)
+            } else {
+                format!("Waiting for the first answer from {}.", self.source)
+            };
+            return PageHeader::new(look, title.to_owned()).description(words);
+        }
+        PageHeader::new(look, title.to_owned()).description(format!(
+            "{up} of {n} instance(s) up. Checked every {}s; alerts {}.",
+            self.interval,
+            if alerts { "on" } else { "off" }
+        ))
+    }
+
+    fn summary<'a>(&self, look: &'a Look) -> Vec<StatPanel<'a>> {
+        let tiles = self.tiles();
+        let n = tiles.len();
+        let up = tiles
+            .iter()
+            .filter(|t| t.worst_status == Status::Ok)
+            .count();
+        let checks: usize = tiles.iter().map(|t| t.total_count).sum();
+        let ok: usize = tiles.iter().map(|t| t.ok_count).sum();
+        let failing = tiles
+            .iter()
+            .flat_map(|t| &t.checks)
+            .filter(|c| matches!(c.status, Status::Fail | Status::Error))
+            .count();
+        let uptimes: Vec<f64> = tiles.iter().filter_map(|t| t.uptime_pct).collect();
+        let uptime =
+            (!uptimes.is_empty()).then(|| uptimes.iter().sum::<f64>() / uptimes.len() as f64);
+        let stale = self.stale();
+        let mark = |p: StatPanel<'a>| match &stale {
+            Some(since) => p.stale(since.clone()),
+            None => p,
+        };
+        let waiting =
+            !self.never_answered() && self.state.as_ref().is_none_or(|s| s.last_refresh.is_none());
+        let none = self.never_answered();
+        if none {
+            return ["Instances up", "Checks OK", "Failing checks", "Ping uptime"]
+                .into_iter()
+                .map(|t| StatPanel::new(look, t, None))
+                .collect();
+        }
+        let read = |p: StatPanel<'a>| {
+            if waiting {
+                p.read(PanelRead::Loading(0))
+            } else {
+                p
+            }
+        };
+        vec![
+            mark(read(
+                StatPanel::new(look, "Instances up", Some(up as f64))
+                    .note(format!("of {n}"))
+                    .color(if up == n { "good" } else { "critical" }),
+            )),
+            mark(read(
+                StatPanel::new(look, "Checks OK", Some(ok as f64)).note(format!("of {checks}")),
+            )),
+            mark(read(
+                StatPanel::new(look, "Failing checks", Some(failing as f64))
+                    .color(if failing == 0 { "good" } else { "critical" })
+                    .color_mode(if failing == 0 {
+                        sokkel_tui::ColorMode::Value
+                    } else {
+                        sokkel_tui::ColorMode::Background
+                    }),
+            )),
+            mark(read(
+                StatPanel::new(look, "Ping uptime", uptime)
+                    .unit("%")
+                    .decimals(1)
+                    .thresholds(uptime_scale())
+                    .note("since start"),
+            )),
+        ]
+    }
+
+    /// The overview's layout: the four tiles, then the instances table.
+    fn overview_spans(&self, look: &Look) -> Vec<(Span, u16)> {
+        let th = self
+            .summary(look)
+            .iter()
+            .map(StatPanel::height)
+            .max()
+            .unwrap_or(6);
+        let mut spans: Vec<(Span, u16)> = (0..4).map(|_| (Span::Quarter, th)).collect();
+        spans.push((Span::Full, self.tiles().len().max(1) as u16 + 6));
+        spans
+    }
+
+    fn instance_columns() -> Vec<Column> {
+        vec![
+            Column::new("Instance").width(ColumnWidth::Fill(3)),
+            Column::new("Platform").width(ColumnWidth::Content),
+            Column::new("Status"),
+            Column::new("Checks"),
+            Column::new("Ping"),
+            Column::new("Latency").align(sokkel_tui::Align::End),
+            Column::new("Checked"),
+        ]
+    }
+
+    fn instance_rows(&self) -> Vec<Row> {
+        self.tiles()
+            .iter()
+            .map(|t| {
+                let status = if t.total_count == 0 {
+                    Cell::toned("waiting", StatusTone::Quiet)
+                } else {
+                    Cell::toned(t.worst_status.as_str(), tone(t.worst_status))
+                };
+                let ping = t
+                    .uptime_pct
+                    .map(|p| format!("{p:.0}% ({}/{})", t.ping_ok, t.ping_total));
+                let row = Row::new([
+                    Cell::text(label(t)),
+                    Cell::text(platform(t)),
+                    status,
+                    Cell::text(format!("{}/{}", t.ok_count, t.total_count)),
+                    Cell::maybe(ping),
+                    Cell::maybe(t.latency_ms.map(|ms| format!("{ms} ms")))
+                        .sort_by(t.latency_ms.unwrap_or(0) as f64),
+                    Cell::text(clock(t.last_refresh)),
+                ]);
+                if t.total_count == 0 {
+                    row.tone(RowTone::Muted)
+                } else {
+                    row.tone(row_tone(t.worst_status))
+                }
+            })
+            .collect()
+    }
+
+    fn instances_panel<'a>(&self, look: &'a Look) -> DashboardPanel<'a> {
+        let mut p = DashboardPanel::new(look, "Instances")
+            .subtitle(match self.tiles().len() {
+                0 => "none yet".to_owned(),
+                n => format!("{n} configured; Enter or a click opens one"),
+            })
+            .flush(true);
+        if let (true, Conn::Disconnected(why) | Conn::Rejected(why)) =
+            (self.never_answered(), &self.conn)
+        {
+            p = p.read(PanelRead::Failed(Some(why.clone())));
+        } else if self.tiles().is_empty() {
+            p = p.read(PanelRead::Empty);
+        }
+        if let Some(since) = self.stale() {
+            p = p.stale(since);
+        }
+        p
+    }
+
+    fn draw_overview(&mut self, f: &mut Frame, page: Rect, cx: &mut Cx) {
+        let look = cx.look;
+        let header = self.overview_header(look);
+        let hh = header.height(page.width);
+        f.render_widget(&header, Rect { height: hh, ..page });
+        let area = Rect {
+            y: page.y + hh + 1,
+            height: page.height.saturating_sub(hh + 1),
+            ..page
+        };
+        let rects = grid(look, area, &self.overview_spans(look));
+        let summary = self.summary(look);
+        for (tile, r) in summary.iter().zip(&rects) {
+            tile.render(r.intersection(area), f.buffer_mut());
+        }
+        if let Some(r) = rects.get(summary.len()) {
+            let p = self.instances_panel(look);
+            (&p).render(r.intersection(area), f.buffer_mut());
+            self.panel_at = *r;
+            if self.tiles().is_empty() {
+                return;
+            }
+            let body = p.layout(*r).body;
+            self.table_at = body;
+            let columns = Self::instance_columns();
+            let rows = self.instance_rows();
+            let table = Table::new(look, &columns, &rows)
+                .framed(false)
+                .focused(true);
+            f.render_stateful_widget(&table, body.intersection(area), &mut self.instances);
+        }
+    }
+
+    fn instance_header<'a>(&self, look: &'a Look, tile: &Tile) -> PageHeader<'a> {
+        PageHeader::new(look, label(tile).to_owned())
+            .code(tile.url.clone())
+            .description(platform(tile))
+            .meta([
+                format!("checked {}", clock(tile.last_refresh)),
+                format!("{}/{} checks OK", tile.ok_count, tile.total_count),
+            ])
+    }
+
+    fn instance_tiles<'a>(&self, look: &'a Look, tile: &Tile) -> Vec<StatPanel<'a>> {
+        let latencies: Vec<f64> = tile
+            .history
+            .iter()
+            .filter_map(|p| p.latency_ms.map(|v| v as f64))
+            .collect();
+        let good_runs = tile
+            .history
+            .iter()
+            .filter(|p| p.status == Status::Ok)
+            .count();
+        let stale = self.stale();
+        let mark = |p: StatPanel<'a>| match &stale {
+            Some(since) => p.stale(since.clone()),
+            None => p,
+        };
+        vec![
+            mark(
+                StatPanel::new(look, "Checks OK", Some(tile.ok_count as f64))
+                    .note(format!("of {}", tile.total_count))
+                    .color(if tile.worst_status == Status::Ok {
+                        "good"
+                    } else {
+                        "critical"
+                    }),
+            ),
+            mark(
+                StatPanel::new(look, "Ping uptime", tile.uptime_pct)
+                    .unit("%")
+                    .decimals(1)
+                    .thresholds(uptime_scale())
+                    .note(format!("{} of {} pings", tile.ping_ok, tile.ping_total)),
+            ),
+            mark(
+                StatPanel::new(look, "Latency", tile.latency_ms.map(|v| v as f64))
+                    .unit("ms")
+                    .sparkline(latencies)
+                    .note("mean of the checks that ran"),
+            ),
+            mark(
+                StatPanel::new(look, "Clean refreshes", Some(good_runs as f64))
+                    .note(format!("of the last {}", tile.history.len())),
+            ),
+        ]
+    }
+
+    fn instance_spans(&self, look: &Look, tile: &Tile) -> Vec<(Span, u16)> {
+        let th = self
+            .instance_tiles(look, tile)
+            .iter()
+            .map(StatPanel::height)
+            .max()
+            .unwrap_or(6);
+        let mut spans: Vec<(Span, u16)> = (0..4).map(|_| (Span::Quarter, th)).collect();
+        spans.push((Span::Full, (tile.checks.len() as u16).max(1) + 4));
+        spans
+    }
+
+    fn draw_instance(&mut self, f: &mut Frame, page: Rect, cx: &mut Cx, name: &str) {
+        let look = cx.look;
+        let Some(tile) = self.tile(name).cloned() else {
+            let header = PageHeader::new(look, name.to_owned())
+                .description("This instance is no longer in the config.");
+            f.render_widget(&header, page);
+            return;
+        };
+        let header = self.instance_header(look, &tile);
+        let hh = header.height(page.width);
+        f.render_widget(&header, Rect { height: hh, ..page });
+        let area = Rect {
+            y: page.y + hh + 1,
+            height: page.height.saturating_sub(hh + 1),
+            ..page
+        };
+        let rects = grid(look, area, &self.instance_spans(look, &tile));
+        let stats = self.instance_tiles(look, &tile);
+        for (s, r) in stats.iter().zip(&rects) {
+            s.render(r.intersection(area), f.buffer_mut());
+        }
+        if let Some(r) = rects.get(stats.len()) {
+            let columns = vec![
+                Column::new("Check").width(ColumnWidth::Content),
+                Column::new("Status"),
+                Column::new("Message").width(ColumnWidth::Fill(1)),
+            ];
+            let rows: Vec<Row> = tile
+                .checks
+                .iter()
+                .map(|c| {
+                    Row::new([
+                        Cell::text(&c.name),
+                        Cell::toned(c.status.as_str(), tone(c.status)),
+                        Cell::text(&c.message),
+                    ])
+                    .tone(row_tone(c.status))
+                })
+                .collect();
+            let table = Table::new(look, &columns, &rows);
+            f.render_stateful_widget(&table, r.intersection(area), &mut self.checks);
+        }
+    }
+
+    fn open(&mut self, name: &str) {
+        self.route = Route::Instance(name.to_owned());
+        self.checks = TableState::default();
+    }
+}
+
+impl ShellApp for App {
+    fn kiosk(&self) -> bool {
+        self.kiosk
+    }
+
+    fn id(&self) -> Option<&str> {
+        Some("chap-checker")
+    }
+
+    fn route(&self) -> String {
+        match &self.route {
+            Route::Overview => "overview".into(),
+            Route::Instance(name) => format!("instance/{name}"),
+        }
+    }
+
+    fn go(&mut self, route: &str) {
+        match route.strip_prefix("instance/") {
+            Some(name) => self.open(name),
+            None => self.route = Route::Overview,
+        }
+    }
+
+    fn banner(&self) -> Option<(BannerTone, String)> {
+        match &self.conn {
+            Conn::Disconnected(why) | Conn::Rejected(why) => {
+                Some((BannerTone::Critical, why.clone()))
+            }
+            _ => self.notice.clone(),
+        }
+    }
+
+    fn chrome<'a>(&'a self, look: &'a Look) -> Chrome<'a> {
+        let overview = RailEntry::new("Overview").icon("\u{25eb}");
+        let overview = if self.route == Route::Overview {
+            overview.active()
+        } else {
+            overview
+        };
+        let instances = self.tiles().iter().map(|t| {
+            let entry = RailEntry::new(label(t).to_owned()).icon("\u{25aa}").status(
+                if t.total_count == 0 {
+                    StatusTone::Quiet
+                } else {
+                    tone(t.worst_status)
+                },
+                if t.total_count == 0 {
+                    "waiting".to_owned()
+                } else {
+                    t.worst_status.as_str().to_owned()
+                },
+            );
+            if self.route == Route::Instance(t.name.clone()) {
+                entry.active()
+            } else {
+                entry
+            }
+        });
+        let mut trail = vec!["chap-checker".to_owned()];
+        match &self.route {
+            Route::Overview => trail.push("Overview".into()),
+            Route::Instance(name) => {
+                trail.push("Instances".into());
+                trail.push(
+                    self.tile(name)
+                        .map_or(name.clone(), |t| label(t).to_owned()),
+                );
+            }
+        }
+        let foot = match &self.conn {
+            Conn::Live if self.busy => StatusLine::new(look).note("Refreshing", NoteTone::Plain),
+            Conn::Live => StatusLine::new(look)
+                .note("Live", NoteTone::Live)
+                .live(true),
+            Conn::Waiting | Conn::NeedsToken => {
+                StatusLine::new(look).note("Connecting", NoteTone::Plain)
+            }
+            Conn::Disconnected(_) => StatusLine::new(look).note("Disconnected", NoteTone::Error),
+            Conn::Rejected(_) => StatusLine::new(look).note("Signed out", NoteTone::Warn),
+        };
+        let checked = self.state.as_ref().and_then(|s| s.last_refresh);
+        Chrome {
+            rail: Rail::new(look, "C", "chap-checker").groups([
+                RailGroup::new(None, [overview]),
+                RailGroup::new(Some("Instances"), instances),
+            ]),
+            top: TopBar::new(look).trail(trail),
+            foot: foot.facts([
+                Fact::labeled("from", self.source.clone()).code(),
+                Fact::new(format!("checked {}", clock(checked))),
+                Fact::new(format!("every {}s", self.interval)),
+            ]),
+        }
+    }
+
+    fn entry(&mut self, group: usize, entry: usize) {
+        if group == 0 {
+            self.route = Route::Overview;
+        } else if let Some(name) = self.tiles().get(entry).map(|t| t.name.clone()) {
+            self.open(&name);
+        }
+    }
+
+    fn page(&mut self, f: &mut Frame, page: Rect, cx: &mut Cx) {
+        match self.route.clone() {
+            Route::Overview => self.draw_overview(f, page, cx),
+            Route::Instance(name) => self.draw_instance(f, page, cx, &name),
+        }
+    }
+
+    fn page_rows(&self, look: &Look, width: u16) -> Option<u16> {
+        let (hh, spans) = match &self.route {
+            Route::Overview => (
+                self.overview_header(look).height(width),
+                self.overview_spans(look),
+            ),
+            Route::Instance(name) => {
+                let tile = self.tile(name)?;
+                (
+                    self.instance_header(look, tile).height(width),
+                    self.instance_spans(look, tile),
+                )
+            }
+        };
+        grid(look, Rect::new(0, hh + 1, width, 0), &spans)
+            .iter()
+            .map(|r| r.bottom())
+            .max()
+    }
+
+    fn layer_open(&self) -> bool {
+        self.prompt.is_some()
+    }
+
+    fn layer_scrim(&self) -> bool {
+        true
+    }
+
+    fn layer(&mut self, f: &mut Frame, cx: &mut Cx) {
+        let Some(mut state) = self.prompt.take() else {
+            return;
+        };
+        let p = self.token_prompt(cx.look, cx.window);
+        let r = p.area(cx.window, &state);
+        p.render(r, f.buffer_mut(), &mut state);
+        if let Some(at) = state.field.cursor_position() {
+            f.set_cursor_position(at);
+        }
+        self.prompt_at = r;
+        self.prompt = Some(state);
+    }
+
+    fn paste(&mut self, text: &str, cx: &mut Cx) {
+        if let Some(mut state) = self.prompt.take() {
+            self.token_prompt(cx.look, cx.window)
+                .paste(&mut state, text);
+            self.prompt = Some(state);
+        }
+    }
+
+    fn commands(&self) -> Vec<CommandGroup> {
+        let mut own = vec![
+            Command::new("refresh", "Refresh now").icon("\u{21bb}"),
+            Command::new("reload", "Reload the config"),
+        ];
+        if self.source != "local" {
+            own.push(Command::new("signin", "Sign in"));
+        }
+        let instances = self
+            .tiles()
+            .iter()
+            .map(|t| Command::new(format!("open:{}", t.name), format!("Open {}", label(t))));
+        vec![
+            CommandGroup::new("chap-checker", own),
+            CommandGroup::new("Instances", instances),
+        ]
+    }
+
+    fn command(&mut self, id: &str) -> Ran {
+        match id {
+            "refresh" => {
+                let _ = self.asks.send(Ask::Refresh);
+            }
+            "reload" => {
+                let _ = self.asks.send(Ask::Reload);
+            }
+            "signin" => self.prompt = Some(PromptState::default()),
+            other => {
+                if let Some(name) = other.strip_prefix("open:") {
+                    self.open(name);
+                }
+            }
+        }
+        Ran::Done
+    }
+
+    fn shortcuts(&self) -> Vec<Binding<String>> {
+        vec![
+            Binding::new(Keys::Char('r'), "refresh".to_owned(), "Refresh now"),
+            Binding::new(Keys::Mod('r'), "reload".to_owned(), "Reload the config"),
+        ]
+    }
+
+    fn key(&mut self, key: KeyPress, cx: &mut Cx) -> Flow {
+        if let Some(mut state) = self.prompt.take() {
+            let event = self
+                .token_prompt(cx.look, cx.window)
+                .handle(&mut state, key);
+            self.prompted(event, state);
+            return Flow::Handled;
+        }
+        if self.route == Route::Overview {
+            let (columns, rows) = (Self::instance_columns(), self.instance_rows());
+            let table = Table::new(cx.look, &columns, &rows).framed(false);
+            match self.instances.handle(&table, key) {
+                sokkel_tui::TableEvent::Ignored => {}
+                sokkel_tui::TableEvent::Opened(i) => {
+                    if let Some(name) = self.tiles().get(i).map(|t| t.name.clone()) {
+                        self.open(&name);
+                    }
+                    return Flow::Handled;
+                }
+                _ => return Flow::Handled,
+            }
+        }
+        Flow::Ignored
+    }
+
+    fn pointer(&mut self, p: Pointer, cx: &mut Cx) {
+        if let Some(mut state) = self.prompt.take() {
+            let event = if p.kind == PointerKind::Press {
+                self.token_prompt(cx.look, cx.window)
+                    .press(&mut state, self.prompt_at, p.at)
+            } else {
+                PromptEvent::Ignored
+            };
+            self.prompted(event, state);
+            return;
+        }
+        if p.kind == PointerKind::Press
+            && self.route == Route::Overview
+            && self.instances_panel(cx.look).hit(self.panel_at, p.at)
+                == Some(sokkel_tui::PanelTool::Retry)
+        {
+            let _ = self.asks.send(Ask::Refresh);
+            return;
+        }
+        if p.kind == PointerKind::Press && self.route == Route::Overview {
+            let (columns, rows) = (Self::instance_columns(), self.instance_rows());
+            let table = Table::new(cx.look, &columns, &rows).framed(false);
+            if let Some(hit) = table.hit(self.table_at, p.at, &self.instances)
+                && let sokkel_tui::TableEvent::Opened(i) = table.press(&mut self.instances, hit)
+                && let Some(name) = self.tiles().get(i).map(|t| t.name.clone())
+            {
+                self.open(&name);
+            }
+        }
+    }
+
+    fn tick(&mut self, _now: u64) {
+        let s = lock(&self.shared);
+        self.state.clone_from(&s.state);
+        self.conn = s.conn.clone();
+        self.busy = s.busy;
+        self.last_contact = s.last_contact;
+        self.notice = s
+            .notice
+            .as_ref()
+            .filter(|(_, _, until)| *until > Utc::now())
+            .map(|(t, w, _)| (*t, w.clone()));
+        let needs_token = s.conn == Conn::NeedsToken;
+        drop(s);
+        if needs_token && self.prompt.is_none() {
+            self.prompt = Some(PromptState::default());
+            lock(&self.shared).conn = Conn::Waiting;
+        }
+    }
+}
+
+/// The sokkel theme for a `[ui] theme`, trying the contract's own name for it first and falling
+/// back to the closest theme a sokkel-tui without it has.
+pub fn look_for(theme: UiTheme) -> Look {
+    let (names, scheme): (&[&str], Scheme) = match theme {
+        UiTheme::Phosphor => (&["phosphor", "terminal"], Scheme::Dark),
+        UiTheme::Amber => (&["amber"], Scheme::Dark),
+        UiTheme::High => (&["phosphor-bright", "contrast"], Scheme::Dark),
+        UiTheme::Tokyo => (&["tokyo"], Scheme::Dark),
+        UiTheme::Dhis2 => (&["tray", "paper"], Scheme::Light),
+    };
+    names
+        .iter()
+        .find_map(|n| Look::new(n, scheme))
+        .or_else(|| Look::new("tidevann", scheme))
+        .expect("the contract has tidevann")
+        .with_depth(Depth::detect())
+        .with_charset(Charset::detect())
+}
+
+/// Options for [`run`].
+pub struct TuiOptions {
+    pub interval_s: f64,
+    pub kiosk: bool,
+    pub theme: UiTheme,
+    /// Draw one frame after the first data arrives, `(cols, rows)`, into `<out>.svg` and
+    /// `<out>.txt`, instead of taking the terminal.
+    pub frame: Option<((u16, u16), std::path::PathBuf, Vec<KeyPress>)>,
+}
+
+/// Run the dashboard until the reader quits.
+pub fn run(source: Source, options: TuiOptions) -> std::io::Result<()> {
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime starts");
+    let shared: SharedRef = Arc::new(Mutex::new(Shared {
+        state: None,
+        conn: Conn::Waiting,
+        busy: false,
+        notice: None,
+        last_contact: None,
+    }));
+    let (tx, rx) = mpsc::unbounded_channel();
+    let label = match &source {
+        Source::Local(_) => "local".to_owned(),
+        Source::Connect { url, .. } => url.clone(),
+    };
+    match source {
+        Source::Local(daemon) => {
+            rt.spawn(local(daemon, Arc::clone(&shared), rx));
+        }
+        Source::Connect { url, token } => {
+            rt.spawn(connect(
+                url,
+                token,
+                options.interval_s,
+                Arc::clone(&shared),
+                rx,
+            ));
+        }
+    }
+    let app = App {
+        shared: Arc::clone(&shared),
+        asks: tx,
+        source: label,
+        interval: options.interval_s,
+        kiosk: options.kiosk,
+        route: Route::Overview,
+        state: None,
+        conn: Conn::Waiting,
+        busy: false,
+        notice: None,
+        last_contact: None,
+        checks: TableState::default(),
+        prompt: None,
+        prompt_at: Rect::default(),
+        instances: TableState::default(),
+        table_at: Rect::default(),
+        panel_at: Rect::default(),
+    };
+    let look = look_for(options.theme);
+    if let Some((size, out, keys)) = options.frame {
+        // Wait for the first answer (data, a failure or a 401), at most two minutes.
+        let deadline = std::time::Instant::now() + Duration::from_secs(120);
+        while std::time::Instant::now() < deadline {
+            let s = lock(&shared);
+            let answered = s.state.as_ref().is_some_and(|st| st.last_refresh.is_some())
+                || s.conn != Conn::Waiting;
+            drop(s);
+            if answered {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        let mut app = app;
+        app.tick(0);
+        let buf = app::shot(app, look.clone(), size, |_| {}, &keys);
+        std::fs::write(out.with_extension("svg"), snapshot::svg_in(&buf, &look))?;
+        std::fs::write(out.with_extension("txt"), snapshot::text(&buf))?;
+        rt.shutdown_background();
+        return Ok(());
+    }
+    let result = app::run_shell(app, look);
+    rt.shutdown_background();
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::daemon::{CheckRow, HistoryPoint};
+
+    fn tile(name: &str, status: Status) -> Tile {
+        Tile {
+            name: name.into(),
+            display_name: None,
+            url: format!("https://{name}.example.org"),
+            platform: "DHIS2".into(),
+            version: Some("2.42.6".into()),
+            worst_status: status,
+            ok_count: usize::from(status == Status::Ok),
+            total_count: 1,
+            ping_ok: 3,
+            ping_total: 4,
+            latency_ms: Some(120),
+            uptime_pct: Some(75.0),
+            last_refresh: Some(Utc::now()),
+            checks: vec![CheckRow {
+                name: "ping".into(),
+                status,
+                symbol: String::new(),
+                message: format!("{name} says {}", status.as_str()),
+            }],
+            history: vec![HistoryPoint {
+                status,
+                latency_ms: Some(120),
+            }],
+        }
+    }
+
+    fn app(state: Option<DashboardState>, conn: Conn) -> App {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let shared = Arc::new(Mutex::new(Shared {
+            state,
+            conn,
+            busy: false,
+            notice: None,
+            last_contact: Some(Utc::now()),
+        }));
+        let mut app = App {
+            shared,
+            asks: tx,
+            source: "http://daemon:8765".into(),
+            interval: 30.0,
+            kiosk: false,
+            route: Route::Overview,
+            state: None,
+            conn: Conn::Waiting,
+            busy: false,
+            notice: None,
+            last_contact: None,
+            checks: TableState::default(),
+            prompt: None,
+            prompt_at: Rect::default(),
+            instances: TableState::default(),
+            table_at: Rect::default(),
+            panel_at: Rect::default(),
+        };
+        app.tick(0);
+        app
+    }
+
+    fn state() -> DashboardState {
+        DashboardState {
+            instance_count: 2,
+            alerts_enabled: false,
+            interval_s: 30.0,
+            last_refresh: Some(Utc::now()),
+            tiles: vec![tile("prod", Status::Ok), tile("staging", Status::Fail)],
+            ui_title: "Fleet".into(),
+            ui_theme: "phosphor".into(),
+        }
+    }
+
+    fn text(app: App, keys: &[&str]) -> String {
+        let look = Look::new("tidevann", Scheme::Dark).unwrap();
+        let keys: Vec<KeyPress> = keys.iter().filter_map(|k| KeyPress::named(k)).collect();
+        snapshot::text(&app::shot(app, look, (150, 40), |_| {}, &keys))
+    }
+
+    #[test]
+    fn overview_lists_instances_with_their_status() {
+        let screen = text(app(Some(state()), Conn::Live), &[]);
+        assert!(screen.contains("Fleet"), "{screen}");
+        assert!(screen.contains("1 of 2 instance(s) up"), "{screen}");
+        assert!(
+            screen.contains("prod") && screen.contains("staging"),
+            "{screen}"
+        );
+        assert!(screen.contains("\u{25cf} fail"), "{screen}");
+        assert!(screen.contains("75% (3/4)"), "{screen}");
+        assert!(screen.contains("Live"), "{screen}");
+    }
+
+    #[test]
+    fn enter_opens_the_active_instance() {
+        let screen = text(app(Some(state()), Conn::Live), &["down", "enter"]);
+        assert!(screen.contains("Instances \u{203a} staging"), "{screen}");
+        assert!(screen.contains("staging says fail"), "{screen}");
+        assert!(screen.contains("https://staging.example.org"), "{screen}");
+    }
+
+    #[test]
+    fn a_lost_connection_keeps_the_data_under_a_banner() {
+        let screen = text(
+            app(
+                Some(state()),
+                Conn::Disconnected("disconnected from http://daemon:8765: refused".into()),
+            ),
+            &[],
+        );
+        assert!(
+            screen.contains("disconnected from http://daemon:8765: refused"),
+            "{screen}"
+        );
+        assert!(screen.contains("Disconnected"), "{screen}");
+        assert!(screen.contains("staging"), "the last data stays: {screen}");
+    }
+
+    #[test]
+    fn a_401_without_a_token_opens_the_prompt() {
+        let screen = text(app(None, Conn::NeedsToken), &[]);
+        assert!(screen.contains("Sign in to http://daemon:8765"), "{screen}");
+        assert!(screen.contains("Bearer token"), "{screen}");
+    }
+
+    #[test]
+    fn themes_map_to_sokkel() {
+        for theme in [
+            UiTheme::Phosphor,
+            UiTheme::Amber,
+            UiTheme::High,
+            UiTheme::Tokyo,
+            UiTheme::Dhis2,
+        ] {
+            let _ = look_for(theme);
+        }
+        assert!(
+            Look::new("phosphor", Scheme::Dark).is_some(),
+            "the pinned sokkel-tui carries phosphor"
+        );
+        assert!(Look::new("phosphor-bright", Scheme::Dark).is_some());
+        assert!(Look::new("tray", Scheme::Light).is_some());
+    }
+}

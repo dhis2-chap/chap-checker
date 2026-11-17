@@ -10,7 +10,8 @@
 //! - [`state_store`] persists statuses and computes alert transitions.
 //! - [`alerts`] delivers transitions to Slack and generic webhooks.
 //! - [`output`] renders a verify report as tables or JSON.
-//! - [`daemon`] keeps the refresh loop and the dashboard snapshot; [`serve`] puts it on HTTP.
+//! - [`daemon`] keeps the refresh loop and the dashboard snapshot; [`serve`] puts it on HTTP;
+//!   [`tui`] draws it in a terminal with sokkel-tui.
 
 pub mod alerts;
 pub mod checks;
@@ -23,6 +24,7 @@ pub mod plugins;
 pub mod runner;
 pub mod serve;
 pub mod state_store;
+pub mod tui;
 
 /// The package version, reported by `--version`, in JSON reports and in webhook envelopes.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

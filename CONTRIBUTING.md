@@ -61,8 +61,10 @@ src/chap_checker/
 chap-checker is being ported to Rust. Python remains the shipped implementation until the cutover,
 when the binary goes out as PyPI wheels so `uvx chap-checker` keeps working. The port lives in a
 Cargo workspace beside the Python package and runs in CI as `make rust-check` and `make rust-test`.
-It covers `init`, `verify`, `checks list`, `alerts list` / `test` and `serve`; the TUI (on
-sokkel-tui) comes next. It reads the same `chap-checker.toml` and state file, `verify --json`
+It covers every command: `init`, `verify`, `checks list`, `plugins list`, `alerts list` / `test`,
+`serve` and `tui` (drawn with sokkel-tui, pinned by commit in `crates/chap-checker/Cargo.toml`;
+a gap in sokkel-tui is reported to its maintainers, not worked around in chap-checker).
+`scripts/capture_tui_rs.sh` captures the Rust TUI for visual checks. It reads the same `chap-checker.toml` and state file, `verify --json`
 prints the same document, config errors read the same, and `serve` answers every route with the
 same status and JSON, serving the same browser dashboard from `src/chap_checker/web_ui/` (built
 into the binary).
@@ -78,6 +80,7 @@ crates/chap-checker/src/
 ├── runner.rs              # run_targets, RunReport, VerifyReport
 ├── daemon.rs              # refresh loop, per-tile trackers, the /api/state snapshot
 ├── serve.rs               # axum app: /api/*, auth, the embedded browser dashboard
+├── tui.rs                 # the terminal dashboard on sokkel-tui (local and --connect)
 ├── state_store.rs         # state file and per-alerter transitions
 ├── alerts.rs              # Slack and webhook alerters, dispatch
 └── output.rs              # tables and JSON
