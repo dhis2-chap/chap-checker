@@ -2,9 +2,10 @@
 #
 # `chap-checker verify`             - check every instance below
 # `chap-checker verify -i <name>`   - check just one
-# `chap-checker tui`                - Textual TUI
+# `chap-checker tui`                - terminal dashboard (`--kiosk` for a wall display)
 # `chap-checker serve`              - long-running daemon + browser dashboard (loopback by default)
 # `chap-checker checks list`        - every available check name
+# `chap-checker plugins list`       - every kind of server, with a copy-paste table
 #
 # WARNING: this file may contain credentials. Keep it out of git and
 # leave it chmod 600 (which `init` already set on POSIX).

@@ -35,6 +35,22 @@ jobs:
       - name: make test
         run: make test
 
+  # The release ships macOS and Windows wheels too; build and test there on every PR so a
+  # platform-only break (signals, file locks, paths) shows up before a tag.
+  test-os:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo test
+        run: cargo test --locked
+
   # The release builds a wheel per platform with maturin; build the Linux ones on every PR so a
   # packaging break shows up here, not on the tag.
   wheel:
