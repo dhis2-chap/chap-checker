@@ -1,12 +1,10 @@
-.PHONY: help install lint check test rust-check rust-test coverage clean docs docs-build docs-cli docs-screenshot
+.PHONY: help install lint check test build docs docs-build docs-cli docs-screenshot clean
 
-# ==============================================================================
-# Venv
-# ==============================================================================
+# chap-checker is a Rust binary (crates/chap-checker); uv only carries the docs site, the
+# browser capture script and maturin, which builds the PyPI wheel.
 
 UV := $(shell command -v uv 2> /dev/null)
-VENV_DIR?=.venv
-PYTHON := $(VENV_DIR)/bin/python
+BIN := target/debug/chap-checker
 
 # ==============================================================================
 # Targets
@@ -16,60 +14,42 @@ help:
 	@echo "Usage: make [target]"
 	@echo ""
 	@echo "Targets:"
-	@echo "  install         Install dependencies"
-	@echo "  lint            Format, lint and type-check (auto-fixes)"
-	@echo "  check           Lint and type-check without writing changes"
-	@echo "  test            Run tests"
-	@echo "  coverage        Run tests with coverage reporting"
-	@echo "  rust-check      Format-check and lint the Rust port (crates/)"
-	@echo "  rust-test       Run the Rust port's tests"
+	@echo "  install         Install the dev tools (mkdocs, playwright, maturin) and build the binary"
+	@echo "  lint            Format, and lint with clippy"
+	@echo "  check           Check formatting and lint without writing changes"
+	@echo "  test            Run the tests"
+	@echo "  build           Build the wheel and sdist into dist/ (what the release uploads)"
 	@echo "  docs            Serve docs locally at http://127.0.0.1:8000"
 	@echo "  docs-build      Build the static docs site into site/"
-	@echo "  docs-cli        Regenerate docs/cli-reference.md from the Typer app"
-	@echo "  docs-screenshot Re-capture docs/assets/dashboard.svg (needs ./chap-checker.toml)"
-	@echo "  clean           Clean up temporary files"
+	@echo "  docs-cli        Regenerate docs/cli-reference.md from the CLI"
+	@echo "  docs-screenshot Re-capture the TUI screenshots in docs/assets/ (needs ./chap-checker.toml)"
+	@echo "  clean           Clean up build output"
 
 install:
-	@echo ">>> Installing dependencies"
-	@$(UV) sync --all-extras
+	@echo ">>> Installing dev tools"
+	@$(UV) sync
+	@echo ">>> Building chap-checker"
+	@cargo build
 
 lint:
-	@echo ">>> Running formatter"
-	@$(UV) run ruff format .
-	@echo ">>> Running linter"
-	@$(UV) run ruff check . --fix
-	@echo ">>> Running type checker"
-	@$(UV) run mypy --explicit-package-bases src tests
-	@$(UV) run pyright
+	@echo ">>> Formatting"
+	@cargo fmt --all
+	@echo ">>> Running clippy"
+	@cargo clippy --all-targets --locked -- -D warnings
 
 check:
 	@echo ">>> Checking formatting"
-	@$(UV) run ruff format --check .
-	@echo ">>> Running linter"
-	@$(UV) run ruff check .
-	@echo ">>> Running type checker"
-	@$(UV) run mypy --explicit-package-bases src tests
-	@$(UV) run pyright
-
-test:
-	@echo ">>> Running tests"
-	@$(UV) run pytest -q
-
-rust-check:
-	@echo ">>> Checking Rust formatting"
 	@cargo fmt --all --check
 	@echo ">>> Running clippy"
 	@cargo clippy --all-targets --locked -- -D warnings
 
-rust-test:
-	@echo ">>> Running Rust tests"
+test:
+	@echo ">>> Running tests"
 	@cargo test --locked
 
-coverage:
-	@echo ">>> Running tests with coverage"
-	@$(UV) run coverage run -m pytest -q
-	@$(UV) run coverage report
-	@$(UV) run coverage xml
+build:
+	@echo ">>> Building the wheel and sdist"
+	@$(UV) build
 
 docs:
 	@echo ">>> Serving docs at http://127.0.0.1:8000"
@@ -80,25 +60,19 @@ docs-build: docs-cli
 	@$(UV) run mkdocs build
 
 docs-cli:
-	@echo ">>> Regenerating docs/cli-reference.md from the Typer app"
-	@$(UV) run typer chap_checker.cli utils docs --name chap-checker --title "CLI reference" --output docs/cli-reference.md
+	@echo ">>> Regenerating docs/cli-reference.md from the CLI"
+	@cargo build --quiet
+	@$(BIN) markdown-help > docs/cli-reference.md
 	@echo "    wrote docs/cli-reference.md"
 
 docs-screenshot:
-	@echo ">>> Capturing dashboard screenshot to docs/assets/dashboard.svg"
-	@$(UV) run python scripts/capture_dashboard.py
+	@echo ">>> Capturing the TUI screenshots into docs/assets/ (both themes)"
+	@scripts/capture_docs_tui.sh chap-checker.toml
 
 clean:
 	@echo ">>> Cleaning up"
-	@find . -type f -name "*.pyc" -delete
-	@find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
-	@find . -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true
-	@find . -type d -name ".ruff_cache" -exec rm -rf {} + 2>/dev/null || true
-	@find . -type d -name ".mypy_cache" -exec rm -rf {} + 2>/dev/null || true
-	@rm -rf .coverage htmlcov coverage.xml
-	@rm -rf .pyright
-	@rm -rf dist build *.egg-info
-	@rm -rf site
+	@cargo clean
+	@rm -rf dist site
 
 # ==============================================================================
 # Default

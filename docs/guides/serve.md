@@ -2,14 +2,11 @@
 
 ```bash
 chap-checker serve
-# 2026-05-16 11:59:10 INFO chap_checker.serve: serving dashboard + API on http://127.0.0.1:8765
-# 2026-05-16 11:59:10 INFO chap_checker.serve: config: ./chap-checker.toml
-# 2026-05-16 11:59:10 INFO chap_checker.serve: interval: 30.0s; alerts: off
-# INFO:     Started server process [57114]
-# INFO:     Application startup complete.
-# INFO:     Uvicorn running on http://127.0.0.1:8765 (Press CTRL+C to quit)
-# 2026-05-16 11:59:10 INFO chap_checker.daemon: refresh: 4/4 targets ok in 384ms
-# 2026-05-16 11:59:18 INFO chap_checker.serve.access: 127.0.0.1 "GET /api/state HTTP/1.1" 200 2081 0.6ms ua="curl/8.7.1"
+# 2026-11-17T11:59:10.054558Z  INFO chap_checker::serve: serving dashboard + API on http://127.0.0.1:8765
+# 2026-11-17T11:59:10.054677Z  INFO chap_checker::serve: config: ./chap-checker.toml
+# 2026-11-17T11:59:10.054790Z  INFO chap_checker::serve: interval: 30.0s; alerts: off; auth: off
+# 2026-11-17T11:59:10.438920Z  INFO chap_checker::daemon: refresh: 4/4 targets ok in 384ms
+# 2026-11-17T11:59:18.695447Z  INFO chap_checker::serve::access: 127.0.0.1 "GET /api/state HTTP/1.1" 200 2081 0.6ms ua="curl/8.7.1"
 ```
 
 Long-running daemon. Runs the check loop on its own schedule, dispatches
@@ -83,9 +80,8 @@ The command palette currently exposes:
 
 ![Command palette open in the browser dashboard](../assets/web-dashboard-palette.png)
 
-The [TUI](dashboard.md#command-palette) ships the same commands via
-Textual's built-in palette (`Ctrl+P`), so the same muscle memory works
-in both surfaces.
+The [TUI](dashboard.md#command-palette) has the same commands in its own
+palette (`Ctrl+K`), so the same muscle memory works in both surfaces.
 
 ## Headless mode
 
@@ -118,8 +114,7 @@ diverging numbers — the daemon is the single source of truth.
 
 The daemon logs at INFO level by default:
 
-- Startup banner (host, port, config, interval, alerts)
-- Uvicorn's own startup chatter
+- Startup banner (host, port, config, interval, alerts, auth)
 - One line per refresh cycle from `chap_checker.daemon` (e.g.
   `refresh: 4/4 targets ok in 384ms`)
 - One `chap_checker.serve.access` line per HTTP request:
@@ -267,17 +262,18 @@ The command palette exposes two runtime tweaks for the look:
 - **Density**: `default`, `comfortable`, `TV`, `wall (big numbers)`.
 
 Defined as CSS custom-property bundles in
-[`src/chap_checker/web_ui/src/app.jsx`](https://github.com/dhis2-chap/chap-checker/blob/main/src/chap_checker/web_ui/src/app.jsx)
+[`crates/chap-checker/web_ui/src/app.jsx`](https://github.com/dhis2-chap/chap-checker/blob/main/crates/chap-checker/web_ui/src/app.jsx)
 (`THEMES`, `DENSITY`) and applied by `applyTheme()` on every tweak
 change. Selections live in React state for the session; a page reload
 resets to the defaults.
 
 ## Architecture
 
-A small FastAPI app + a React/Babel-standalone SPA. No build step.
+A small HTTP server (axum, in the same binary) + a React/Babel-standalone SPA.
+No build step.
 
 ```
-src/chap_checker/web_ui/
+crates/chap-checker/web_ui/
 ├── index.html      Loads vendor/React + vendor/Babel + src/*.jsx in order
 ├── vendor/         React 18.3.1 UMD + Babel 7.29.0 standalone (committed)
 ├── _state.js       Wiring layer (polls /api/state, maps to artifact shape)
@@ -288,17 +284,15 @@ src/chap_checker/web_ui/
     └── tweaks-panel.jsx
 ```
 
-Living inside the `chap_checker` package means the assets ship with
-both editable installs and built wheels (uv_build picks up everything
-under `src/chap_checker/` automatically). The page loads no external
+The files are built into the `chap-checker` binary at compile time, so
+there is nothing to install beside it. The page loads no external
 resources — React and Babel are vendored under `vendor/`, no web fonts
 are fetched, and the body CSS falls back to the platform monospace
 stack — so the dashboard works offline, in air-gapped kiosks, and
 behind strict CSP without any third-party trust dependency.
 
-- FastAPI runs the checks on a background `asyncio` task every
-  `--interval` seconds via the shared `DashboardServer` in
-  `chap_checker.daemon`.
+- The daemon runs the checks on a background task every `--interval`
+  seconds (`crates/chap-checker/src/daemon.rs`).
 - Check runs never overlap. A `POST /api/refresh` that arrives while
   a run is in flight (from the background loop or another client)
   waits for that run and returns once it lands, instead of starting a
@@ -306,8 +300,8 @@ behind strict CSP without any third-party trust dependency.
 - `GET /api/state` returns the current snapshot as JSON. Timestamps
   (`last_refresh`, per tile and overall) are UTC with an explicit offset
   (ISO 8601, `Z` suffix), so viewers in any time zone see correct ages.
-- The web UI is mounted via `StaticFiles(directory=web_ui, html=False)`
-  with a dedicated `GET /` handler returning `index.html`; skip both
+- `GET /` returns `index.html` and every other unclaimed `GET` path is
+  looked up among the dashboard's files (404 when there is none); skip both
   with `--no-ui` for an API-only daemon.
 - `_state.js` exposes `window.CK_useLiveState(pollSec)` — a React hook
   that polls `/api/state`, maps the server schema to the artifact's
@@ -357,7 +351,7 @@ export CHAP_CHECKER_TOKEN=<the same token>
 chap-checker tui --connect http://daemon-host:8765 --token-env CHAP_CHECKER_TOKEN
 ```
 
-If you omit `--token-env` (and the daemon requires auth), the TUI hits its first 401 and pops a centred token-prompt modal — paste the token, press Enter, the dashboard renders. Escape to cancel, which paints the auth-rejected banner instead. The modal stays inside the Textual surface so the operator never leaves the dashboard.
+If you omit `--token-env` (and the daemon requires auth), the TUI hits its first 401 and pops a centred token-prompt modal — paste the token, press Enter, the dashboard renders. Escape to cancel, which paints the auth-rejected banner instead. The prompt stays inside the dashboard, so the operator never leaves it.
 
 A wrong token (or one rejected mid-session) paints the disconnect banner with `"auth rejected by ..."` (distinct from a generic "disconnected", so you know the receiver is up but the credential is bad).
 

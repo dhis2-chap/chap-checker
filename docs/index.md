@@ -1,10 +1,12 @@
 # chap-checker
 
-[![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
+[![Rust 2024](https://img.shields.io/badge/rust-2024-orange.svg)](https://github.com/dhis2-chap/chap-checker/blob/main/crates/chap-checker/Cargo.toml)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 
-A small command-line health-check and alerting tool for DHIS2 instances that
-integrate with `chap-core` via a DHIS2 route.
+An uptime monitor for the servers around Chap: DHIS2 instances that integrate
+with `chap-core` through a DHIS2 route, chap-core itself, CAPS, Open Geo
+Service deployments, and any other URL. Each kind of server is a plugin with
+its own checks (see [Checks](guides/checks.md)).
 
 Operating a DHIS2 deployment with `chap-core` means several moving pieces all
 have to stay healthy at once:
@@ -15,8 +17,9 @@ have to stay healthy at once:
 - the modeling app on the DHIS2 frontend,
 - the climate app on the DHIS2 frontend.
 
-`chap-checker` runs one HTTP probe per piece against each DHIS2 instance it's
-pointed at, rolls the results up into a non-zero exit code on any failure, and
+`chap-checker` runs one HTTP probe per piece against each instance it's
+pointed at (and the same for chap-core, CAPS or Open Geo Service on their
+own), rolls the results up into a non-zero exit code on any failure, and
 optionally fires alerts (Slack, generic webhook, or a custom transport) when
 something flips between OK and broken — transition-only, so a sustained
 outage produces one message on entry and one on recovery, not a ping every
@@ -25,7 +28,7 @@ cron tick.
 It's designed to be run by cron / a Kubernetes `CronJob` / any scheduler that
 cares about exit codes and a quiet stdout when everything is fine. You can
 also run it interactively for ad-hoc one-off checks, open the
-[Textual dashboard](guides/dashboard.md) for an at-a-glance TV view, or run
+[terminal dashboard](guides/dashboard.md) for an at-a-glance view, or run
 [`chap-checker serve`](guides/serve.md) as a 24/7 daemon backing a browser
 dashboard and remote thin-client TUIs.
 
@@ -42,10 +45,12 @@ chap-checker --version
 
 # Upgrade to the latest release later:
 uv tool upgrade chap-checker
-
-# Or, if you're embedding into another uv project:
-uv add chap-checker
 ```
+
+chap-checker is a single binary written in Rust. PyPI carries a wheel per
+platform (Linux x86_64 and aarch64, macOS Intel and Apple silicon, Windows),
+which is what `uvx` and `uv tool install` pick up; nothing else needs to be
+installed.
 
 Released versions are published to
 [PyPI](https://pypi.org/project/chap-checker/) and the docs site
@@ -102,13 +107,13 @@ annotated template if you'd rather start from a scaffold.
 - **[Configuration](guides/configuration.md)** — the TOML file in detail.
 - **[Checks](guides/checks.md)** — what each built-in check does and how they
   depend on each other.
-- **[Custom checks](guides/custom-checks.md)** — the `@register_check`
-  decorator and Protocol contract for adding your own probe.
+- **[Adding checks and plugins](guides/custom-checks.md)** — how a check and
+  a plugin (a kind of server) are added to chap-checker.
 - **[Alerting](guides/alerts.md)** — Slack and generic-webhook transports,
   per-instance opt-in, transition semantics, delivery-failure retries.
 - **[CLI](guides/cli.md)** — every command and flag.
 - **[Cron](guides/cron.md)** — production deployment recipes.
-- **[TUI dashboard](guides/dashboard.md)** — the at-a-glance Textual UI (with `--connect` for cross-machine consistency).
+- **[TUI dashboard](guides/dashboard.md)** — the terminal dashboard (with `--connect` for cross-machine consistency, `--kiosk` for a wall).
 - **[Server](guides/serve.md)** — long-running daemon, browser dashboard, JSON state API, systemd autostart.
 
 ## Links

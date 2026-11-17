@@ -34,7 +34,7 @@ nav:
   - Guides:
       - Configuration: guides/configuration.md
       - Checks: guides/checks.md
-      - Custom checks: guides/custom-checks.md
+      - Adding checks and plugins: guides/custom-checks.md
       - Alerting: guides/alerts.md
       - CLI: guides/cli.md
       - Cron: guides/cron.md

@@ -26,9 +26,9 @@ use url::Url;
 
 const INIT_TEMPLATE: &str = include_str!("init_template.toml");
 
-/// Health-check CLI for DHIS2 instances integrated with chap-core and Open Geo Service
-/// deployments. Cron-friendly with Slack/webhook alerts on status transitions and a TUI dashboard
-/// for at-a-glance monitoring.
+/// Uptime monitoring for DHIS2 with chap-core, chap-core itself, CAPS, Open Geo Service and any
+/// URL, one plugin per kind of server. Cron-friendly, with Slack/webhook alerts on status
+/// transitions, a daemon with a browser dashboard, and a terminal dashboard.
 #[derive(Parser)]
 #[command(name = "chap-checker", disable_version_flag = true)]
 struct Cli {
@@ -100,6 +100,9 @@ enum Command {
     /// default). Connect mode (`--connect URL`) shows a remote `chap-checker serve` daemon's
     /// state instead; the config, the state file and alerts stay with the daemon.
     Tui(TuiArgs),
+    /// Print this CLI's reference as Markdown (for `make docs-cli`).
+    #[command(hide = true)]
+    MarkdownHelp,
 }
 
 #[derive(clap::Args)]
@@ -348,6 +351,14 @@ fn main() -> ExitCode {
         Some(Command::Checks(ChecksCommand::List)) => checks_list(&global),
         Some(Command::Plugins(PluginsCommand::List)) => plugins_list(&global),
         Some(Command::Serve(args)) => serve(args),
+        Some(Command::MarkdownHelp) => {
+            let options = clap_markdown::MarkdownOptions::new()
+                .title("CLI reference".to_owned())
+                .show_footer(false)
+                .show_table_of_contents(true);
+            print!("{}", clap_markdown::help_markdown_custom::<Cli>(&options));
+            Ok(ExitCode::SUCCESS)
+        }
         Some(Command::Tui(args)) => {
             let sub = matches.subcommand_matches("tui").expect("tui was invoked");
             tui(args, sub)

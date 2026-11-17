@@ -6,6 +6,59 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+chap-checker is now a single Rust binary, organised as an uptime monitor with
+a plugin per kind of server. It still installs from PyPI with
+`uvx chap-checker` / `uv tool install chap-checker` (now as a wheel per
+platform), reads the same `chap-checker.toml` and state file, and `verify`,
+alerts and `serve` behave as before: on the production fleet's config,
+`verify --json` prints the same document as 0.12.0, and the `serve` API
+answers every route with the same status and JSON.
+
+### Added
+
+- **Three new instance kinds**, each a plugin with its own checks:
+  `kind = "chap"` (chap-core reached directly: `chap_health`,
+  `chap_system_info`), `kind = "caps"` (CAPS: `caps_system_info`, and
+  `caps_chap` / `caps_dhis2` for its links to chap-core and DHIS2), and
+  `kind = "http"` (any URL: `http_expect`, with `expect_status`,
+  `body_contains`, `json_path` / `json_equals` and `headers` in the config).
+  These replace the workaround of `kind = "ogs"` limited to `http_2xx`.
+- **`chap-checker plugins list`** (and `--json`): every kind with its checks
+  and a copy-paste `[instances.<key>]` table.
+- **`chap-checker tui --kiosk`**: start full screen, without the rail and the
+  top bar, for a wall display.
+- **Wheels for Linux (x86_64 and aarch64, glibc and musl), macOS (Intel and
+  Apple silicon) and Windows**; no Python needed at run time.
+
+### Changed
+
+- **Rewritten in Rust** (**breaking** for anyone importing it: there is no
+  longer a `chap_checker` Python module, and `uv add chap-checker` no longer
+  gives you one). The command line, the config, the state file, `verify
+  --json`, alerts and the `serve` API are unchanged.
+- **The terminal dashboard is redesigned** on sokkel-tui: a rail of instances
+  with their status, an overview with summary tiles and an instances table,
+  and a page per instance with its checks, uptime and latency. `Ctrl+K` opens
+  the command palette (was `Ctrl+P`), `Ctrl+Q` quits (was `q`). In
+  `--connect` mode a lost daemon keeps the last data on screen, marked stale,
+  under a banner. The `[ui] theme` values are unchanged; the TUI shows them as
+  sokkel's `phosphor`, `phosphor-bright` (`high`), `amber`, `tokyo` and `tray`
+  (`dhis2`), and a theme picked in its settings is kept between runs.
+- **The TUI's command palette** drops *Open GitHub repository* / *Open
+  documentation* and gains *Open &lt;instance&gt;* for each instance.
+- **Transport error messages** name the error kind themselves
+  (`ConnectError (/api/me): ...`, `ReadTimeout (...)`), not Python's
+  exception classes.
+- **Requests send a `chap-checker/<version>` User-Agent.**
+- **A config with several type errors reports the first one**; other config
+  errors read as before.
+
+### Removed
+
+- **The Python package and the Textual TUI**, with the `scripts/capture_dashboard.py`
+  and `scripts/capture_token_modal.py` capture scripts
+  (`scripts/capture_docs_tui.sh` and `scripts/capture_tui_rs.sh` replace them).
+
 ## [0.12.0] — 2026-11-17
 
 ### Changed

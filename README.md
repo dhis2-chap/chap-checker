@@ -2,18 +2,21 @@
 
 [![CI](https://github.com/dhis2-chap/chap-checker/actions/workflows/ci.yml/badge.svg)](https://github.com/dhis2-chap/chap-checker/actions/workflows/ci.yml)
 [![PyPI version](https://img.shields.io/pypi/v/chap-checker)](https://pypi.org/project/chap-checker/)
-[![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
+[![Rust 2024](https://img.shields.io/badge/rust-2024-orange.svg)](crates/chap-checker/Cargo.toml)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Documentation](https://img.shields.io/badge/docs-mkdocs-blue.svg)](https://dhis2-chap.github.io/chap-checker/)
 
-A small command-line health-check and alerting tool for DHIS2 instances that
-integrate with `chap-core` via a DHIS2 route, and for
-[Open Geo Service](https://github.com/dhis2/open-geo-service)
-deployments (`kind = "ogs"`). Cron-friendly, with optional
-Slack / generic-webhook alerts on status transitions, a long-running
-daemon that exposes a browser dashboard (designed for a TV / kiosk) and a
-JSON state API, and a Textual TUI for the operator-at-a-desk view (locally
-or pointed at a remote daemon).
+An uptime monitor for the servers around Chap: DHIS2 instances that
+integrate with `chap-core` through a DHIS2 route, chap-core itself, CAPS,
+[Open Geo Service](https://github.com/dhis2/open-geo-service) deployments,
+and any other URL. Each kind of server is a plugin with its own checks.
+Cron-friendly, with optional Slack / generic-webhook alerts on status
+transitions, a long-running daemon that serves a browser dashboard (designed
+for a TV / kiosk) and a JSON state API, and a terminal dashboard for the
+operator at a desk (locally or pointed at a remote daemon).
+
+A single binary, written in Rust and published to PyPI as a wheel per
+platform: `uvx chap-checker` runs it with nothing else installed.
 
 **Documentation:** <https://dhis2-chap.github.io/chap-checker>
 
@@ -30,9 +33,6 @@ chap-checker --version
 
 # Upgrade to the latest release later:
 uv tool upgrade chap-checker
-
-# Or, if you're embedding into another uv project:
-uv add chap-checker
 ```
 
 ## Quick start
@@ -85,23 +85,31 @@ chap-checker verify --url https://dhis2.example.com --username admin --password-
 ### Surfaces
 
 ```bash
-chap-checker tui          # Textual TUI: operator-at-a-desk view, in a terminal
+chap-checker tui          # terminal dashboard: operator-at-a-desk view
+chap-checker tui --kiosk  # the same, full screen, for a wall display
 chap-checker serve        # long-running daemon: browser dashboard at / + JSON state at /api/state
 chap-checker tui --connect http://daemon-host:8765   # TUI as a thin client of a remote `serve`
 ```
 
 Pair them: run `chap-checker serve` somewhere persistent (a small VM, the TV machine itself, systemd-supervised — see [the server guide](https://dhis2-chap.github.io/chap-checker/guides/serve/) for the unit file). Pin a kiosk browser at the URL on the TV; operators at desks run `chap-checker tui` locally or `chap-checker tui --connect http://daemon:8765` for the same numbers without spinning up their own check loop. Alerts fire from one place.
 
-## Built-in checks
+## Plugins and built-in checks
 
-Four namespaces — `http_*` is a transport-level reachability probe for
-every instance kind, `dhis2_*` probes DHIS2 itself, `dhis2_chap_*` probes
-chap-core through the DHIS2 route, and `ogs_*` probes an Open Climate
-Service deployment. An instance only runs the checks for its `kind`. Each
-tile in the dashboard, each row in `chap-checker checks list`, each entry in
-the JSON output:
+Each instance names its `kind`, and each kind is a plugin with its own checks
+(`chap-checker plugins list` shows them with a copy-paste TOML table):
 
-- `http_2xx` — unauthenticated `GET <base_url>`, asserts the final response is 2xx (follows redirects)
+| `kind` | What it checks |
+|---|---|
+| `dhis2` (default) | DHIS2, and chap-core through the DHIS2 `chap` route |
+| `ogs` | An Open Geo Service (openEO backend) deployment |
+| `chap` | chap-core reached directly: `/health`, `/system/info` |
+| `caps` | CAPS: its version, and whether it reaches chap-core and DHIS2 |
+| `http` | Any URL: an expected status (default 2xx), and optionally body text or a JSON value |
+
+An instance only runs the checks for its `kind`. Each row in the dashboards,
+each row in `chap-checker checks list`, each entry in the JSON output:
+
+- `http_2xx` — unauthenticated `GET <base_url>`, asserts the final response is 2xx (follows redirects); `dhis2` and `ogs`
 - `dhis2_ping` — `/api/me`
 - `dhis2_system_info` — `/api/system/info`
 - `dhis2_chap_route` — `/api/routes?filter=code:eq:chap`
@@ -111,15 +119,21 @@ the JSON output:
 - `dhis2_chap_climate_app` — `/api/apps` (matched by `app_hub_id`)
 - `ogs_health` — `/health` (liveness only)
 - `ogs_info` — `/info` + `/` (version and openEO capabilities)
+- `chap_health` — `/health` on chap-core, `status` must be `success`
+- `chap_system_info` — `/system/info` on chap-core (version, revision)
+- `caps_system_info` — `/system/info` on CAPS (version)
+- `caps_chap`, `caps_dhis2` — CAPS reports chap-core / DHIS2 connected
+- `http_expect` — any URL, with `expect_status`, `body_contains`, `json_path` / `json_equals`
 
 Full reference + endpoint details: [Checks](https://dhis2-chap.github.io/chap-checker/guides/checks/).
 
 ## Development
 
 ```bash
-make install
-make lint        # ruff + mypy + pyright
-make test
+make install     # dev tools (uv) and a debug build (cargo)
+make lint        # cargo fmt + clippy
+make test        # cargo test
+make build       # the wheel + sdist into dist/, as the release does
 make docs        # serve docs locally
 ```
 

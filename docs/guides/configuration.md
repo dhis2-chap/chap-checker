@@ -99,6 +99,12 @@ before kinds existed keep working unchanged.
 | --------- | ---------------------------------------------------------------------------------------- | ------------------------------------------- | ------------------------- |
 | `"dhis2"` | DHIS2 (optionally with the chap-core integration)                                         | required: password or token (see above)     | `http_2xx`, `dhis2_*`     |
 | `"ogs"`   | [Open Geo Service](https://github.com/dhis2/open-geo-service) (openEO backend)           | none                                        | `http_2xx`, `ogs_*`       |
+| `"chap"`  | chap-core reached directly (its base URL, without `/health`)                             | none                                        | `chap_*`                  |
+| `"caps"`  | CAPS (its base URL, without `/system/info`)                                               | none                                        | `caps_*`                  |
+| `"http"`  | Any URL                                                                                  | none (or `headers`)                          | `http_expect`             |
+
+Each kind is a plugin; `chap-checker plugins list` prints them all with a
+copy-paste table.
 
 Open Geo Service was called Open Climate Service (OCS) until late 2026.
 chap-checker 0.11.x and earlier used `kind = "ocs"` and `ocs_health` /
@@ -112,14 +118,47 @@ url = "https://ocs-demo-nepal.dhis2.org"
 alerts = ["slack"]
 ```
 
-An OGS instance accepts the shared fields only: `name`, `url`, `timeout_s`,
-`verify_tls`, `checks`, `alerts`. OGS has no authentication, so setting
-`username` / `password` / `token` on it is a validation error, and neither
-the top-level `[retry]` block nor a per-instance `retry_policy` applies to it.
+An `ogs`, `chap` or `caps` instance accepts the shared fields only: `name`,
+`url`, `timeout_s`, `verify_tls`, `checks`, `alerts`. They have no
+authentication, so setting `username` / `password` / `token` on one is a
+validation error, and neither the top-level `[retry]` block nor a per-instance
+`retry_policy` applies to them.
+
+```toml
+[instances.chap-stable]
+kind = "chap"
+name = "Chap Core stable"
+url = "https://climate-demo.dhis2.org/chap/stable"
+
+[instances.caps]
+kind = "caps"
+url = "https://climate-demo.dhis2.org/caps"
+```
+
+An `http` instance also takes what the URL must answer, all optional:
+
+| Field           | Meaning                                                                                 |
+| --------------- | --------------------------------------------------------------------------------------- |
+| `expect_status` | The statuses that count as up, e.g. `[200]` or `[200, 401]`. Default: any 2xx.          |
+| `body_contains` | Text the body must contain.                                                             |
+| `json_path`     | A dotted path into a JSON body: `status`, `data.0.state`.                               |
+| `json_equals`   | The value at `json_path` (a string, number or boolean). Needs `json_path`.              |
+| `headers`       | Headers to send, e.g. `{ Accept = "application/json" }`. Credentials here count as inline secrets (see the file-mode note above). |
+
+```toml
+[instances.landing]
+kind = "http"
+name = "Landing page"
+url = "https://climate-demo.dhis2.org/"
+body_contains = "Climate"
+```
+
+Redirects are followed (up to five) and the status checked is the final one's.
 
 Alerts, the state file, `verify --json` and the dashboard treat every kind the
 same way. JSON output carries a `target_kind` field per run, and dashboard
-tiles show the platform (`DHIS2 2.42.3`, `OGS 0.1.0`).
+rows show the platform (`DHIS2 2.42.3`, `OGS 0.1.0`, `Chap Core 2.7.0`,
+`CAPS 3.2.2`).
 
 ## Per-instance check filter
 
@@ -181,7 +220,7 @@ semantics.
 ## Concurrency
 
 `concurrency` (default 5) controls how many instances are probed in parallel.
-Each target runs its own `httpx.AsyncClient`, so there's no shared HTTP state.
+Each target gets its own HTTP client, so there's no shared HTTP state.
 Bump it up for many same-network targets, down to `1` to force serial
 execution. Hard upper bound 100.
 
@@ -189,8 +228,8 @@ CLI flag `--concurrency N` on `verify` overrides the config value for one run.
 
 ## Retries
 
-Optional `[retry]` block — installs a `dhis2w_client.RetryPolicy` on every
-target's upstream client so transient transport failures and the configured
+Optional `[retry]` block — applies a retry policy to every DHIS2 target's
+client so transient transport failures and the configured
 `retry_statuses` (default 429 / 502 / 503 / 504) are retried with
 exponential backoff. **Off by default**: a health checker generally wants
 to see flakes, not paper over them. Opt in when you specifically want a
@@ -235,16 +274,18 @@ title = "DHIS2 / Climate Instance Checker"  # default; 1-120 chars
 theme = "phosphor"                          # phosphor | amber | high | tokyo | dhis2
 ```
 
-`title` is the top-left header text shown in both the [Textual TUI](dashboard.md)
+`title` is the header text shown in both the [terminal dashboard](dashboard.md)
 and the [browser dashboard served by `chap-checker serve`](serve.md). The
 browser also syncs `document.title` so the browser tab matches.
 
-`theme` selects the palette for both the browser dashboard and the Textual
-TUI. The browser's command palette (`Ctrl+K`/`⌘K`) also exposes the same
+`theme` selects the palette for both the browser dashboard and the terminal
+dashboard. The browser's command palette (`Ctrl+K`/`⌘K`) also exposes the same
 options at runtime — there, the config value acts as the **starting default**
 and a per-user palette pick (persisted in browser `localStorage`) wins
-over the config until cleared. For the TUI the config value is applied
-on mount and re-applied on reload (`Ctrl+R` re-reads the toml).
+over the config until cleared. The TUI starts in the config's theme the
+first time; a theme picked in its settings (`,`) is kept between runs after
+that. In the TUI the themes are sokkel's: `phosphor`, `amber`, `tokyo`,
+`phosphor-bright` for `high`, and `tray` for `dhis2`.
 
 Themes:
 

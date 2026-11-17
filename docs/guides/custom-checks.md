@@ -1,196 +1,116 @@
-# Adding a custom check
+# Adding checks and plugins
 
-Checks are tiny dataclass-style Python objects implementing a `Protocol`. To
-add one:
+chap-checker is an uptime monitor with compiled-in plugins. The core (the
+runner, the state file and alerts, `verify`, `serve` and the TUI) knows
+nothing about DHIS2 or chap-core; each kind of server it understands is a
+plugin that brings its own checks. All of it lives in the Rust crate under
+`crates/chap-checker/`.
 
-1. Drop a new file under `src/chap_checker/checks/`.
-2. Define a class with `name`, `description`, `order`, `requires`, and an
-   `async def run(self, client, ctx)` method (`ctx: CheckContext` carries
-   per-target state: the `target`, `prior_results` and `dhis2_version`).
-   Add `kinds` if the check is not DHIS2-only (see the field reference).
-3. Decorate the class with `@register_check` — the decorator instantiates it
-   once and adds it to the registry.
-4. Import the new module from `src/chap_checker/checks/__init__.py` so the
-   decorator fires on package load.
+Before writing code, check whether the [`http` kind](configuration.md#instance-kinds)
+covers it: an expected status, text in the body, or a value in a JSON body
+need no code at all.
 
-```python
-from typing import ClassVar
-import time
+## Adding a check to an existing plugin
 
-from chap_checker.checks.base import (
-    CheckContext,
-    CheckResult,
-    Status,
-    format_request_error,
-    register_check,
-)
-from chap_checker.client import Dhis2Client
+A check is a `CheckDef`: static metadata plus a `run` function. Checks for a
+plugin live together, in `crates/chap-checker/src/checks/<plugin>.rs`.
 
+```rust
+use std::time::Instant;
 
-@register_check
-class Dhis2ChapMyCustomCheck:
-    """Verify that <something specific> behaves the way <X> expects."""
+use super::{CheckContext, CheckDef, CheckResult, Status, diagnose_status};
+use crate::http::TargetKind;
 
-    name: ClassVar[str] = "dhis2_chap_my_custom"
-    description: ClassVar[str] = "What this check verifies."
-    order: ClassVar[int] = 70
-    requires: ClassVar[list[str]] = ["dhis2_chap_ping"]
+pub static MY_CHECK: CheckDef = CheckDef {
+    name: "dhis2_chap_my_check",
+    description: "One line, shown by `chap-checker checks list`.",
+    order: 80,                            // lower runs first; built-ins use multiples of 10
+    requires: &["dhis2_chap_route"],      // must be OK first, or this one is SKIPPED
+    kinds: &[TargetKind::Dhis2],          // the plugins it belongs to
+    run: |ctx| Box::pin(my_check(ctx)),
+};
 
-    async def run(self, client: Dhis2Client, ctx: CheckContext) -> CheckResult:  # noqa: ARG002
-        start = time.perf_counter()
-        try:
-            # `client.get_response(path)` returns the raw `httpx.Response`
-            # without raising on 4xx/5xx, so the check can report status
-            # codes itself. `client.get(path, model=...)` is the typed
-            # alternative for happy-path GETs; not what we want here.
-            response = await client.get_response("/api/routes/chap/run/some/endpoint")
-        except Exception as exc:  # noqa: BLE001
-            return CheckResult(
-                name=self.name,
-                status=Status.ERROR,
-                message=format_request_error(exc, path="/api/routes/chap/run/some/endpoint"),
-                duration_ms=(time.perf_counter() - start) * 1000,
-            )
-        duration_ms = (time.perf_counter() - start) * 1000
-        if response.status_code >= 400:
-            return CheckResult(
-                name=self.name,
-                status=Status.FAIL,
-                message=f"Unexpected status {response.status_code}.",
-                duration_ms=duration_ms,
-            )
-        return CheckResult(
-            name=self.name,
-            status=Status.OK,
-            message="All good.",
-            duration_ms=duration_ms,
-        )
+async fn my_check(ctx: &mut CheckContext) -> CheckResult {
+    const NAME: &str = "dhis2_chap_my_check";
+    const PATH: &str = "/api/something";
+    let start = Instant::now();
+    let response = match ctx.client.get(PATH).await {
+        Ok(r) => r,
+        // A transport failure (DNS, TLS, timeout) is an ERROR, never a panic.
+        Err(e) => return CheckResult::new(NAME, Status::Error, e.describe(Some(PATH))).since(start),
+    };
+    // 401, 403 (naming the authority it needs) and 404 (saying what it means here) read the
+    // same in every check.
+    if let Some((message, details)) = diagnose_status(
+        response.status,
+        PATH,
+        Some("/api/something returned 404 - this DHIS2 version doesn't have it."),
+        Some("M_dhis-web-app-management"),
+    ) {
+        return CheckResult::new(NAME, Status::Fail, message).details(details).since(start);
+    }
+    let Some(body) = response.json() else {
+        return CheckResult::new(NAME, Status::Fail, "The body was not JSON.").since(start);
+    };
+    // ... judge the body ...
+    CheckResult::new(NAME, Status::Ok, "All good.").since(start)
+}
 ```
 
-## Using the version context (optional)
+Then register it in `crates/chap-checker/src/checks/mod.rs` (the `REGISTRY`
+list) and add a test against a mock server in `tests/checks.rs`.
 
-`CheckContext` carries the detected DHIS2 version after `dhis2_system_info`
-runs (`None` before that, or when the server reports a version outside the
-v41/v42/v43 range dhis2w-client 0.14 ships generated modules for). Use it
-when a check needs to pick a version-specific payload parser or open a
-version-pinned typed client:
+What the run context gives a check:
 
-```python
-from dhis2w_client import Dhis2
+| Field                  | What it is                                                                      |
+| ---------------------- | ------------------------------------------------------------------------------- |
+| `ctx.client`           | The target's client: `get(path)` and `get_with(path, params, headers)` return the response without failing on 4xx/5xx, so a status is a fact to report. Auth, timeouts, redirects and retries are the plugin's. |
+| `ctx.target`           | The target: its kind, base URL, timeout, TLS setting, and `params` (the plugin's own config fields). |
+| `ctx.prior_results`    | Every check that ran before this one, by name, in any status. A check can judge another's result without a request of its own (the `caps_chap` check does). |
+| `ctx.dhis2_version`    | The DHIS2 minor version (`42`), once `dhis2_system_info` has run.              |
 
-async def run(self, client: Dhis2Client, ctx: CheckContext) -> CheckResult:
-    # Status-aware fast path: works on any DHIS2 version.
-    response = await client.get_response("/api/some/endpoint")
-    if response.status_code >= 400:
-        return CheckResult(name=self.name, status=Status.FAIL, ...)
+House rules for checks:
 
-    # Version-typed deep parse: only when we know which generated module
-    # to import. ctx.dhis2_version is `Dhis2.V41 | V42 | V43 | None`.
-    if ctx.dhis2_version is Dhis2.V43:
-        from dhis2w_client.generated.v43.schemas.foo import FooSchema  # type: ignore[import]
-        parsed = FooSchema.model_validate(response.json())
-        ...
+- **Treat a 2xx as a claim, not proof.** An SSO or reverse proxy answers 200
+  with a login page; check the content type and the body's shape before
+  reporting `OK`.
+- **Never panic.** A non-JSON body, a missing field or a field of the wrong
+  type is a `FAIL` with a message that says what was expected. (A panic is
+  caught and recorded as `ERROR`, but that's a bug.)
+- **Messages say what to do.** Name the path, the status, and the likely
+  cause. Never put a credential in a message or in `details`.
+- **`details` are for machines.** Alert receivers and the JSON output route on
+  them: carry `http_status` and `path` on every failure (`diagnose_status`
+  does).
 
-    # Or open a brand-new client pinned to the detected version, e.g. so
-    # `typed.system.info()` returns the right shape. The status-aware
-    # path above already uses the runner's shared client; this is for
-    # checks that want typed accessors specifically.
-    async with ctx.target.open(version=ctx.dhis2_version) as typed:
-        info = await typed.system.info()
-        ...
-```
+## Adding a plugin
 
-`ctx.prior_results` is a name->`CheckResult` snapshot of every check
-that completed before this one, useful when a check wants to read an
-earlier check's `details` (e.g. the parsed `dhis2_system_info` body) without
-re-issuing the request.
+A plugin is a new kind of server, `kind = "..."` in an instance:
 
-## Field reference
+1. **The kind.** A `TargetKind` variant in `crates/chap-checker/src/http.rs`
+   (with its name in `as_str`) and an entry in `PLUGINS` in
+   `crates/chap-checker/src/plugins.rs`: its label for the dashboards, a
+   description, the check that counts as its ping (uptime), the check and
+   `details` key its version comes from, and a TOML example for
+   `chap-checker plugins list`.
+2. **Its checks.** In `crates/chap-checker/src/checks/<plugin>.rs`, each with
+   `kinds: &[TargetKind::<Plugin>]`, registered in `checks/mod.rs`.
+3. **Its config.** In `crates/chap-checker/src/config.rs`, the `instance()`
+   match: a kind with no settings and no auth reuses `OgsInstanceConfig`;
+   one with settings gets its own struct (`deny_unknown_fields`) and passes
+   them to its checks as the target's `params`, as `HttpInstanceConfig` does.
+4. **Tests and docs.** Mock-server tests in `tests/checks.rs`, a config test
+   in `config.rs`, an example in `init_template.toml` and
+   `chap-checker.toml.example`, and a section in the
+   [Checks](checks.md) and [Configuration](configuration.md) guides.
 
-| Field         | Type             | Notes |
-| ------------- | ---------------- | ----- |
-| `name`        | `ClassVar[str]`  | Unique. Pick `dhis2_*` for DHIS2-level probes, `dhis2_chap_*` for chap-stack probes, `ogs_*` for Open Geo Service probes. The dashboard / JSON output use this name. |
-| `description` | `ClassVar[str]`  | Shown in `chap-checker checks list`. |
-| `order`       | `ClassVar[int]`  | Lower runs first. Built-in checks use multiples of 10 so there's room to slot custom checks between them. |
-| `requires`    | `ClassVar[list[str]]` | Names of checks that must be `OK` before this one runs. If any required check is not `OK`, the runner records `SKIPPED` and never calls `run()`. |
-| `kinds`       | `ClassVar[frozenset[str]]` | Optional. Instance kinds the check applies to; defaults to `frozenset({"dhis2"})`. Use `frozenset({"ogs"})` for an Open Geo Service check (name it `ogs_*`), or both for a kind-agnostic probe like `http_2xx`. |
-
-### What `client` is, per kind
-
-The runner hands `run()` whatever the instance's target opens:
-
-- **`kind = "dhis2"`**: a `dhis2w_client.Dhis2Client` with the instance's
-  credentials. Call `client.get_response(path)` for the raw response.
-- **`kind = "ogs"`**: an `httpx2.AsyncClient` with `base_url` set to the
-  deployment, so `await client.get("/health")` works. No credentials.
-
-`ctx.target` is the matching `Dhis2Target` or `OgsTarget`; both carry
-`base_url`, `timeout_s` and `verify_tls`.
-
-## Conventions
-
-- **HTTP errors return `Status.ERROR`** built via `format_request_error(exc, path=...)`.
-  Plain `str(exc)` is empty for `httpx.TimeoutException`, which leaves the
-  operator-facing message as just `"Request failed: "` - the helper always
-  carries the exception type name and falls back to `"(no message)"` so the
-  failure mode is visible at a glance.
-  Bad status codes (`>= 400`) return `Status.FAIL`. Unexpected response shapes
-  return `Status.FAIL`. `Status.WARN` is for "responded but with anomalies"
-  (e.g. missing version field).
-- **Use `diagnose_status()` for 4xx/5xx**. It distinguishes the three
-  permission-shaped modes (401 / 403 / 404) so the message points the
-  operator at the actual fix - credentials vs. missing authority vs.
-  missing endpoint - and stashes `http_status`, `path`, and optional
-  `required_authority` into the result's `details` dict so JSON consumers
-  (alerts, monitoring) can route on the cause without parsing strings.
-
-  ```python
-  from chap_checker.checks.base import diagnose_status
-
-  response = await client.get_response("/api/apps")
-  diag = diagnose_status(
-      response.status_code,
-      path="/api/apps",
-      required_authority="M_dhis-web-app-management",  # surfaced in the 403 message
-      not_found_meaning="/api/apps returned 404 - check your reverse-proxy config.",
-  )
-  if diag is not None:
-      message, details = diag
-      return CheckResult(name=self.name, status=Status.FAIL, message=message, details=details, ...)
-  ```
-- **Wrap `response.json()` in `try`/`except ValueError`** — a non-JSON body
-  should produce a clean `FAIL`, not a crash that the runner has to catch.
-- **Guard `isinstance(body, dict)`** before constructing pydantic models from
-  the response — a list / string body would otherwise raise inside the
-  validator.
-- **Use pydantic models** for response shapes you care about (see
-  `Dhis2SystemInfo`, `ChapCoreSystemInfo`, `Dhis2App` for examples). Avoid
-  `dict[str, Any]` for anything that flows further than the immediate check.
-- **Use `client.get_response(path)`** for status-aware checks. It returns
-  the raw `httpx.Response` without raising on 4xx/5xx, so the check can
-  treat status codes as facts to report. Reserve `client.get(path, model=...)`
-  for the typed happy path - it raises on 4xx/5xx and parses the body into
-  a pydantic model, which is great for ingest code but the wrong shape for
-  health checks. Either way, don't reach for `requests` / `urllib`.
-
-## Registration mechanics
-
-The `@register_check` decorator looks like this:
-
-```python
-def register_check(cls: type[Check]) -> type[Check]:
-    register(cls())  # instantiate once, add to the registry
-    return cls
-```
-
-There is no lazy registration — importing the module is what registers the
-check. That's why `src/chap_checker/checks/__init__.py` explicitly imports
-every check module. Add your import there.
+A unit test in `plugins.rs` checks that every kind has a plugin whose ping and
+version checks exist.
 
 ## How `requires` interacts with `checks = [...]`
 
 When a user restricts checks (per-instance `checks = ["dhis2_chap_ping"]` or
 CLI `--check dhis2_chap_ping`), the runner pulls in the transitive closure of
-`requires`. So declaring `requires = ["dhis2_chap_ping"]` on your custom
-check means asking for `dhis2_chap_my_custom` alone still pulls in
-`dhis2_ping → dhis2_chap_route → dhis2_chap_ping → dhis2_chap_my_custom`.
+`requires`. So declaring `requires: &["dhis2_chap_ping"]` on your check means
+asking for `dhis2_chap_my_check` alone still pulls in
+`dhis2_ping → dhis2_chap_route → dhis2_chap_ping → dhis2_chap_my_check`.

@@ -2,7 +2,7 @@
 # See https://docs.github.com/en/repositories/managing-your-repositories-settings-and-customization/customizing-your-repository/about-code-owners
 #
 # A single org-level team owns the whole repo today. Add path-specific lines
-# (e.g. `/src/chap_checker/web_ui/ @some-frontend-team`) if specific areas
+# (e.g. `/crates/chap-checker/web_ui/ @some-frontend-team`) if specific areas
 # grow distinct owners.
 
 * @dhis2-chap/maintainers

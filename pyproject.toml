@@ -1,128 +1,52 @@
 [project]
 name = "chap-checker"
-version = "0.12.0"
-description = "Health-check CLI for DHIS2 instances integrated with chap-core; cron-friendly with Slack alerts on status transitions."
+dynamic = ["version"]
+description = "Uptime monitoring for DHIS2 with chap-core, chap-core, CAPS, Open Geo Service and any URL; cron-friendly with Slack alerts on status transitions."
 readme = "README.md"
 authors = [{ name = "Morten Hansen", email = "morten@dhis2.org" }]
 license = { text = "AGPL-3.0-or-later" }
-requires-python = ">=3.13"
-keywords = ["dhis2", "chap", "chap-core", "healthcheck", "monitoring", "slack", "cli"]
+requires-python = ">=3.10"
+keywords = ["dhis2", "chap", "chap-core", "healthcheck", "uptime", "monitoring", "slack", "cli"]
 classifiers = [
-  "Development Status :: 3 - Alpha",
-  "Intended Audience :: Developers",
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
   "Intended Audience :: System Administrators",
-  "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Rust",
   "Topic :: System :: Monitoring",
-  "Topic :: Software Development :: Libraries :: Python Modules",
-]
-dependencies = [
-  "typer>=0.27.2",
-  "httpx2>=2.13.1",
-  "pydantic>=2.13.5",
-  "rich>=13.9.0",
-  "textual>=8.2.8",
-  "fastapi>=0.142.2",
-  "starlette>=1.7.0",             # explicit floor; transitive via fastapi
-  "uvicorn[standard]>=0.54.0",
-  "dhis2w-client>=1.30.1",
 ]
 
 [project.urls]
 Homepage = "https://github.com/dhis2-chap/chap-checker"
 Repository = "https://github.com/dhis2-chap/chap-checker"
 Issues = "https://github.com/dhis2-chap/chap-checker/issues"
+Documentation = "https://dhis2-chap.github.io/chap-checker/"
 
-[project.scripts]
-chap-checker = "chap_checker.cli:main"
+# The package is the Rust binary in crates/chap-checker, built by maturin into a wheel per
+# platform (`bindings = "bin"`), the way ruff and uv ship. `uvx chap-checker` and
+# `uv tool install chap-checker` install it; there is no Python module to import.
+[build-system]
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
 
+[tool.maturin]
+bindings = "bin"
+manifest-path = "crates/chap-checker/Cargo.toml"
+strip = true
+
+# Python stays for the docs site and the browser capture script only.
 [dependency-groups]
 dev = [
-  "coverage[toml]>=7.16.2",
+  "maturin>=1.9,<2",
   "mkdocs>=1.6.0,<2",              # 2.0 drops the plugin + theme system mkdocs-material needs
   "mkdocs-material>=9.7.7",
-  "mypy>=2.3.1",
   "playwright>=1.63.0",
-  "pyright>=1.1.414",
-  "pytest>=9.1.1",
-  "pytest-asyncio>=1.4.0",
   "ruff>=0.16.9",
 ]
 
-[build-system]
-requires = ["uv_build>=0.9.0,<0.14.0"]
-build-backend = "uv_build"
+[tool.uv]
+# The project itself is a compiled binary; `uv sync` installs only the dev tools.
+package = false
 
 [tool.ruff]
 target-version = "py313"
 line-length = 120
-
-[tool.ruff.lint]
-fixable = ["ALL"]
-select = ["E", "W", "F", "I", "D"]
-ignore = ["D203", "D213"]
-
-[tool.ruff.lint.pydocstyle]
-convention = "google"
-
-[tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["D"]
-"**/__init__.py" = ["D104"]
-"src/**/*.py" = ["D102", "D105", "D107"]
-
-[tool.ruff.format]
-quote-style = "double"
-indent-style = "space"
-skip-magic-trailing-comma = false
-docstring-code-format = true
-docstring-code-line-length = "dynamic"
-
-[tool.pytest.ini_options]
-asyncio_mode = "auto"
-asyncio_default_fixture_loop_scope = "function"
-testpaths = ["tests"]
-norecursedirs = [".git", ".venv", "__pycache__"]
-
-[tool.coverage.run]
-branch = true
-relative_files = true
-source = ["chap_checker"]
-
-[tool.coverage.report]
-exclude_also = ["if TYPE_CHECKING:"]
-precision = 2
-show_missing = true
-skip_covered = true
-
-[tool.mypy]
-python_version = "3.13"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = true
-check_untyped_defs = true
-no_implicit_optional = true
-warn_unused_ignores = true
-strict_equality = true
-mypy_path = ["src"]
-
-[[tool.mypy.overrides]]
-module = "tests.*"
-disallow_untyped_defs = false
-
-[tool.pyright]
-include = ["src", "tests"]
-exclude = ["**/.venv"]
-pythonVersion = "3.13"
-typeCheckingMode = "strict"
-useLibraryCodeForTypes = true
-reportPrivateUsage = false
-reportUnusedFunction = false
-reportUnknownMemberType = false
-reportUnknownArgumentType = false
-reportUnknownParameterType = false
-reportUnknownVariableType = false
-reportUnknownLambdaType = false
-reportMissingTypeArgument = false
-reportMissingTypeStubs = false
-reportMissingImports = "warning"
-reportMissingModuleSource = false
