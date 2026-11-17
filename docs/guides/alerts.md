@@ -2,8 +2,8 @@
 
 Alerts are stateful and transition-only: a sustained outage produces one
 message on entry and one on recovery, not a ping every cron tick. Two
-built-in transports ship in the box, plus a subclassing hook for anything
-else.
+built-in transports ship in the box; a new one is a small addition to the
+code (see [Custom payload shape](#custom-payload-shape)).
 
 | Name      | Transport                                                  | Use when                                                                              |
 |---        |---                                                         |---                                                                                    |
@@ -158,7 +158,7 @@ is accepted.
 | `HTTP 404` from the webhook                              | Slack revoked the webhook (app deleted, channel archived, workspace token rotated). Generate a new URL and update `SLACK_WEBHOOK_URL`.                                    |
 | `HTTP 429`                                               | Slack's per-webhook rate limit. The dispatcher will log the failure and retry on the next refresh tick — no special handling. If sustained, route to a less-busy channel. |
 | `HTTP 500 / 502 / 503` from `hooks.slack.com`            | Slack incident. Retried on next tick (see [Delivery failure retry](#delivery-failure-retry)).                                                                             |
-| `httpx2.ConnectError` / `httpx2.TimeoutException`        | Network egress problem from the daemon. Retried on next tick.                                                                                                             |
+| `ConnectError` / `ReadTimeout` / `ConnectTimeout`         | Network egress problem from the daemon. Retried on next tick.                                                                                                             |
 | `2xx` but the message never lands in the channel         | Wrong webhook URL pointing at a different channel, or the channel was archived. Recreate the webhook against the right channel.                                           |
 
 #### Rate limits
@@ -371,40 +371,13 @@ chap-checker alerts test --config /tmp/wh.toml --kind both
 
 #### Custom payload shape
 
-If the receiver wants a different body (Slack Block Kit, Teams Adaptive
-Card, PagerDuty Events v2, your own JSON contract), subclass
-`WebhookAlerter` and override `_build_payload(transitions) -> dict`. The
-HTTP transport, timeout, header handling, and `>= 400` raise behavior
-come from the base — that's exactly how `SlackAlerter` is implemented.
-
-```python
-# my_alerter.py
-from chap_checker.alerts.base import Transition, register_alerter
-from chap_checker.alerts.webhook import WebhookAlerter
-from typing import Any, ClassVar
-
-
-@register_alerter("pagerduty")
-class PagerDutyEventsAlerter(WebhookAlerter):
-    name: ClassVar[str] = "pagerduty"
-    description: ClassVar[str] = "PagerDuty Events API v2 - one event per transition."
-
-    def _build_payload(self, transitions: list[Transition]) -> dict[str, Any]:
-        # PagerDuty wants one POST per event; this example only emits the
-        # first transition. Real code would call notify() in a loop, or
-        # adapt the base to support multiple POSTs per notify call.
-        t = transitions[0]
-        return {
-            "routing_key": "<your-integration-key>",
-            "event_action": "trigger" if t.kind == "failure" else "resolve",
-            "dedup_key": f"{t.target_name}:{t.check_name}",
-            "payload": {
-                "summary": f"{t.target_name} {t.check_name}: {t.message}",
-                "source": t.target_url,
-                "severity": "error" if t.kind == "failure" else "info",
-            },
-        }
-```
+If the receiver wants a different body (Teams Adaptive Card, PagerDuty
+Events v2, your own JSON contract), that is a new alerter in
+`crates/chap-checker/src/alerts.rs`: a `Flavor` variant with its payload
+function, its `[alerts.<name>]` table in `config.rs`, and an entry in
+`ALERTER_TYPES` for `chap-checker alerts list`. The HTTP transport, timeout,
+header handling, no-redirect rule and the error on anything but 2xx are
+shared, which is how the Slack alerter is built on the webhook one.
 
 #### Auth and credentials
 
@@ -415,9 +388,9 @@ for now — the permission-warning loader nags you when they're inline
 (e.g. `Authorization = "env:WEBHOOK_TOKEN"`) is a planned follow-up —
 until then, either:
 
-- Put the token in the file and rely on filesystem permissions, or
-- Subclass `WebhookAlerter` and read the token from `os.environ` inside
-  `__init__`.
+- put the token in the file and rely on filesystem permissions, or
+- keep the whole URL in an env var (`url_env`) when the receiver accepts the
+  token in the URL.
 
 ## Testing the wiring
 

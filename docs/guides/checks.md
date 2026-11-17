@@ -9,15 +9,21 @@ Each check applies to one or more instance kinds (see
 [Instance kinds](configuration.md#instance-kinds)). An instance only runs the
 checks for its kind; `chap-checker checks list` shows the kinds per check.
 
-Four namespaces:
+Each kind is a plugin, and its checks share a prefix:
 
-- `http_*` — transport-level reachability probes that don't speak DHIS2. Apply
-  to every kind.
+- `http_2xx` — a transport-level reachability probe that doesn't speak DHIS2
+  (`dhis2` and `ogs` instances).
 - `dhis2_*` — probes against DHIS2 itself (`kind = "dhis2"`).
 - `dhis2_chap_*` — probes against the `chap-core` service behind the DHIS2
   `chap` route (`kind = "dhis2"`).
-- `ogs_*` — probes against an Open Geo Service deployment
-  (`kind = "ogs"`).
+- `ogs_*` — probes against an Open Geo Service deployment (`kind = "ogs"`).
+- `chap_*` — probes against chap-core reached directly (`kind = "chap"`).
+- `caps_*` — probes against CAPS (`kind = "caps"`).
+- `http_expect` — any URL, judged by expectations in the config
+  (`kind = "http"`).
+
+`chap-checker plugins list` shows every kind with its checks and a TOML
+example.
 
 | Check                       | Kinds        | Endpoint                                              | Requires             |
 | --------------------------- | ------------ | ----------------------------------------------------- | -------------------- |
@@ -31,13 +37,19 @@ Four namespaces:
 | `dhis2_chap_climate_app`    | dhis2        | `/api/apps` (matched by `app_hub_id`)                 | `dhis2_chap_route`   |
 | `ogs_health`                | ogs          | `/health`                                             | —                    |
 | `ogs_info`                  | ogs          | `/info` + `/` (openEO capabilities)                   | `ogs_health`         |
+| `chap_health`               | chap         | `/health`                                             | —                    |
+| `chap_system_info`          | chap         | `/system/info` (falls back to `/system-info`)         | `chap_health`        |
+| `caps_system_info`          | caps         | `/system/info`                                        | —                    |
+| `caps_chap`                 | caps         | (from `caps_system_info`: chap-core connected)        | `caps_system_info`   |
+| `caps_dhis2`                | caps         | (from `caps_system_info`: DHIS2 connected)            | `caps_system_info`   |
+| `http_expect`               | http         | `GET <url>` with the configured expectations          | —                    |
 
 ### Open Geo Service checks
 
 - **`ogs_health`** is a liveness signal only. OGS's `/health` reports that the
   API process is up; it does not probe storage, the job service or the
   scheduler. `degraded` maps to `WARN`, anything other than `healthy` to
-  `FAIL`, and a 404 is reported as "does not look like an Open Climate
+  `FAIL`, and a 404 is reported as "does not look like an Open Geo
   Service" (a common sign of a wrong URL).
 - **`ogs_info`** reads the service version from `/info` (`app_version`) and the
   openEO capabilities document from `/` (`api_version`, backend `id`). The
@@ -45,10 +57,50 @@ Four namespaces:
   reported in the message because public demo deployments run read-only on
   purpose.
 
+### chap-core checks (`kind = "chap"`)
+
+For a chap-core that is reachable on its own URL, not only through DHIS2.
+The URL is chap-core's base (`https://example.org/chap/stable`), without
+`/health`.
+
+- **`chap_health`** reads `/health`. The body must be chap-core's health
+  payload with `status` `success`, judged by the same code as
+  `dhis2_chap_ping`, so a login page or a proxy answering 200 is a `FAIL`.
+- **`chap_system_info`** reads `/system/info` (or `/system-info` on chap-core
+  1.1 to 1.2) and reports the version, revision and Python version. The
+  version labels the instance in the dashboards (`Chap Core 2.7.0`).
+
+### CAPS checks (`kind = "caps"`)
+
+CAPS (Climate Automation & Prediction Scheduler) reports, at `/system/info`,
+its own version and whether it reaches chap-core and DHIS2. The URL is CAPS's
+base (`https://example.org/caps`).
+
+- **`caps_system_info`** reads `/system/info` once: `OK` with the version,
+  `WARN` without one, `FAIL` when the body is not CAPS's.
+- **`caps_chap`** and **`caps_dhis2`** judge the two connections from that
+  read (no request of their own): `OK` when connected, `FAIL` when CAPS says
+  it is not, `WARN` when it doesn't say. A CAPS that is up but cut off from
+  chap-core shows as exactly that, not as "CAPS is down".
+
+### HTTP checks (`kind = "http"`)
+
+For anything else: a landing page, an API that has no plugin, a service
+behind a proxy. **`http_expect`** fetches the URL (following up to five
+redirects, sending the configured `headers` and nothing else) and passes when:
+
+- the final status is in `expect_status` (by default, any 2xx; list `401` to
+  count a protected endpoint as up),
+- the body contains `body_contains`, when set,
+- the JSON value at `json_path` (a dotted path such as `status` or
+  `data.0.state`) equals `json_equals`, when set (`"200"` matches `200`).
+
+See [Instance kinds](configuration.md#instance-kinds) for the fields.
+
 List them at runtime:
 
 ```bash
-chap-checker checks list             # Rich table
+chap-checker checks list             # table
 chap-checker --json checks list      # JSON for tooling
 ```
 
@@ -86,7 +138,7 @@ is reported as `FAIL`, not a false `OK`.
 
 ### `dhis2_system_info`
 
-Hits `/api/system/info` and parses the response into a pydantic model. Returns
+Hits `/api/system/info` and reads the response. Returns
 `OK` with the DHIS2 `version` and `revision` in the result's `details`. If the
 body is JSON but the `version` field is missing, `WARN`.
 

@@ -29,7 +29,7 @@ use serde_json::json;
 use crate::daemon::{Daemon, ReloadError};
 
 /// The browser dashboard: the same files the Python package ships.
-static WEB_UI: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../../src/chap_checker/web_ui");
+static WEB_UI: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/web_ui");
 
 /// Build the HTTP app around `daemon`.
 pub fn app(daemon: Arc<Daemon>, ui_enabled: bool) -> Router {

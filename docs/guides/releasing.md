@@ -31,7 +31,9 @@ The recipe — **bump → tag → push**, done straight from `main`:
 ```bash
 git checkout main && git pull
 
-# 1. Bump [project].version in pyproject.toml following SemVer:
+# 1. Bump `version` in crates/chap-checker/Cargo.toml following SemVer (the
+#    wheel takes its version from there; run `cargo build` so Cargo.lock
+#    follows):
 #    MAJOR  - breaking changes
 #    MINOR  - backwards-compatible features
 #    PATCH  - backwards-compatible bug fixes
@@ -50,7 +52,7 @@ git commit -am "chore(release): vX.Y.Z"
 git push origin main
 
 # 5. Tag from main with a v-prefixed semver tag that matches
-#    pyproject.toml exactly, then push the tag.
+#    Cargo.toml's version exactly, then push the tag.
 git tag -a vX.Y.Z -m "vX.Y.Z: short summary"
 git push origin vX.Y.Z
 ```
@@ -58,13 +60,16 @@ git push origin vX.Y.Z
 The release workflow (`.github/workflows/release.yml`) fires on the
 tag push and:
 
-1. Verifies the tag (`vX.Y.Z`) matches `pyproject.toml` version
-   (`X.Y.Z`); fails fast otherwise so a mismatched tag never reaches
-   PyPI.
-2. Runs `uv build` to produce both an sdist and a wheel.
-3. Uploads to PyPI via the trusted-publisher OIDC exchange.
+1. Verifies the tag (`vX.Y.Z`) matches the crate's version (`X.Y.Z` in
+   `crates/chap-checker/Cargo.toml`); fails fast otherwise so a
+   mismatched tag never reaches PyPI.
+2. Builds a wheel per platform with maturin (Linux x86_64 and aarch64,
+   manylinux and musllinux; macOS Intel and Apple silicon; Windows x86_64),
+   and the sdist. Each Linux and macOS wheel is smoke-tested with
+   `uvx chap-checker --version` on its runner.
+3. Uploads them all to PyPI via the trusted-publisher OIDC exchange.
 4. Creates a GitHub Release for the tag with auto-generated notes
-   (from merged PRs since the previous tag) and the wheel + sdist
+   (from merged PRs since the previous tag) and the wheels + sdist
    attached as assets.
 
 Verify within ~30s of the workflow completing:
@@ -84,12 +89,13 @@ Both pages update on success:
 - **Test the build locally** before pushing the tag:
 
   ```bash
-  uv build
+  make build
   ls dist/
+  uvx --from dist/chap_checker-*.whl chap-checker --version
   ```
 
-  Inspect the wheel contents to confirm `src/chap_checker/web_ui/`
-  is included if you've changed anything there.
+  The wheel holds the binary only; the browser dashboard
+  (`crates/chap-checker/web_ui/`) is built into it.
 
 - **Bad tag, no upload yet?** Delete it before the workflow lands:
 

@@ -14,16 +14,14 @@ concurrency:
 
 jobs:
   check:
-    name: Lint + type-check
+    name: Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.3.3
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          python-version: "3.13"
-          enable-cache: true
-      - name: Install dependencies
-        run: uv sync --frozen
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
       - name: make check
         run: make check
 
@@ -32,25 +30,44 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10.3.3
-        with:
-          python-version: "3.13"
-          enable-cache: true
-      - name: Install dependencies
-        run: uv sync --frozen
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
       - name: make test
         run: make test
 
-  rust:
-    name: Rust port
+  # The release builds a wheel per platform with maturin; build the Linux ones on every PR so a
+  # packaging break shows up here, not on the tag.
+  wheel:
+    name: Wheel (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { name: manylinux x86_64, target: x86_64-unknown-linux-gnu, manylinux: auto }
+          - { name: musllinux x86_64, target: x86_64-unknown-linux-musl, manylinux: musllinux_1_2 }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux }}
+          args: --release --locked --out dist
+      - uses: astral-sh/setup-uv@v10.3.3
+      - name: uvx runs the wheel
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: uvx --no-cache --from dist/*.whl chap-checker --version
+
+  docs:
+    name: Docs build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      - name: make rust-check
-        run: make rust-check
-      - name: make rust-test
-        run: make rust-test
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          enable-cache: true
+      - name: Install docs tools
+        run: uv sync --frozen
+      - name: make docs-build
+        run: make docs-build

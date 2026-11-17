@@ -11,7 +11,7 @@ Include:
 
 - a description of the issue and its impact,
 - the chap-checker version (`chap-checker --version`),
-- the platform (OS, Python version) and the DHIS2 server version (`dhis2_system_info` output) if relevant,
+- the platform (OS and architecture) and the DHIS2 server version (`dhis2_system_info` output) if relevant,
 - repro steps or a proof-of-concept,
 - whether you'd like to be credited in the advisory.
 
@@ -24,15 +24,15 @@ Include:
 
 ## Scope
 
-chap-checker is a CLI / daemon for monitoring DHIS2 instances. In scope:
+chap-checker is a CLI / daemon for monitoring DHIS2 instances and the services around them. In scope:
 
-- Any vulnerability in the chap-checker code (the Python package, the bundled web UI, the daemon's HTTP surface).
+- Any vulnerability in the chap-checker code (the binary, the bundled web UI, the daemon's HTTP surface).
 - Credential or secret leakage in logs, error messages, or persisted state files.
 - Authentication / authorization issues in the `chap-checker serve` HTTP surface. As of 0.7, the daemon supports optional bearer-token auth via the `[auth]` block (see `docs/guides/serve.md#authentication`); auth is **off by default for backwards compatibility**, so a report of "no auth on /api/state on a deployment without `[auth]` configured" is not a vulnerability. Any way to bypass the token when `[auth]` *is* set, or to read the token from a non-protected response, is in scope.
 
 Out of scope:
 
-- Vulnerabilities in DHIS2 itself, in `dhis2w-client`, or in upstream dependencies — please report those to the relevant project.
+- Vulnerabilities in DHIS2 itself or in upstream dependencies (Rust crates, sokkel-tui) — please report those to the relevant project.
 - Issues that require the operator to install a malicious config file or run arbitrary code as the chap-checker process.
 
 ## Supported versions

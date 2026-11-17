@@ -4,24 +4,25 @@ Thanks for taking the time to look at chap-checker. This page covers the rules a
 
 ## Getting the project running
 
-The repo uses [`uv`](https://docs.astral.sh/uv/) for everything; `pip` is not supported.
+chap-checker is a Rust binary (`crates/chap-checker`, stable toolchain). [`uv`](https://docs.astral.sh/uv/) carries the dev tools around it (the docs site, the browser capture script, and maturin, which builds the PyPI wheel); `pip` is not supported.
 
 ```bash
 git clone https://github.com/dhis2-chap/chap-checker.git
 cd chap-checker
-make install              # uv sync --all-extras
-make check                # ruff format-check + ruff lint + mypy + pyright
-make test                 # pytest
+make install              # uv sync (dev tools) + cargo build
+make check                # cargo fmt --check + clippy -D warnings
+make test                 # cargo test
 make docs                 # mkdocs serve on http://127.0.0.1:8000
 ```
 
 A typical change cycle is:
 
 ```bash
-make lint                 # auto-format + auto-fix lint + type-check
+make lint                 # cargo fmt + clippy
 make test                 # run tests
-make docs-cli             # regenerate docs/cli-reference.md from the Typer app
+make docs-cli             # regenerate docs/cli-reference.md from the CLI
                           # (only when you've touched the CLI surface)
+make build                # the wheel + sdist, as the release builds them
 ```
 
 ## Project rules
@@ -34,80 +35,42 @@ These come up in code review every time, so they're worth stating once:
    - `<type>(<scope>)?: <description>` (e.g. `feat(ci): add docker publish workflow`, `fix(main): correct db path creation`).
    - Types: `feat`, `fix`, `docs`, `chore`, `refactor`, `test`, `ci`, `build`, `perf`, `style`, `revert`.
    - Branch names: `<type>/<short-description>` (e.g. `feat/makefile-and-ci`, `fix/sqlite-path`).
-4. **`uv` only.** `uvx chap-checker ...` for one-shots, `uv tool install / upgrade chap-checker` for persistent installs, `uv add chap-checker` for embedding in another project. Don't write `pip install` in code, docs, or chat output.
-5. **`pydantic` for every data class.** No `@dataclass`, no `attrs`, no `NamedTuple` / `TypedDict` for things that hold data.
-6. **`httpx2` for every HTTP call**, imported as `import httpx2 as httpx` (same API). Never depend on or import plain `httpx`. No `requests`, no `urllib`, no `aiohttp`.
-7. **Strict typing.** `mypy --strict` and `pyright --strict` both run on every `make check`. New code should pass both. Use `ClassVar[...]` on Protocol implementations (`Check`, `Alerter`) so the decorator-style registration type-checks cleanly.
+4. **`uv` only.** `uvx chap-checker ...` for one-shots, `uv tool install / upgrade chap-checker` for persistent installs. Don't write `pip install` in code, docs, or chat output.
+5. **Clippy clean.** `make check` runs clippy with warnings as errors; CI is the gate.
+6. **Never panic on a server's answer, never echo a secret.** A check turns anything unexpected into a `FAIL` or `ERROR` with a message an operator can act on; config errors and check results never carry a credential.
+7. **The TUI uses sokkel-tui's parts.** sokkel-tui is pinned by commit in `crates/chap-checker/Cargo.toml`; move the pin on purpose. A missing part or behaviour is reported to sokkel-tui, not worked around here.
 
 ## Where things live
 
-```
-src/chap_checker/
-├── cli.py                 # typer entry point (verify / checks / alerts / tui / serve / init)
-├── client.py              # Dhis2Target wrapper around dhis2w_client.Dhis2Client
-├── config.py              # TOML loader; CheckerConfig, InstanceConfig, *AlertConfig
-├── runner.py              # parallel run_targets, RunReport, VerifyReport, TargetEntry
-├── output.py              # Rich table + JSON renderers
-├── state_store.py         # state file load/save + per-alerter transitions
-├── daemon.py              # DashboardServer (refresh loop + per-tile trackers + DashboardState)
-├── dashboard.py           # Textual TUI; embeds DashboardServer locally, httpx-polls in --connect mode
-├── serve.py               # FastAPI app exposing the daemon's /api/state + browser bundle (chap-checker serve)
-├── alerts/                # registered alerters (slack, webhook). Add a new one: drop a module + decorate + import.
-└── checks/                # registered checks. Add a new one: drop a module + decorate + import.
-```
-
-### The Rust port (in progress)
-
-chap-checker is being ported to Rust. Python remains the shipped implementation until the cutover,
-when the binary goes out as PyPI wheels so `uvx chap-checker` keeps working. The port lives in a
-Cargo workspace beside the Python package and runs in CI as `make rust-check` and `make rust-test`.
-It covers every command: `init`, `verify`, `checks list`, `plugins list`, `alerts list` / `test`,
-`serve` and `tui` (drawn with sokkel-tui, pinned by commit in `crates/chap-checker/Cargo.toml`;
-a gap in sokkel-tui is reported to its maintainers, not worked around in chap-checker).
-`scripts/capture_tui_rs.sh` captures the Rust TUI for visual checks. It reads the same `chap-checker.toml` and state file, `verify --json`
-prints the same document, config errors read the same, and `serve` answers every route with the
-same status and JSON, serving the same browser dashboard from `src/chap_checker/web_ui/` (built
-into the binary).
+chap-checker is an uptime monitor with plugins. The core is the runner, the state file and alerts, `verify`, `serve` and the TUI. Each kind of server (`kind = "..."`) is a plugin, compiled in: `dhis2`, `ogs`, `chap` (chap-core reached directly), `caps` (CAPS and its links to chap-core and DHIS2) and `http` (any URL, with expectations written in the config). `chap-checker plugins list` shows each one.
 
 ```
-crates/chap-checker/src/
-├── main.rs                # clap entry point
-├── config.rs              # TOML loader and validation (same schema as config.py)
-├── http.rs                # targets, the HTTP client, retries
-├── plugins.rs             # the kinds chap-checker understands: dhis2, ogs, chap, caps, http
-├── checks/                # the registry (mod.rs) and each plugin's checks: dhis2.rs, ogs.rs, chap.rs,
-│                          # caps.rs, http_expect.rs; http_2xx.rs is shared
-├── runner.rs              # run_targets, RunReport, VerifyReport
-├── daemon.rs              # refresh loop, per-tile trackers, the /api/state snapshot
-├── serve.rs               # axum app: /api/*, auth, the embedded browser dashboard
-├── tui.rs                 # the terminal dashboard on sokkel-tui (local and --connect)
-├── state_store.rs         # state file and per-alerter transitions
-├── alerts.rs              # Slack and webhook alerters, dispatch
-└── output.rs              # tables and JSON
+crates/chap-checker/
+├── web_ui/                # the browser dashboard `serve` serves, built into the binary
+└── src/
+    ├── main.rs            # the CLI (clap)
+    ├── config.rs          # chap-checker.toml: parsing and validation
+    ├── init_template.toml # what `chap-checker init` writes (mirror chap-checker.toml.example)
+    ├── http.rs            # targets, the HTTP client, retries
+    ├── plugins.rs         # the kinds: dhis2, ogs, chap, caps, http
+    ├── checks/            # the registry (mod.rs) and each plugin's checks: dhis2.rs, ogs.rs,
+    │                      # chap.rs, caps.rs, http_expect.rs; http_2xx.rs is shared
+    ├── runner.rs          # run_targets, RunReport, VerifyReport
+    ├── state_store.rs     # state file and per-alerter transitions
+    ├── alerts.rs          # Slack and webhook alerters, dispatch
+    ├── output.rs          # verify's tables; jsonfmt.rs its JSON
+    ├── daemon.rs          # refresh loop, per-tile trackers, the /api/state snapshot
+    ├── serve.rs           # axum app: /api/*, auth, the browser dashboard
+    └── tui.rs             # the terminal dashboard on sokkel-tui (local and --connect)
+pyproject.toml             # maturin: builds the wheel from the crate (`bindings = "bin"`)
+scripts/                   # capture scripts: capture_tui_rs.sh, capture_docs_tui.sh, capture_browser.py
 ```
-
-The Rust port is organised as an uptime monitor with plugins. The core is the runner, the state
-file and alerts, `verify`, `serve` and the TUI. Each kind of server (`kind = "..."`) is a plugin,
-compiled in: `dhis2` and `ogs` as before; `chap` (chap-core reached directly), `caps` (CAPS and
-its links to chap-core and DHIS2) and `http` (any URL, with expectations written in the config)
-exist only in Rust. `chap-checker plugins list` shows each one.
-
-Adding a plugin in Rust:
-
-1. A `TargetKind` variant in `http.rs` and its entry in `plugins.rs` (label, description, the
-   check that counts as its ping, where its version comes from, a TOML example).
-2. Its checks in `checks/<plugin>.rs`, each with `kinds: &[TargetKind::<Plugin>]`, registered in
-   `checks/mod.rs`.
-3. Its config fields in `config.rs` (the `instance()` match); a kind without settings or auth
-   reuses `OgsInstanceConfig`.
-4. Tests against a mock server in `tests/checks.rs`, and an example in `init_template.toml`.
-
-A check or alerter added on the Python side during the port needs its Rust twin in the same PR.
 
 ## Adding things
 
-- **A new check** — see `docs/guides/custom-checks.md`. Short version: subclass `Check` (Protocol), set `kinds` if it isn't DHIS2-only, decorate with `@register_check`, add the module import to `src/chap_checker/checks/__init__.py`.
-- **A new alerter** — see `docs/guides/alerts.md`. Short version: subclass `WebhookAlerter` if it's an HTTP receiver (just override `_build_payload`), or implement `Alerter` directly otherwise. Decorate with `@register_alerter("name")`, add a `[alerts.<name>]` config model in `config.py`, and add the module import to `src/chap_checker/alerts/__init__.py`. Ship a `toml_example` ClassVar so `chap-checker alerts list` can show your alerter to operators.
+- **A new check** — see `docs/guides/custom-checks.md`. Short version: a `CheckDef` in `checks/<plugin>.rs` with its `kinds`, `order` and `requires`, registered in `checks/mod.rs`, with a mock-server test in `tests/checks.rs`.
+- **A new plugin** (a kind of server) — same guide. Short version: a `TargetKind` variant and its entry in `plugins.rs`, its checks, its config fields in `config.rs`, tests, and an example in `init_template.toml` and `chap-checker.toml.example`.
+- **A new alerter** — see `docs/guides/alerts.md#custom-payload-shape`. Short version: a `Flavor` and payload function in `alerts.rs`, its `[alerts.<name>]` table in `config.rs`, and an entry in `ALERTER_TYPES` with a TOML example so `chap-checker alerts list` shows it.
 
 ## Pull requests
 

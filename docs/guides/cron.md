@@ -118,7 +118,7 @@ rate limits.
 | ---- | ---------------------------------------------------------------------------------- |
 | 0    | Every check on every target returned `OK`.                                         |
 | 1    | At least one check is not `OK` (FAIL / ERROR / WARN / SKIPPED).                    |
-| 2    | Bad CLI usage (unknown flag, unknown check name, missing required arg). Typer default. |
+| 2    | Bad CLI usage (unknown flag, unknown check name, missing required arg, invalid config). |
 
 Alert delivery failures **never** affect the exit code — they're logged and
 the state save is skipped so the transition is retried next run.

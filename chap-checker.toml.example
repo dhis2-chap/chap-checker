@@ -52,6 +52,29 @@ kind = "ogs"
 name = "Nepal climate service"
 url = "https://ocs-demo-nepal.dhis2.org"
 
+# More kinds; `chap-checker plugins list` shows each with its checks. Like
+# OGS, these have no auth and [retry] does not apply.
+#
+# chap-core reached directly, by its base URL (its /health and /system/info):
+# [instances.chap-stable]
+# kind = "chap"
+# url = "https://example.org/chap/stable"
+#
+# CAPS: its version, and whether it reaches chap-core and DHIS2:
+# [instances.caps]
+# kind = "caps"
+# url = "https://example.org/caps"
+#
+# Any URL, with what it must answer (all optional; the default is any 2xx):
+# [instances.landing]
+# kind = "http"
+# url = "https://example.org/"
+# expect_status = [200]
+# body_contains = "Welcome"
+# json_path = "status"
+# json_equals = "success"
+# headers = { Accept = "application/json" }
+
 # Optional per-instance overrides (shown with their defaults):
 # timeout_s = 10.0
 # verify_tls = true
@@ -104,7 +127,7 @@ webhook_url_env = "SLACK_WEBHOOK_URL"
 # [auth]
 # token_env = "CHAP_CHECKER_TOKEN"
 
-# Optional UI branding + theme, shown in both the Textual TUI header and
+# Optional UI branding + theme, shown in both the terminal dashboard and
 # the browser dashboard. The browser's command palette (Ctrl+K / Cmd+K)
 # also exposes the theme at runtime; the config value here is the
 # *starting default* - a per-user pick (persisted in browser localStorage)

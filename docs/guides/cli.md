@@ -101,18 +101,28 @@ Exit code is non-zero when any check on any target is not `OK`.
 Inspect available checks.
 
 ```bash
-chap-checker checks list             # Rich table of (name, order, requires, description)
+chap-checker checks list             # table of (name, kinds, order, requires, description)
 chap-checker --json checks list      # JSON for tooling
 ```
 
 `ls` is a hidden alias for `list`.
+
+## `plugins`
+
+The kinds of server chap-checker understands (`kind = "..."` on an instance),
+each with its checks and a copy-paste `[instances.<name>]` table.
+
+```bash
+chap-checker plugins list            # dhis2, ogs, chap, caps, http
+chap-checker --json plugins list     # JSON for tooling
+```
 
 ## `alerts`
 
 Inspect or test configured alerters.
 
 ```bash
-chap-checker alerts list             # Rich table of [alerts.*] sections
+chap-checker alerts list             # each alerter with a copy-paste [alerts.*] table
 chap-checker alerts test             # post a synthetic transition to every alerter
 chap-checker alerts test --name slack
 chap-checker --json alerts list
@@ -125,7 +135,7 @@ to the channel. Run after webhook rotation, not on a cron. See
 
 ## `tui`
 
-Launch the [Textual TUI dashboard](dashboard.md).
+Launch the [terminal dashboard](dashboard.md).
 
 ```bash
 chap-checker tui                                # alerts off (default)
@@ -133,9 +143,11 @@ chap-checker tui --alerts                       # also dispatch Slack on transit
 chap-checker tui --interval 10                  # refresh every 10s instead of 30
 chap-checker tui --config /etc/chap-checker.toml
 chap-checker tui --connect http://tv-host:8765  # render a remote `chap-checker serve` daemon
+chap-checker tui --kiosk                        # full screen, for a wall display
 ```
 
-Keys inside the TUI: `r` refresh now, `q` quit.
+Keys inside the TUI: `r` refresh now, `Ctrl+R` reload the config, `Ctrl+K`
+the command palette, `?` every key, `Ctrl+Q` quit.
 
 `--connect URL` turns the TUI into a thin client of a remote
 `chap-checker serve` daemon: no local config, no local check loop, just
