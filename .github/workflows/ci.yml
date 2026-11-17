@@ -40,3 +40,17 @@ jobs:
         run: uv sync --frozen
       - name: make test
         run: make test
+
+  rust:
+    name: Rust port
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: make rust-check
+        run: make rust-check
+      - name: make rust-test
+        run: make rust-test

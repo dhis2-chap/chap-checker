@@ -21,3 +21,6 @@ site/
 # Playwright MCP scratch dir (screenshots are saved here before being moved
 # under docs/assets/ for committing).
 .playwright-mcp/
+
+# Rust build output
+/target/

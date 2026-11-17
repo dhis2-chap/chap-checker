@@ -56,6 +56,29 @@ src/chap_checker/
 └── checks/                # registered checks. Add a new one: drop a module + decorate + import.
 ```
 
+### The Rust port (in progress)
+
+chap-checker is being ported to Rust. Python remains the shipped implementation until the cutover,
+when the binary goes out as PyPI wheels so `uvx chap-checker` keeps working. The port lives in a
+Cargo workspace beside the Python package and runs in CI as `make rust-check` and `make rust-test`.
+It covers `init`, `verify`, `checks list` and `alerts list` / `test`; `serve` and the TUI (on
+sokkel-tui) come next. It reads the same `chap-checker.toml` and state file, and `verify --json`
+prints the same document.
+
+```
+crates/chap-checker/src/
+├── main.rs                # clap entry point
+├── config.rs              # TOML loader and validation (same schema as config.py)
+├── http.rs                # targets, the HTTP client, retries
+├── checks/                # the registry (mod.rs) and the checks: dhis2.rs, ogs.rs, http_2xx.rs
+├── runner.rs              # run_targets, RunReport, VerifyReport
+├── state_store.rs         # state file and per-alerter transitions
+├── alerts.rs              # Slack and webhook alerters, dispatch
+└── output.rs              # tables and JSON
+```
+
+A check or alerter added on the Python side during the port needs its Rust twin in the same PR.
+
 ## Adding things
 
 - **A new check** — see `docs/guides/custom-checks.md`. Short version: subclass `Check` (Protocol), set `kinds` if it isn't DHIS2-only, decorate with `@register_check`, add the module import to `src/chap_checker/checks/__init__.py`.
