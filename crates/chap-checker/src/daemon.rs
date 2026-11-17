@@ -14,6 +14,8 @@ use serde::Serialize;
 use crate::alerts::{build_alerters, dispatch};
 use crate::checks::{CheckResult, Status};
 use crate::config::{CheckerConfig, ConfigError, load_config};
+use crate::http::TargetKind;
+use crate::plugins;
 use crate::runner::{RunReport, TargetEntry, run_targets};
 use crate::state_store::utc;
 
@@ -45,32 +47,19 @@ fn symbol(status: Status) -> &'static str {
     }
 }
 
-/// The check whose `details["version"]` labels the tile, per kind.
-fn version_check(kind: &str) -> Option<&'static str> {
-    match kind {
-        "dhis2" => Some("dhis2_system_info"),
-        "ogs" => Some("ogs_info"),
-        _ => None,
-    }
-}
-
-/// The check that counts as the tile's ping, per kind.
+/// The check that counts as the tile's ping, per kind (the plugin's).
 fn ping_check(kind: &str) -> Option<&'static str> {
-    match kind {
-        "dhis2" => Some("dhis2_ping"),
-        "ogs" => Some("ogs_health"),
-        _ => None,
-    }
+    TargetKind::parse(kind).map(|k| plugins::plugin(k).ping_check)
 }
 
-/// The server version reported by the kind's version check.
+/// The server version the kind's plugin reads from one of its checks.
 pub fn extract_version(results: &[CheckResult], kind: &str) -> Option<String> {
-    let source = version_check(kind)?;
+    let (source, field) = plugins::plugin(TargetKind::parse(kind)?).version?;
     let value = results
         .iter()
         .find(|r| r.name == source)?
         .details
-        .get("version")?;
+        .get(field)?;
     match value {
         serde_json::Value::Null | serde_json::Value::Bool(false) => None,
         serde_json::Value::String(s) if s.is_empty() => None,
@@ -507,8 +496,9 @@ fn tile(entry: &TargetEntry, tracker: Option<&Tracker>) -> Tile {
         .results
         .iter()
         .map(|r| {
-            let short = r.name.strip_prefix("dhis2_").unwrap_or(&r.name);
-            let short = short.strip_prefix("ogs_").unwrap_or(short);
+            // The plugin's own prefix goes: `dhis2_ping` reads `ping` on a DHIS2 tile.
+            let prefix = format!("{}_", kind.as_str());
+            let short = r.name.strip_prefix(&prefix).unwrap_or(&r.name);
             CheckRow {
                 name: short.to_owned(),
                 status: r.status,
@@ -536,6 +526,7 @@ mod tests {
                 verify_tls: true,
                 auth: Some(Auth::Token("t".into())),
                 retry: None,
+                params: serde_json::Value::Null,
             },
             check_names: None,
             alerts: vec![],

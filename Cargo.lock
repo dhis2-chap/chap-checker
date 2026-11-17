@@ -244,6 +244,7 @@ dependencies = [
  "http-body-util",
  "include_dir",
  "indexmap",
+ "libc",
  "mime_guess",
  "rand",
  "regex",

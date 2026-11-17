@@ -80,6 +80,9 @@ enum Command {
     /// Inspect available checks.
     #[command(subcommand, arg_required_else_help = true)]
     Checks(ChecksCommand),
+    /// Inspect the kinds of server chap-checker can check (`kind = "..."` in an instance).
+    #[command(subcommand, arg_required_else_help = true)]
+    Plugins(PluginsCommand),
     /// Launch the chap-checker server.
     ///
     /// A long-running daemon: it runs the check loop, dispatches alerts (with `--alerts`), serves
@@ -210,6 +213,13 @@ enum TestKind {
 }
 
 #[derive(Subcommand)]
+enum PluginsCommand {
+    /// List every plugin with its checks and a copy-paste instance table.
+    #[command(alias = "ls")]
+    List,
+}
+
+#[derive(Subcommand)]
 enum ChecksCommand {
     /// List registered checks.
     #[command(alias = "ls")]
@@ -234,6 +244,13 @@ impl<T: Into<String>> From<T> for Usage {
 type Outcome = Result<ExitCode, Usage>;
 
 fn main() -> ExitCode {
+    // Piped into `head`, exit quietly when the reader goes away, as other CLIs do (Rust ignores
+    // SIGPIPE by default, which turns a closed pipe into a panic).
+    #[cfg(unix)]
+    // SAFETY: setting a signal's disposition to its default before any thread starts.
+    unsafe {
+        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+    }
     let matches = Cli::command().get_matches();
     let cli = match Cli::from_arg_matches(&matches) {
         Ok(cli) => cli,
@@ -267,6 +284,7 @@ fn main() -> ExitCode {
             alerts_test(&global, name, kind, config)
         }
         Some(Command::Checks(ChecksCommand::List)) => checks_list(&global),
+        Some(Command::Plugins(PluginsCommand::List)) => plugins_list(&global),
         Some(Command::Serve(args)) => serve(args),
     };
     match outcome {
@@ -517,6 +535,7 @@ fn adhoc_target(
         verify_tls: !args.insecure,
         auth: Some(auth),
         retry: None,
+        params: serde_json::Value::Null,
     })
 }
 
@@ -584,6 +603,62 @@ fn serve(args: ServeArgs) -> Outcome {
     runtime()
         .block_on(chap_checker::serve::run(daemon, options))
         .map_err(|e| Usage(format!("could not serve: {e}")))?;
+    Ok(ExitCode::SUCCESS)
+}
+
+fn plugins_list(global: &Global) -> Outcome {
+    if global.quiet {
+        return Ok(ExitCode::SUCCESS);
+    }
+    let checks_of = |kind: TargetKind| -> Vec<&'static str> {
+        checks::all_checks()
+            .into_iter()
+            .filter(|c| c.applies_to(kind))
+            .map(|c| c.name)
+            .collect()
+    };
+    if global.json {
+        #[derive(Serialize)]
+        struct Row {
+            kind: &'static str,
+            label: &'static str,
+            description: &'static str,
+            checks: Vec<&'static str>,
+            toml_example: &'static str,
+        }
+        let rows: Vec<Row> = chap_checker::plugins::PLUGINS
+            .iter()
+            .map(|p| Row {
+                kind: p.kind.as_str(),
+                label: p.label,
+                description: p.description,
+                checks: checks_of(p.kind),
+                toml_example: p.toml_example,
+            })
+            .collect();
+        println!(
+            "{}",
+            jsonfmt::to_pretty_sorted(&rows).expect("rows serialize")
+        );
+        return Ok(ExitCode::SUCCESS);
+    }
+    let color = color_stdout();
+    for (i, p) in chap_checker::plugins::PLUGINS.iter().enumerate() {
+        if i > 0 {
+            println!();
+        }
+        let kind = if color {
+            format!("\x1b[1;36m{}\x1b[0m", p.kind.as_str())
+        } else {
+            p.kind.as_str().to_owned()
+        };
+        println!("{kind} \u{2014} {}", p.description);
+        println!("    checks: {}", checks_of(p.kind).join(", "));
+        println!();
+        for line in p.toml_example.trim_end().lines() {
+            println!("    {line}");
+        }
+    }
     Ok(ExitCode::SUCCESS)
 }
 

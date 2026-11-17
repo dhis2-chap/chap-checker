@@ -16,8 +16,11 @@ use serde_json::{Map, Value};
 
 use crate::http::{Client, Target, TargetKind};
 
+mod caps;
+mod chap;
 mod dhis2;
 mod http_2xx;
+pub mod http_expect;
 mod ogs;
 
 /// Outcome of a single check.
@@ -160,6 +163,12 @@ static REGISTRY: &[&CheckDef] = &[
     &dhis2::CLIMATE_APP,
     &ogs::HEALTH,
     &ogs::INFO,
+    &chap::HEALTH,
+    &chap::SYSTEM_INFO,
+    &caps::SYSTEM_INFO,
+    &caps::CHAP,
+    &caps::DHIS2,
+    &http_expect::EXPECT,
 ];
 
 /// Every registered check, sorted by `(order, name)`.
@@ -342,7 +351,7 @@ mod tests {
         assert_eq!(names(&checks), ["ogs_health", "ogs_info"]);
         let err = resolve_checks(Some(&["nope".to_owned()]), TargetKind::Dhis2).unwrap_err();
         assert!(
-            err.starts_with("unknown check 'nope'. Known: dhis2_chap_climate_app"),
+            err.starts_with("unknown check 'nope'. Known: caps_chap, caps_dhis2"),
             "{err}"
         );
     }

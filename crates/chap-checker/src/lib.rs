@@ -4,6 +4,7 @@
 //! The binary in `main.rs` is a thin clap layer over these modules:
 //!
 //! - [`config`] loads and validates `chap-checker.toml`.
+//! - [`plugins`] lists the kinds of server chap-checker understands (dhis2, ogs, chap, caps, http).
 //! - [`checks`] holds the check registry and every built-in check.
 //! - [`runner`] runs checks against targets, several targets at a time.
 //! - [`state_store`] persists statuses and computes alert transitions.
@@ -18,6 +19,7 @@ pub mod daemon;
 pub mod http;
 pub mod jsonfmt;
 pub mod output;
+pub mod plugins;
 pub mod runner;
 pub mod serve;
 pub mod state_store;

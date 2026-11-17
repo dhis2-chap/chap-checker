@@ -3,7 +3,7 @@
 //! A DHIS2 target authenticates with Basic auth or a Personal Access Token (sent as
 //! `Authorization: ApiToken <value>`), never follows redirects (a redirect from the API is a fact a
 //! check reports, not something to chase with credentials attached), and can retry transient
-//! failures per a [`RetryPolicy`]. An OGS target has no auth and follows up to five redirects.
+//! failures per a [`RetryPolicy`]. Every other kind has no auth and follows up to five redirects.
 
 use std::time::Duration;
 
@@ -12,28 +12,44 @@ use reqwest::redirect::Policy;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-/// What kind of server a target is; picks which checks apply.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// What kind of server a target is: one per plugin ([`crate::plugins`]). It picks which checks
+/// apply, which config fields an instance takes, and how its tile is labelled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TargetKind {
     Dhis2,
     Ogs,
+    Chap,
+    Caps,
+    Http,
 }
 
 impl TargetKind {
+    pub const ALL: [TargetKind; 5] = [
+        TargetKind::Dhis2,
+        TargetKind::Ogs,
+        TargetKind::Chap,
+        TargetKind::Caps,
+        TargetKind::Http,
+    ];
+
     pub fn as_str(self) -> &'static str {
         match self {
             TargetKind::Dhis2 => "dhis2",
             TargetKind::Ogs => "ogs",
+            TargetKind::Chap => "chap",
+            TargetKind::Caps => "caps",
+            TargetKind::Http => "http",
         }
+    }
+
+    pub fn parse(text: &str) -> Option<TargetKind> {
+        TargetKind::ALL.into_iter().find(|k| k.as_str() == text)
     }
 
     /// Human-readable platform label, shown on dashboard tiles.
     pub fn platform_label(self) -> &'static str {
-        match self {
-            TargetKind::Dhis2 => "DHIS2",
-            TargetKind::Ogs => "OGS",
-        }
+        crate::plugins::plugin(self).label
     }
 }
 
@@ -143,6 +159,8 @@ pub struct Target {
     pub auth: Option<Auth>,
     /// DHIS2 only.
     pub retry: Option<RetryPolicy>,
+    /// Settings only this kind's plugin reads (the `http` kind's expectations).
+    pub params: serde_json::Value,
 }
 
 impl Target {
@@ -155,7 +173,7 @@ impl Target {
     pub fn open(&self) -> Result<Client, RequestError> {
         let redirects = match self.kind {
             TargetKind::Dhis2 => Policy::none(),
-            TargetKind::Ogs => Policy::limited(5),
+            _ => Policy::limited(5),
         };
         let http = build_http(self.timeout_s, self.verify_tls, redirects)?;
         Ok(Client {

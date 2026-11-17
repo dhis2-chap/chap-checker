@@ -34,3 +34,6 @@ url = { version = "2.5.8", features = ["serde"] }
 http-body-util = "0.1.5"
 tower = { version = "0.5.3", features = ["util"] }
 wiremock = "0.6.5"
+
+[target."cfg(unix)".dependencies]
+libc = "0.2.191"
