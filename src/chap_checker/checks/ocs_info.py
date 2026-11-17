@@ -1,4 +1,4 @@
-"""Version and capabilities check against an Open Climate Service deployment."""
+"""Version and capabilities check against an Open Geo Service deployment."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ _CAPABILITIES_PATH = "/"
 
 @register_check
 class OcsInfoCheck:
-    """Read the OCS version from ``/info`` and the openEO capabilities from ``/``.
+    """Read the OGS version from ``/info`` and the openEO capabilities from ``/``.
 
     ``details["version"]`` carries the service version; the dashboard shows
     it on the tile, the same way it shows the DHIS2 version for DHIS2
@@ -31,7 +31,7 @@ class OcsInfoCheck:
     """
 
     name: ClassVar[str] = "ocs_info"
-    description: ClassVar[str] = "Open Climate Service /info and openEO capabilities readable."
+    description: ClassVar[str] = "Open Geo Service /info and openEO capabilities readable."
     order: ClassVar[int] = 20
     requires: ClassVar[list[str]] = ["ocs_health"]
     kinds: ClassVar[frozenset[str]] = frozenset({"ocs"})
@@ -94,7 +94,7 @@ class OcsInfoCheck:
         return CheckResult(
             name=self.name,
             status=Status.OK,
-            message=f"Open Climate Service {version or 'unknown version'}{suffix}.",
+            message=f"Open Geo Service {version or 'unknown version'}{suffix}.",
             details=details,
             duration_ms=duration_ms,
         )

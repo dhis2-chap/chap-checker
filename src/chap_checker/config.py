@@ -284,9 +284,9 @@ class Dhis2InstanceConfig(BaseInstanceConfig):
 
 
 class OcsInstanceConfig(BaseInstanceConfig):
-    """One Open Climate Service deployment to check (``kind = "ocs"``).
+    """One Open Geo Service deployment to check (``kind = "ocs"``).
 
-    OCS has no authentication, so there are no credential fields; setting
+    OGS has no authentication, so there are no credential fields; setting
     one is a validation error. The top-level ``[retry]`` block does not
     apply to this kind.
     """

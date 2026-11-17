@@ -1,6 +1,6 @@
 # CLI reference
 
-Health-check CLI for DHIS2 instances integrated with chap-core and Open Climate Service deployments. Cron-friendly with Slack/webhook alerts on status transitions and a TUI dashboard for at-a-glance monitoring.
+Health-check CLI for DHIS2 instances integrated with chap-core and Open Geo Service deployments. Cron-friendly with Slack/webhook alerts on status transitions and a TUI dashboard for at-a-glance monitoring.
 
 **Usage**:
 

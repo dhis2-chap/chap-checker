@@ -8,7 +8,7 @@
 
 A small command-line health-check and alerting tool for DHIS2 instances that
 integrate with `chap-core` via a DHIS2 route, and for
-[Open Climate Service](https://github.com/dhis2/open-climate-service)
+[Open Geo Service](https://github.com/dhis2/open-geo-service)
 deployments (`kind = "ocs"`). Cron-friendly, with optional
 Slack / generic-webhook alerts on status transitions, a long-running
 daemon that exposes a browser dashboard (designed for a TV / kiosk) and a

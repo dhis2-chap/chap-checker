@@ -179,7 +179,7 @@ class Check(Protocol):
     The runner passes both an opened client and a :class:`CheckContext`.
     The client is whatever the target's ``open()`` returns: a
     ``Dhis2Client`` for DHIS2 instances, an ``httpx2.AsyncClient`` rooted
-    at the server for OCS instances.
+    at the server for OGS instances.
 
     A check declares which instance kinds it applies to with an optional
     ``kinds: ClassVar[frozenset[str]]`` attribute (read through
@@ -265,7 +265,7 @@ def resolve_checks(names: list[str] | None, kind: str = "dhis2") -> list[Check]:
     prerequisites available. Named checks that don't apply to ``kind`` are
     dropped (config validation rejects them up front; this keeps the CLI's
     cross-instance ``--check`` override from running a DHIS2 check against
-    an OCS server). Output is in the canonical ``(order, name)`` order.
+    an OGS server). Output is in the canonical ``(order, name)`` order.
 
     Raises ``KeyError`` if any name doesn't match a registered check.
     """
