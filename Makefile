@@ -1,4 +1,4 @@
-.PHONY: help install lint check test coverage clean docs docs-build docs-cli docs-screenshot
+.PHONY: help install lint check test rust-check rust-test coverage clean docs docs-build docs-cli docs-screenshot
 
 # ==============================================================================
 # Venv
@@ -21,6 +21,8 @@ help:
 	@echo "  check           Lint and type-check without writing changes"
 	@echo "  test            Run tests"
 	@echo "  coverage        Run tests with coverage reporting"
+	@echo "  rust-check      Format-check and lint the Rust port (crates/)"
+	@echo "  rust-test       Run the Rust port's tests"
 	@echo "  docs            Serve docs locally at http://127.0.0.1:8000"
 	@echo "  docs-build      Build the static docs site into site/"
 	@echo "  docs-cli        Regenerate docs/cli-reference.md from the Typer app"
@@ -52,6 +54,16 @@ check:
 test:
 	@echo ">>> Running tests"
 	@$(UV) run pytest -q
+
+rust-check:
+	@echo ">>> Checking Rust formatting"
+	@cargo fmt --all --check
+	@echo ">>> Running clippy"
+	@cargo clippy --all-targets --locked -- -D warnings
+
+rust-test:
+	@echo ">>> Running Rust tests"
+	@cargo test --locked
 
 coverage:
 	@echo ">>> Running tests with coverage"
