@@ -35,6 +35,10 @@ ops environment:
 | `Ctrl+P` | Open the [command palette](#command-palette).                   |
 | `q`      | Quit.                                                           |
 
+If a reload fails (a TOML error, or an instance whose `password_env` /
+`token_env` names an unset variable), a "Reload failed" notification
+shows the reason and the previous config keeps running unchanged.
+
 There is no in-UI alert toggle — see below.
 
 ## Command palette
@@ -97,6 +101,14 @@ It polls `{URL}/api/state` each refresh tick and renders whatever the
 daemon reports. If the daemon goes down, a red banner appears across the
 top; the last-known tiles stay on screen and the TUI reconnects on the
 next tick once the daemon comes back.
+
+Pressing `r` (or *Refresh now* in the command palette) asks the daemon
+to re-run every check (`POST {URL}/api/refresh`, with the bearer token
+when one is set) and then fetches the fresh `/api/state`. The periodic
+tick only reads `/api/state`, so it shows whatever the daemon's own loop
+produced last. If the refresh request fails, an error notification says
+why and the tiles stay as they were; a 401 is handled like any other
+auth failure (token prompt the first time, auth-rejected banner after).
 
 `--connect` is mutually exclusive with `--config`, `--state`, and
 `--alerts` (those settings live on the remote daemon). To swap the
