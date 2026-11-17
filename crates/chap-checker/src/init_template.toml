@@ -47,6 +47,27 @@ checks = ["dhis2_ping", "dhis2_system_info"]
 # name = "Nepal climate service"
 # url = "https://ocs-demo-nepal.dhis2.org"
 
+# More kinds (`chap-checker plugins list` shows each with its checks):
+#
+# chap-core reached directly, by its base URL (its /health and /system/info):
+# [instances.chap-stable]
+# kind = "chap"
+# url = "https://example.org/chap/stable"
+#
+# CAPS: its version, and whether it reaches chap-core and DHIS2:
+# [instances.caps]
+# kind = "caps"
+# url = "https://example.org/caps"
+#
+# Any URL, with what it must answer (all optional; the default is any 2xx):
+# [instances.landing]
+# kind = "http"
+# url = "https://example.org/"
+# expect_status = [200]
+# body_contains = "Welcome"
+# json_path = "status"
+# json_equals = "success"
+
 # Optional per-instance overrides (shown with their defaults):
 # timeout_s = 10.0
 # verify_tls = true

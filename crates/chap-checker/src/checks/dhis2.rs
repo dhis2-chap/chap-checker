@@ -8,7 +8,7 @@ use super::{
     CheckContext, CheckDef, CheckResult, Status, details, diagnose_status, non_empty_str,
     parse_dhis2_version, without_nulls,
 };
-use crate::http::TargetKind;
+use crate::http::{Response, TargetKind};
 
 const DHIS2: &[TargetKind] = &[TargetKind::Dhis2];
 
@@ -322,15 +322,27 @@ async fn chap_ping(ctx: &mut CheckContext) -> CheckResult {
             .details(d)
             .took(elapsed);
     }
+    chap_health_body(NAME, PATH, &response, elapsed)
+}
+
+/// Judge a chap-core `/health` body: a JSON object whose `status` is `success`.
+///
+/// Shared by `dhis2_chap_ping` (through the DHIS2 route) and the `chap` plugin (direct).
+pub(crate) fn chap_health_body(
+    name: &'static str,
+    path: &str,
+    response: &Response,
+    elapsed: f64,
+) -> CheckResult {
     // A 2xx alone is not proof chap-core answered: an SSO or reverse proxy can return a 200 login
     // page. Anything but a JSON object carrying chap-core's `status` field is a FAIL.
     let fail = |message: String, extra: Map<String, Value>| {
         let mut d = details([
             ("http_status", response.status.into()),
-            ("path", PATH.into()),
+            ("path", path.into()),
         ]);
         d.extend(extra);
-        CheckResult::new(NAME, Status::Fail, message)
+        CheckResult::new(name, Status::Fail, message)
             .details(d)
             .took(elapsed)
     };
@@ -339,7 +351,7 @@ async fn chap_ping(ctx: &mut CheckContext) -> CheckResult {
         let essence = content_type.split(';').next().unwrap_or("").trim();
         return fail(
             format!(
-                "{PATH} responded with a non-JSON body ({essence}) - likely an SSO or proxy login page \
+                "{path} responded with a non-JSON body ({essence}) - likely an SSO or proxy login page \
                  intercepted the request. chap-core was not reached."
             ),
             details([("content_type", content_type.clone().into())]),
@@ -347,7 +359,7 @@ async fn chap_ping(ctx: &mut CheckContext) -> CheckResult {
     }
     let Some(body) = response.json() else {
         return fail(
-            format!("{PATH} returned malformed JSON - the response is not from chap-core."),
+            format!("{path} returned malformed JSON - the response is not from chap-core."),
             Map::new(),
         );
     };
@@ -358,7 +370,7 @@ async fn chap_ping(ctx: &mut CheckContext) -> CheckResult {
     else {
         return fail(
             format!(
-                "Unexpected {PATH} response shape (expected a JSON object with a 'status' field) - \
+                "Unexpected {path} response shape (expected a JSON object with a 'status' field) - \
                  the response is not from chap-core."
             ),
             Map::new(),
@@ -380,7 +392,7 @@ async fn chap_ping(ctx: &mut CheckContext) -> CheckResult {
         );
     }
     CheckResult::new(
-        NAME,
+        name,
         Status::Ok,
         format!("chap-core healthy (status {}).", response.status),
     )
@@ -434,9 +446,20 @@ async fn chap_system_info(ctx: &mut CheckContext) -> CheckResult {
             .details(d)
             .took(elapsed);
     }
+    chap_system_info_body(NAME, &response, elapsed)
+}
+
+/// Judge a chap-core `/system/info` body: its version, revision and Python version.
+///
+/// Shared by `dhis2_chap_system_info` (through the DHIS2 route) and the `chap` plugin (direct).
+pub(crate) fn chap_system_info_body(
+    name: &'static str,
+    response: &Response,
+    elapsed: f64,
+) -> CheckResult {
     let Some(body) = response.json() else {
         return CheckResult::new(
-            NAME,
+            name,
             Status::Fail,
             "chap-core responded but body was not JSON.",
         )
@@ -444,7 +467,7 @@ async fn chap_system_info(ctx: &mut CheckContext) -> CheckResult {
     };
     let Some(body) = body.as_object() else {
         return CheckResult::new(
-            NAME,
+            name,
             Status::Fail,
             "Unexpected chap-core /system/info response shape (expected a JSON object).",
         )
@@ -454,7 +477,7 @@ async fn chap_system_info(ctx: &mut CheckContext) -> CheckResult {
     let Some(version) = non_empty_str(body, "chap_core_version") else {
         info.insert("raw".into(), Value::Object(body.clone()));
         return CheckResult::new(
-            NAME,
+            name,
             Status::Warn,
             "chap-core reachable but no 'version' field in response.",
         )
@@ -468,7 +491,7 @@ async fn chap_system_info(ctx: &mut CheckContext) -> CheckResult {
     if let Some(python) = non_empty_str(body, "python_version") {
         parts.push(format!("python {python}"));
     }
-    CheckResult::new(NAME, Status::Ok, format!("{}.", parts.join(" / ")))
+    CheckResult::new(name, Status::Ok, format!("{}.", parts.join(" / ")))
         .details(info)
         .took(elapsed)
 }

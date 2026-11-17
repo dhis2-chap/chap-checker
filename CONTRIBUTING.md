@@ -72,7 +72,9 @@ crates/chap-checker/src/
 ├── main.rs                # clap entry point
 ├── config.rs              # TOML loader and validation (same schema as config.py)
 ├── http.rs                # targets, the HTTP client, retries
-├── checks/                # the registry (mod.rs) and the checks: dhis2.rs, ogs.rs, http_2xx.rs
+├── plugins.rs             # the kinds chap-checker understands: dhis2, ogs, chap, caps, http
+├── checks/                # the registry (mod.rs) and each plugin's checks: dhis2.rs, ogs.rs, chap.rs,
+│                          # caps.rs, http_expect.rs; http_2xx.rs is shared
 ├── runner.rs              # run_targets, RunReport, VerifyReport
 ├── daemon.rs              # refresh loop, per-tile trackers, the /api/state snapshot
 ├── serve.rs               # axum app: /api/*, auth, the embedded browser dashboard
@@ -80,6 +82,22 @@ crates/chap-checker/src/
 ├── alerts.rs              # Slack and webhook alerters, dispatch
 └── output.rs              # tables and JSON
 ```
+
+The Rust port is organised as an uptime monitor with plugins. The core is the runner, the state
+file and alerts, `verify`, `serve` and the TUI. Each kind of server (`kind = "..."`) is a plugin,
+compiled in: `dhis2` and `ogs` as before; `chap` (chap-core reached directly), `caps` (CAPS and
+its links to chap-core and DHIS2) and `http` (any URL, with expectations written in the config)
+exist only in Rust. `chap-checker plugins list` shows each one.
+
+Adding a plugin in Rust:
+
+1. A `TargetKind` variant in `http.rs` and its entry in `plugins.rs` (label, description, the
+   check that counts as its ping, where its version comes from, a TOML example).
+2. Its checks in `checks/<plugin>.rs`, each with `kinds: &[TargetKind::<Plugin>]`, registered in
+   `checks/mod.rs`.
+3. Its config fields in `config.rs` (the `instance()` match); a kind without settings or auth
+   reuses `OgsInstanceConfig`.
+4. Tests against a mock server in `tests/checks.rs`, and an example in `init_template.toml`.
 
 A check or alerter added on the Python side during the port needs its Rust twin in the same PR.
 

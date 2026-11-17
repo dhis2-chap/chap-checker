@@ -20,6 +20,7 @@ fn target(server: &MockServer, kind: TargetKind) -> Target {
         verify_tls: true,
         auth: (kind == TargetKind::Dhis2).then(|| Auth::Token("pat".into())),
         retry: None,
+        params: serde_json::Value::Null,
     }
 }
 
@@ -302,6 +303,7 @@ async fn transport_errors_are_errors() {
         verify_tls: true,
         auth: None,
         retry: None,
+        params: serde_json::Value::Null,
     };
     let results = run(&unused).await;
     assert_eq!(results[1].status, Status::Error);
@@ -408,4 +410,136 @@ async fn dispatch_sends_once_and_keeps_state_on_failure() {
     assert!(err.is_ok(), "an empty list sends nothing");
     dispatch(&reports, &targets, std::slice::from_ref(&failing), &other).await;
     assert!(!other.exists());
+}
+
+fn plain(server: &MockServer, kind: TargetKind, params: serde_json::Value) -> Target {
+    Target {
+        kind,
+        base_url: Url::parse(&server.uri()).unwrap(),
+        timeout_s: 5.0,
+        verify_tls: true,
+        auth: None,
+        retry: None,
+        params,
+    }
+}
+
+#[tokio::test]
+async fn chap_plugin_direct() {
+    let server = MockServer::start().await;
+    mount(
+        &server,
+        "/health",
+        ok_json(json!({"status": "success", "message": "healthy"})),
+    )
+    .await;
+    mount(
+        &server,
+        "/system/info",
+        ok_json(json!({"chap_core_version": "2.7.0", "revision": "62bae69"})),
+    )
+    .await;
+    let results = run(&plain(&server, TargetKind::Chap, serde_json::Value::Null)).await;
+    assert_eq!(
+        statuses(&results),
+        [
+            ("chap_health", Status::Ok),
+            ("chap_system_info", Status::Ok)
+        ]
+    );
+    assert_eq!(results[0].message, "chap-core healthy (status 200).");
+    assert_eq!(results[1].message, "chap-core 2.7.0 / rev 62bae69.");
+
+    server.reset().await;
+    mount(
+        &server,
+        "/health",
+        ok_json(json!({"status": "error", "message": "db down"})),
+    )
+    .await;
+    let results = run(&plain(&server, TargetKind::Chap, serde_json::Value::Null)).await;
+    assert_eq!(
+        results[0].message,
+        "chap-core reported health status 'error': db down"
+    );
+    assert_eq!(results[1].status, Status::Skipped);
+}
+
+#[tokio::test]
+async fn caps_plugin_reads_its_links() {
+    let server = MockServer::start().await;
+    mount(
+        &server,
+        "/system/info",
+        ok_json(json!({"caps": {
+            "version": "3.2.2",
+            "chap": {"connected": true, "info": {"chap_core_version": "2.8.0.dev0"}},
+            "dhis": {"connected": false, "info": {"version": "2.42.6"}},
+        }})),
+    )
+    .await;
+    let results = run(&plain(&server, TargetKind::Caps, serde_json::Value::Null)).await;
+    assert_eq!(
+        statuses(&results),
+        [
+            ("caps_system_info", Status::Ok),
+            ("caps_chap", Status::Ok),
+            ("caps_dhis2", Status::Fail)
+        ]
+    );
+    assert_eq!(results[0].message, "CAPS 3.2.2.");
+    assert_eq!(results[1].message, "chap-core 2.8.0.dev0 connected.");
+    assert_eq!(results[2].message, "CAPS reports DHIS2 not connected.");
+
+    server.reset().await;
+    mount(&server, "/system/info", ok_json(json!({"status": "ok"}))).await;
+    let results = run(&plain(&server, TargetKind::Caps, serde_json::Value::Null)).await;
+    assert_eq!(results[0].status, Status::Fail);
+    assert_eq!(results[1].status, Status::Skipped);
+}
+
+#[tokio::test]
+async fn http_plugin_expectations() {
+    let server = MockServer::start().await;
+    mount(
+        &server,
+        "/",
+        ok_json(json!({"status": "success", "data": [{"state": "up"}]})),
+    )
+    .await;
+    let t = |params| plain(&server, TargetKind::Http, params);
+    let one = |results: Vec<CheckResult>| results.into_iter().next().unwrap();
+
+    let r = one(run(&t(serde_json::Value::Null)).await);
+    assert_eq!(r.status, Status::Ok);
+    assert!(r.message.starts_with("200 from "), "{}", r.message);
+
+    let r = one(run(&t(
+        json!({"json_path": "data.0.state", "json_equals": "up", "body_contains": "success"}),
+    ))
+    .await);
+    assert_eq!(r.status, Status::Ok, "{}", r.message);
+    assert!(
+        r.message.ends_with("; body matches, data.0.state = up"),
+        "{}",
+        r.message
+    );
+
+    let r = one(run(&t(
+        json!({"json_path": "status", "json_equals": "degraded"}),
+    ))
+    .await);
+    assert_eq!(
+        (r.status, r.message.as_str()),
+        (Status::Fail, "'status' is success - expected degraded.")
+    );
+
+    let r = one(run(&t(json!({"expect_status": [401]}))).await);
+    assert_eq!(r.status, Status::Fail);
+    assert!(r.message.contains("(expected 401)"), "{}", r.message);
+
+    server.reset().await;
+    mount(&server, "/", ResponseTemplate::new(401)).await;
+    let r = one(run(&t(json!({"expect_status": [401]}))).await);
+    assert_eq!(r.status, Status::Ok, "a protected URL can count as up");
 }

@@ -163,7 +163,8 @@ pub struct Dhis2InstanceConfig {
     pub retry_policy: Option<RetryPolicy>,
 }
 
-/// One `[instances.<key>]` table of `kind = "ogs"`: an Open Geo Service deployment. No auth.
+/// One `[instances.<key>]` table of a kind with no settings of its own and no auth: `ogs` (an
+/// Open Geo Service), `chap` (chap-core reached directly) and `caps`.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OgsInstanceConfig {
@@ -180,6 +181,34 @@ pub struct OgsInstanceConfig {
     pub alerts: Vec<String>,
 }
 
+/// One `[instances.<key>]` table of `kind = "http"`: any URL, with what it must answer.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HttpInstanceConfig {
+    #[serde(rename = "kind")]
+    _kind: String,
+    pub name: Option<String>,
+    pub url: String,
+    #[serde(default = "default_timeout")]
+    pub timeout_s: f64,
+    #[serde(default = "default_true")]
+    pub verify_tls: bool,
+    pub checks: Option<Vec<String>>,
+    #[serde(default)]
+    pub alerts: Vec<String>,
+    /// Statuses that count as up; by default any 2xx.
+    pub expect_status: Option<Vec<i64>>,
+    /// Text the body must contain.
+    pub body_contains: Option<String>,
+    /// A dotted path into a JSON body (`status`, `data.0.state`).
+    pub json_path: Option<String>,
+    /// The value at `json_path` (a string, number or boolean).
+    pub json_equals: Option<toml::Value>,
+    /// Headers sent with the request (an `Accept`, or credentials for a protected URL).
+    #[serde(default)]
+    pub headers: BTreeMap<String, String>,
+}
+
 /// Any `[instances.<key>]` table.
 #[derive(Debug, Clone)]
 pub struct InstanceConfig {
@@ -192,14 +221,23 @@ pub struct InstanceConfig {
     pub alerts: Vec<String>,
     /// DHIS2 only.
     pub dhis2: Option<Dhis2InstanceConfig>,
+    /// Settings only the kind's plugin reads (the `http` kind's expectations and headers).
+    pub params: serde_json::Value,
 }
 
 impl InstanceConfig {
-    /// True when a password or token is written inline in the file.
+    /// True when a password, token or header is written inline in the file.
     pub fn has_inline_secret(&self) -> bool {
-        self.dhis2
-            .as_ref()
-            .is_some_and(|d| d.password.is_some() || d.token.is_some())
+        let headers = self
+            .params
+            .get("headers")
+            .and_then(serde_json::Value::as_object)
+            .is_some_and(|h| !h.is_empty());
+        headers
+            || self
+                .dhis2
+                .as_ref()
+                .is_some_and(|d| d.password.is_some() || d.token.is_some())
     }
 
     /// Build the runtime target, resolving `*_env` credentials.
@@ -238,6 +276,7 @@ impl InstanceConfig {
             verify_tls: self.verify_tls,
             auth,
             retry,
+            params: self.params.clone(),
         })
     }
 
@@ -648,8 +687,9 @@ impl CheckerConfig {
 fn instance(value: toml::Value, key_loc: &str) -> Result<InstanceConfig, Vec<(String, String)>> {
     let kind = match value.get("kind") {
         None => TargetKind::Dhis2,
-        Some(toml::Value::String(k)) if k == "dhis2" => TargetKind::Dhis2,
-        Some(toml::Value::String(k)) if k == "ogs" => TargetKind::Ogs,
+        Some(toml::Value::String(k)) if TargetKind::parse(k).is_some() => {
+            TargetKind::parse(k).expect("just checked")
+        }
         Some(other) => {
             let tag = match other {
                 toml::Value::String(s) => s.clone(),
@@ -658,7 +698,8 @@ fn instance(value: toml::Value, key_loc: &str) -> Result<InstanceConfig, Vec<(St
             return Err(vec![(
                 key_loc.to_owned(),
                 format!(
-                    "Input tag '{tag}' found using _instance_kind() does not match any of the expected tags: 'dhis2', 'ogs'"
+                    "Input tag '{tag}' found using _instance_kind() does not match any of the expected tags: {}",
+                    crate::plugins::kind_list()
                 ),
             )]);
         }
@@ -670,7 +711,8 @@ fn instance(value: toml::Value, key_loc: &str) -> Result<InstanceConfig, Vec<(St
             "Input should be a valid dictionary or instance of Dhis2InstanceConfig".into(),
         )]);
     }
-    let (name, url, timeout_s, verify_tls, check_names, alerts, dhis2) = match kind {
+    let mut errors = Vec::new();
+    let (name, url, timeout_s, verify_tls, check_names, alerts, dhis2, params) = match kind {
         TargetKind::Dhis2 => {
             let d: Dhis2InstanceConfig = typed(value, &loc).map_err(|e| vec![e])?;
             (
@@ -681,9 +723,10 @@ fn instance(value: toml::Value, key_loc: &str) -> Result<InstanceConfig, Vec<(St
                 d.checks.clone(),
                 d.alerts.clone(),
                 Some(d),
+                serde_json::Value::Null,
             )
         }
-        TargetKind::Ogs => {
+        TargetKind::Ogs | TargetKind::Chap | TargetKind::Caps => {
             let o: OgsInstanceConfig = typed(value, &loc).map_err(|e| vec![e])?;
             (
                 o.name,
@@ -693,12 +736,26 @@ fn instance(value: toml::Value, key_loc: &str) -> Result<InstanceConfig, Vec<(St
                 o.checks,
                 o.alerts,
                 None,
+                serde_json::Value::Null,
+            )
+        }
+        TargetKind::Http => {
+            let h: HttpInstanceConfig = typed(value, &loc).map_err(|e| vec![e])?;
+            let params = http_params(&h, &loc, &mut errors);
+            (
+                h.name,
+                h.url,
+                h.timeout_s,
+                h.verify_tls,
+                h.checks,
+                h.alerts,
+                None,
+                params,
             )
         }
     };
 
     // Field rules, in declaration order.
-    let mut errors = Vec::new();
     let url = match http_url(
         &url,
         "Use the 'username' + 'password' / 'password_env' or 'token' / 'token_env' fields instead.",
@@ -757,6 +814,55 @@ fn instance(value: toml::Value, key_loc: &str) -> Result<InstanceConfig, Vec<(St
         checks: check_names,
         alerts,
         dhis2,
+        params,
+    })
+}
+
+/// Validate an `http` instance's expectations and carry them to its check.
+fn http_params(
+    h: &HttpInstanceConfig,
+    loc: &str,
+    errors: &mut Vec<(String, String)>,
+) -> serde_json::Value {
+    if let Some(statuses) = &h.expect_status {
+        if statuses.is_empty() {
+            errors.push((
+                format!("{loc}.expect_status"),
+                "List should have at least 1 item after validation, not 0".into(),
+            ));
+        }
+        for (i, status) in statuses.iter().enumerate() {
+            if !(100..=599).contains(status) {
+                errors.push((
+                    format!("{loc}.expect_status.{i}"),
+                    "Input should be an HTTP status between 100 and 599".into(),
+                ));
+            }
+        }
+    }
+    let json_equals = match &h.json_equals {
+        None => None,
+        Some(toml::Value::String(s)) => Some(serde_json::Value::from(s.clone())),
+        Some(toml::Value::Integer(n)) => Some(serde_json::Value::from(*n)),
+        Some(toml::Value::Float(f)) => Some(serde_json::Value::from(*f)),
+        Some(toml::Value::Boolean(b)) => Some(serde_json::Value::from(*b)),
+        Some(_) => {
+            errors.push((
+                format!("{loc}.json_equals"),
+                "Input should be a string, a number or a boolean".into(),
+            ));
+            None
+        }
+    };
+    if json_equals.is_some() && h.json_path.is_none() {
+        errors.push((loc.to_owned(), value_error("json_equals needs json_path.")));
+    }
+    serde_json::json!({
+        "expect_status": h.expect_status,
+        "body_contains": h.body_contains,
+        "json_path": h.json_path,
+        "json_equals": json_equals,
+        "headers": h.headers,
     })
 }
 
@@ -1093,6 +1199,65 @@ mod tests {
         assert!(
             errors("[instances.a]\nkind = \"ogs\"\nurl = \"https://x\"\npassword = \"p\"")
                 .contains("instances.a.ogs.password: Extra inputs are not permitted")
+        );
+    }
+
+    #[test]
+    fn plugin_kinds_parse_and_validate() {
+        let cfg = CheckerConfig::parse(
+            r#"
+            [instances.chap]
+            kind = "chap"
+            url = "https://example.org/chap/stable"
+            [instances.caps]
+            kind = "caps"
+            url = "https://example.org/caps"
+            [instances.site]
+            kind = "http"
+            url = "https://example.org/"
+            expect_status = [200, 401]
+            json_path = "status"
+            json_equals = "ok"
+            "#,
+        )
+        .unwrap();
+        let kinds: Vec<TargetKind> = cfg.instances.values().map(|i| i.kind).collect();
+        assert_eq!(
+            kinds,
+            [TargetKind::Chap, TargetKind::Caps, TargetKind::Http]
+        );
+        assert_eq!(
+            cfg.instances["site"].params["expect_status"],
+            serde_json::json!([200, 401])
+        );
+        assert!(!cfg.has_inline_secret());
+        let with_header = CheckerConfig::parse(
+            "[instances.s]\nkind = \"http\"\nurl = \"https://x\"\nheaders = { Authorization = \"Bearer x\" }",
+        )
+        .unwrap();
+        assert!(with_header.has_inline_secret());
+
+        let text =
+            errors("[instances.s]\nkind = \"http\"\nurl = \"https://x\"\nexpect_status = [99]");
+        assert!(
+            text.contains("instances.s.http.expect_status.0: Input should be an HTTP status"),
+            "{text}"
+        );
+        let text =
+            errors("[instances.s]\nkind = \"http\"\nurl = \"https://x\"\njson_equals = \"ok\"");
+        assert!(
+            text.contains("instances.s.http: Value error, json_equals needs json_path."),
+            "{text}"
+        );
+        let text = errors("[instances.s]\nkind = \"chap\"\nurl = \"https://x\"\ntoken = \"t\"");
+        assert!(
+            text.contains("instances.s.chap.token: Extra inputs are not permitted"),
+            "{text}"
+        );
+        let text = errors("[instances.s]\nkind = \"nope\"\nurl = \"https://x\"");
+        assert!(
+            text.contains("expected tags: 'dhis2', 'ogs', 'chap', 'caps', 'http'"),
+            "{text}"
         );
     }
 
