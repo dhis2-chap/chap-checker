@@ -15,6 +15,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Lockfile bumps for vulnerable transitive dependencies: `opentelemetry-api` 1.45.0 -> 1.45.2 (CVE-2026-114603, CVE-2026-126360) and `certifi` 2026.7.22 -> 2026.10.23.
 - CI workflow now runs with a read-only `GITHUB_TOKEN` (`permissions: contents: read`).
 
+### Fixed
+
+- **Daemon refreshes no longer race each other.** The background loop, `POST /api/refresh` and the TUI's local tick now share one lock in `DashboardServer.refresh_once()`: a refresh requested while another is in flight joins it instead of starting a parallel run. A slow older run can no longer finish after a newer one and overwrite a fresh FAIL with a stale OK, and repeated `/api/refresh` calls can no longer multiply the `concurrency` limit.
+- **Config reload no longer mixes old and new config.** A refresh that was checking targets when `POST /api/reload` (or `Ctrl+R` in the local TUI) swapped the config now discards its results instead of applying them, and dispatching alerts, against the new target list. An instance whose `url`, `kind` or `checks` list changes on reload starts with fresh ping counters and an empty uptime strip instead of showing the old server's history; renaming it or rotating credentials keeps history.
+- **Dashboard timestamps are now UTC with an explicit offset.** `last_refresh` in `/api/state` (overall and per tile) and in the `POST /api/refresh` response was a naive local time, so browsers and `tui --connect` clients in a different time zone showed wrong "updated N ago" ages. The TUI still accepts naive timestamps from older daemons and reads them as local time.
+
 ## [0.10.0] — 2026-10-01
 
 ### Added

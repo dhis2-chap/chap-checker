@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
-from datetime import datetime
+from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -281,8 +281,24 @@ def columns_for(n_instances: int) -> int:
     return 4
 
 
+def _as_aware(value: datetime) -> datetime:
+    """Return ``value`` as a timezone-aware datetime.
+
+    The daemon emits UTC timestamps with an offset. Daemons before that
+    fix sent naive local times; treat a naive value as local time (the
+    old behaviour) so `--connect` against an older daemon keeps working.
+    """
+    return value if value.tzinfo is not None else value.astimezone()
+
+
 def _format_relative(now: datetime, then: datetime) -> str:
-    """Render `then` as 'Ns ago' / 'Nm ago' / 'Nh ago'."""
+    """Render `then` as 'Ns ago' / 'Nm ago' / 'Nh ago'.
+
+    Accepts aware or naive datetimes (naive is read as local time), so
+    an aware UTC timestamp from the daemon compares correctly against
+    this machine's clock whatever its time zone.
+    """
+    now, then = _as_aware(now), _as_aware(then)
     delta = max(0, int((now - then).total_seconds()))
     if delta < 60:
         return f"{delta}s ago"
@@ -696,7 +712,7 @@ class InstanceTile(Container):
     def _tick_updated(self) -> None:
         if self._model is None or self._model.last_refresh is None:
             return
-        text = _format_relative(datetime.now(), self._model.last_refresh)
+        text = _format_relative(datetime.now(UTC), self._model.last_refresh)
         try:
             self.query_one("#updated", Static).update(text)
         except Exception:  # noqa: BLE001

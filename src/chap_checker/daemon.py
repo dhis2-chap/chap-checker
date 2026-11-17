@@ -11,10 +11,10 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from chap_checker.checks.base import CheckResult, Status
 from chap_checker.client import PLATFORM_LABELS
@@ -68,6 +68,20 @@ def extract_version(results: list[CheckResult], kind: str = "dhis2") -> str | No
     return None
 
 
+def target_identity(entry: TargetEntry) -> tuple[str, str, tuple[str, ...] | None]:
+    """Return the fields that decide whether a tile's history still describes the same server.
+
+    Two entries with the same TOML key but a different identity (the
+    operator pointed ``prod`` at a new URL, switched its ``kind``, or
+    changed which checks run) must not share counters or the uptime
+    strip, since the old numbers describe a different server or a
+    different set of checks. Credentials and display name are left out
+    on purpose: rotating a password or relabelling a tile keeps history.
+    """
+    checks = tuple(entry.check_names) if entry.check_names is not None else None
+    return (entry.target.kind, str(entry.target.base_url).rstrip("/"), checks)
+
+
 def extract_dhis2_version(results: list[CheckResult]) -> str | None:
     """Pull the DHIS2 server version out of the dhis2_system_info check details."""
     return extract_version(results, "dhis2")
@@ -117,6 +131,7 @@ class TileModel(BaseModel):
     ping_total: int
     latency_ms: int | None = None
     uptime_pct: float | None = None
+    # Timezone-aware UTC (see `DashboardState.last_refresh`).
     last_refresh: datetime | None = None
     checks: list[CheckRowModel] = []
     history: list[HistoryPointModel] = []
@@ -133,6 +148,8 @@ class DashboardState(BaseModel):
     instance_count: int
     alerts_enabled: bool
     interval_s: float
+    # Timezone-aware UTC; serialized as ISO 8601 with a `Z` suffix so
+    # browsers and remote TUIs in other zones compute the right age.
     last_refresh: datetime | None = None
     tiles: list[TileModel] = []
     ui_title: str
@@ -149,6 +166,10 @@ class TileTracker(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    # `target_identity()` of the entry this tracker's history belongs to.
+    # None until the first refresh is applied (or for trackers built by
+    # hand in tests), which matches any entry.
+    identity: tuple[str, str, tuple[str, ...] | None] | None = None
     ping_ok: int = 0
     ping_total: int = 0
     last_refresh: datetime | None = None
@@ -189,18 +210,39 @@ class DashboardServer(BaseModel):
     # or removing the `[auth]` block in the TOML and POSTing /api/reload
     # takes effect immediately, instead of requiring a daemon restart.
     resolved_auth_token: str | None = None
+    # Serializes refresh cycles. The background loop, `POST /api/refresh`
+    # and the TUI's local tick all funnel through `refresh_once()`, which
+    # holds this lock while it checks targets and applies results, so at
+    # most one run is ever in flight (and `run_targets`' per-call
+    # concurrency limit is therefore also the daemon-wide limit).
+    _refresh_lock: asyncio.Lock = PrivateAttr(default_factory=asyncio.Lock)
 
     def model_post_init(self, _context: object) -> None:
         for entry in self.targets:
-            self.trackers.setdefault(entry.name, TileTracker())
+            self.trackers.setdefault(entry.name, TileTracker(identity=target_identity(entry)))
+
+    def _tracker_for(self, entry: TargetEntry) -> TileTracker:
+        """Return the tracker for ``entry``, starting a fresh one if its identity changed."""
+        ident = target_identity(entry)
+        t = self.trackers.get(entry.name)
+        if t is None or (t.identity is not None and t.identity != ident):
+            t = TileTracker(identity=ident)
+            self.trackers[entry.name] = t
+        elif t.identity is None:
+            t.identity = ident
+        return t
 
     def reload(self) -> tuple[set[str], set[str]]:
         """Re-read `config_path` from disk and swap targets / cfg in place.
 
         Returns `(added_names, removed_names)` so callers can surface the
         delta to the operator. Trackers for surviving instances are kept
-        (their history strip stays warm); trackers for removed instances
-        are dropped; trackers for added instances start empty.
+        (their history strip stays warm) unless their identity (URL, kind,
+        or check list, see `target_identity()`) changed, in which case
+        they start over; trackers for removed instances are dropped;
+        trackers for added instances start empty. A refresh in flight
+        when this runs discards its results instead of applying them to
+        the new config.
 
         Raises `RuntimeError` when `config_path` is None and the loader's
         own exceptions (`FileNotFoundError`, `tomllib.TOMLDecodeError`,
@@ -225,8 +267,10 @@ class DashboardServer(BaseModel):
         self.resolved_auth_token = new_token
         for removed in old_names - new_names:
             self.trackers.pop(removed, None)
-        for added in new_names - old_names:
-            self.trackers.setdefault(added, TileTracker())
+        # Creates trackers for added instances and resets the history of
+        # any surviving instance whose URL / kind / checks changed.
+        for entry in new_targets:
+            self._tracker_for(entry)
         return new_names - old_names, old_names - new_names
 
     async def run_loop(self) -> None:
@@ -241,10 +285,37 @@ class DashboardServer(BaseModel):
             await asyncio.sleep(self.interval_s)
 
     async def refresh_once(self) -> None:
-        """Run one refresh cycle: check every target, update trackers, dispatch alerts."""
-        started = datetime.now()
-        reports = await run_targets(self.targets, concurrency=self.cfg.concurrency)
-        now = datetime.now()
+        """Run one refresh cycle: check every target, update trackers, dispatch alerts.
+
+        Refreshes never overlap. If one is already in flight, this call
+        joins it (waits for it to finish and returns) instead of starting
+        a parallel run, so repeated `POST /api/refresh` requests coalesce
+        onto the running cycle rather than racing it: a slow older run can
+        never land after, and overwrite, a newer one.
+        """
+        if self._refresh_lock.locked():
+            async with self._refresh_lock:
+                return
+        async with self._refresh_lock:
+            await self._refresh_locked()
+
+    async def _refresh_locked(self) -> None:
+        # Capture the config this cycle runs against. `reload()` (and the
+        # TUI's in-place reload) replace `self.targets` / `self.cfg` with
+        # new objects rather than mutating them, so an identity check after
+        # the network I/O tells us whether the config moved underneath us.
+        targets = self.targets
+        cfg = self.cfg
+        started = datetime.now(UTC)
+        reports = await run_targets(targets, concurrency=cfg.concurrency)
+        now = datetime.now(UTC)
+        if self.targets is not targets or self.cfg is not cfg:
+            # Results (and alert transitions) computed against the old
+            # config would land on the new target list / alert routing.
+            # Drop the whole cycle; the next one runs against the new config.
+            _log.info("refresh: config reloaded mid-cycle, discarding %d stale report(s)", len(reports))
+            return
+        entries = {e.name: e for e in targets}
         ok_targets = sum(1 for r in reports if all(c.status is Status.OK for c in r.results))
         _log.info(
             "refresh: %d/%d targets ok in %.0fms",
@@ -253,7 +324,12 @@ class DashboardServer(BaseModel):
             (now - started).total_seconds() * 1000,
         )
         for r in reports:
-            t = self.trackers.setdefault(r.target_name, TileTracker())
+            entry = entries.get(r.target_name)
+            t = (
+                self._tracker_for(entry)
+                if entry is not None
+                else self.trackers.setdefault(r.target_name, TileTracker())
+            )
             t.last_report = r
             t.last_refresh = now
             ping_name = PING_CHECK.get(r.target_kind)
@@ -274,11 +350,11 @@ class DashboardServer(BaseModel):
                 t.history.append((w, avg_latency))
         self.last_refresh = now
 
-        if self.alerts_enabled and self.cfg.alerts is not None and self.state_path is not None:
+        if self.alerts_enabled and cfg.alerts is not None and self.state_path is not None:
             # Late import to keep the cli module loaded only when needed.
             from chap_checker.cli import dispatch_alerts_async
 
-            await dispatch_alerts_async(reports, self.targets, self.cfg.alerts, self.state_path)
+            await dispatch_alerts_async(reports, targets, cfg.alerts, self.state_path)
 
     def snapshot(self) -> DashboardState:
         """Build the JSON-serializable snapshot used by both surfaces."""
@@ -293,7 +369,11 @@ class DashboardServer(BaseModel):
         )
 
     def _tile_model(self, entry: TargetEntry) -> TileModel:
-        t = self.trackers.get(entry.name) or TileTracker()
+        t = self.trackers.get(entry.name)
+        if t is None or (t.identity is not None and t.identity != target_identity(entry)):
+            # Config was swapped without going through `reload()` and no
+            # refresh has run since: don't show the old server's numbers.
+            t = TileTracker()
         report = t.last_report
         url = str(entry.target.base_url).rstrip("/")
         kind = entry.target.kind
@@ -354,5 +434,6 @@ __all__ = [
     "TileTracker",
     "extract_dhis2_version",
     "extract_version",
+    "target_identity",
     "worst",
 ]
