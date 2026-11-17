@@ -18,6 +18,9 @@ from chap_checker.checks.base import (
 )
 
 ROUTE_PROXY_PATH = "/api/routes/chap/run/system/info"
+# chap-core 1.1.x - 1.2.0 served system info at `/system-info` (hyphen);
+# `/system/info` arrived in 1.3.0. Tried only when the current path 404s.
+LEGACY_ROUTE_PROXY_PATH = "/api/routes/chap/run/system-info"
 
 
 class ChapCoreSystemInfo(BaseModel):
@@ -30,6 +33,7 @@ class ChapCoreSystemInfo(BaseModel):
     docker_available: bool | None = None
     revision: str | None = None
     server_date: str | None = None
+    auth_required: bool | None = None
     raw: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -53,6 +57,16 @@ class Dhis2ChapSystemInfoCheck:
                 message=format_request_error(exc, path=ROUTE_PROXY_PATH),
                 duration_ms=(time.perf_counter() - start) * 1000,
             )
+
+        if response.status_code == 404:
+            # Older chap-core (1.1.x - 1.2.0) only has `/system-info`. A
+            # failed fallback is reported as the original 404 below.
+            try:
+                legacy = await client.get_response(LEGACY_ROUTE_PROXY_PATH)
+            except Exception:  # noqa: BLE001 - fall through to the original 404
+                legacy = None
+            if legacy is not None and 200 <= legacy.status_code < 300:
+                response = legacy
 
         duration_ms = (time.perf_counter() - start) * 1000
         diag = diagnose_status(

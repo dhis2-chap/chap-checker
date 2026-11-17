@@ -42,7 +42,9 @@ class OcsInfoCheck:
         capabilities: dict[str, Any] = {}
         for path, sink in ((_INFO_PATH, info), (_CAPABILITIES_PATH, capabilities)):
             try:
-                response = await client.get(path)
+                # Ask for JSON explicitly: `GET /` content-negotiates and serves
+                # an HTML landing page to clients that prefer HTML.
+                response = await client.get(path, headers={"Accept": "application/json"})
             except Exception as exc:  # noqa: BLE001 - surface any transport error as a result
                 return CheckResult(
                     name=self.name,

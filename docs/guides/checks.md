@@ -110,7 +110,10 @@ from the route layer is reported as a chap-core outage.
 
 Hits `/api/routes/chap/run/system/info` and parses the chap-core response.
 Surfaces `chap_core_version` (aliased to `version`), `python_version`,
-`revision`, and `server_date` in `details`.
+`revision`, `server_date` and `auth_required` (chap-core 2.2+) in `details`.
+If `/system/info` returns 404, the check retries the older
+`/api/routes/chap/run/system-info` path, so chap-core 1.1.x - 1.2.0
+(which predate `/system/info`) still report their version.
 
 ### `dhis2_chap_modeling_app`
 
