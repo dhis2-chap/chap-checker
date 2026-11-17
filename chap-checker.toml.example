@@ -99,7 +99,8 @@ webhook_url_env = "SLACK_WEBHOOK_URL"
 # reachable. Browser users get a built-in login modal; remote TUI
 # clients pass `tui --connect URL --token-env CHAP_CHECKER_TOKEN`.
 # Generate a token with `openssl rand -hex 32`. Rotation = update the
-# env var, restart serve.
+# env var, restart serve. The token must be non-empty printable ASCII
+# without spaces; an empty or unset token_env makes `serve` refuse to start.
 # [auth]
 # token_env = "CHAP_CHECKER_TOKEN"
 

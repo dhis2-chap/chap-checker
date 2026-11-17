@@ -49,6 +49,19 @@ The file carries passwords and webhook URLs — treat it like any other secret.
   or `webhook_url`.
 - Prefer the `*_env` variants (`password_env`, `webhook_url_env`) and keep the
   actual secret in your shell, secrets manager, or systemd `EnvironmentFile`.
+- An env var named by a `*_env` field must be set and non-empty. An empty or
+  whitespace-only value is an error, not an empty password / token / URL.
+  Literal `password` and `token` values must not be empty either.
+- Don't put credentials in a URL (`https://user:pass@host`). Instance `url`,
+  `[alerts.slack].webhook_url` and `[alerts.webhook].url` (and their `*_env`
+  values) are rejected when they carry a `user[:pass]@` part, because the URL
+  is shown in `verify --json`, `/api/state` and alert payloads. Use the
+  `username` / `password` / `token` fields for DHIS2, and the `headers` table
+  for webhook auth. Webhook URLs that carry a secret in the path or query
+  string (Slack-style) are still accepted.
+- Config errors printed by the CLI, the TUI reload toast and
+  `POST /api/reload` name the field and the problem but never echo the
+  rejected value.
 
 ## Instance display name
 

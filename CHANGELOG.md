@@ -6,6 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Security
+
+- **An empty `[auth]` token no longer disables `serve` auth.** Previously, `token_env` pointing at a set-but-empty env var resolved to `""`, and `Authorization: Bearer ` (no token) then authenticated. The `[auth]` token must now be non-empty printable ASCII with no spaces or surrounding whitespace. A literal `token` that breaks this fails config validation; an unset, empty or invalid `token_env` makes `serve` exit at startup and makes `POST /api/reload` return 400 with the previous token kept. The bearer check also rejects an empty provided token outright and compares bytes, so a non-ASCII `Authorization` header now gets 401 instead of a 500, and a non-ASCII configured token can no longer break every request.
+- **Config errors no longer echo secrets.** `POST /api/reload`, the TUI reload toast and the CLI printed pydantic's raw `ValidationError` text, which includes the rejected `input_value` (passwords, tokens, webhook URLs). They now print only each error's field location and message. New helper `chap_checker.config.format_config_error`.
+- **Credentials in URLs are rejected** (**breaking** for configs that used them). An instance `url`, `[alerts.slack].webhook_url` or `[alerts.webhook].url` (and their `*_env` values) with a `user[:pass]@` part is now an error, because the URL is copied verbatim into `verify --json`, `/api/state` and alert payloads. Use `username` / `password` / `token` for DHIS2 and `headers` for webhook auth. Secrets in a webhook URL's path or query string are still accepted.
+- **Empty `*_env` secrets are rejected.** `password_env`, `token_env`, `webhook_url_env` and `url_env` pointing at an empty or whitespace-only env var now fail with a clear error naming the variable, and literal `password = ""` / `token = ""` on an instance fail validation.
+- Lockfile bumps for vulnerable transitive dependencies: `opentelemetry-api` 1.45.0 -> 1.45.2 (CVE-2026-114603, CVE-2026-126360) and `certifi` 2026.7.22 -> 2026.10.23.
+- CI workflow now runs with a read-only `GITHUB_TOKEN` (`permissions: contents: read`).
+
 ## [0.10.0] — 2026-10-01
 
 ### Added
