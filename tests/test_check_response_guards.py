@@ -268,3 +268,68 @@ def test_chap_system_info_404_carries_route_specific_hint() -> None:
     assert "404" in result.message
     assert "chap route" in result.message.lower() or "chap-core" in result.message
     assert result.details["http_status"] == 404
+
+
+# ---------- dhis2_chap_ping body validation ----------
+
+
+def test_chap_ping_ok_on_chap_core_health_body() -> None:
+    """chap-core's /health answers `{"status": "success", "message": "healthy"}`."""
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"status": "success", "message": "healthy"})
+
+    result = asyncio.run(Dhis2ChapPingCheck().run(_client(handler), _ctx()))
+    assert result.status is Status.OK
+    assert result.details["health_status"] == "success"
+    assert result.details["health_message"] == "healthy"
+
+
+@pytest.mark.parametrize(
+    "content_type,body",
+    [
+        ("text/html; charset=utf-8", b"<html><body>Sign in with SSO</body></html>"),
+        ("text/plain", b"ok"),
+    ],
+)
+def test_chap_ping_fails_on_non_json_2xx(content_type: str, body: bytes) -> None:
+    """A 200 login page from an SSO / reverse proxy must not count as healthy."""
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=body, headers={"content-type": content_type})
+
+    result = asyncio.run(Dhis2ChapPingCheck().run(_client(handler), _ctx()))
+    assert result.status is Status.FAIL
+    assert "non-JSON" in result.message
+    assert result.details["http_status"] == 200
+    assert result.details["path"] == "/api/routes/chap/run/health"
+
+
+def test_chap_ping_fails_on_malformed_json() -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"{not json", headers={"content-type": "application/json"})
+
+    result = asyncio.run(Dhis2ChapPingCheck().run(_client(handler), _ctx()))
+    assert result.status is Status.FAIL
+    assert "malformed JSON" in result.message
+
+
+@pytest.mark.parametrize("payload", [["a", "b"], {"something_else": "x"}, {"status": 1}])
+def test_chap_ping_fails_on_unexpected_json_shape(payload: object) -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=payload)
+
+    result = asyncio.run(Dhis2ChapPingCheck().run(_client(handler), _ctx()))
+    assert result.status is Status.FAIL
+    assert "not from chap-core" in result.message
+
+
+def test_chap_ping_fails_when_chap_core_reports_failure() -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"status": "failed", "message": "GEE not configured"})
+
+    result = asyncio.run(Dhis2ChapPingCheck().run(_client(handler), _ctx()))
+    assert result.status is Status.FAIL
+    assert "failed" in result.message
+    assert "GEE not configured" in result.message
+    assert result.details["health_status"] == "failed"
