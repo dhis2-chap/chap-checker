@@ -93,27 +93,27 @@ impl Default for RetryPolicy {
 impl RetryPolicy {
     /// Return the problems with this policy, as `(field, message)` pairs.
     pub fn problems(&self) -> Vec<(&'static str, String)> {
+        let ge = |n: &str| format!("Input should be greater than or equal to {n}");
+        let le = |n: &str| format!("Input should be less than or equal to {n}");
         let mut out = Vec::new();
-        if !(1..=10).contains(&self.max_attempts) {
-            out.push(("max_attempts", "must be between 1 and 10".to_owned()));
+        if self.max_attempts < 1 {
+            out.push(("max_attempts", ge("1")));
+        } else if self.max_attempts > 10 {
+            out.push(("max_attempts", le("10")));
         }
         if self.base_delay < 0.0 {
-            out.push((
-                "base_delay",
-                "must be greater than or equal to 0".to_owned(),
-            ));
+            out.push(("base_delay", ge("0")));
         }
         if self.max_delay <= 0.0 {
-            out.push(("max_delay", "must be greater than 0".to_owned()));
+            out.push(("max_delay", "Input should be greater than 0".to_owned()));
         }
         if self.backoff_factor < 1.0 {
-            out.push((
-                "backoff_factor",
-                "must be greater than or equal to 1".to_owned(),
-            ));
+            out.push(("backoff_factor", ge("1")));
         }
-        if !(0.0..=1.0).contains(&self.jitter) {
-            out.push(("jitter", "must be between 0 and 1".to_owned()));
+        if self.jitter < 0.0 {
+            out.push(("jitter", ge("0")));
+        } else if self.jitter > 1.0 {
+            out.push(("jitter", le("1")));
         }
         out
     }
