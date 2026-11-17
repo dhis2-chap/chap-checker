@@ -20,7 +20,6 @@ from chap_checker.daemon import (
     DashboardServer,
     DashboardState,
     TileModel,
-    TileTracker,
 )
 from chap_checker.dashboard import (
     _THEME_BUILDERS,
@@ -66,34 +65,23 @@ def _server(name: str = "test") -> DashboardServer:
 
 
 def _feed_report(server: DashboardServer, name: str, results: list[CheckResult]) -> None:
-    """Push a synthetic RunReport into the server's tracker without hitting the network.
+    """Run the real `DashboardServer.refresh_once()` with `run_targets` stubbed out.
 
-    The previous test suite called `InstanceTile.update_from(report)` directly.
-    The new state lives on `TileTracker`, so we reproduce the tracker-update
-    half of `DashboardServer.refresh_once` here.
+    The stub returns one synthetic `RunReport` for ``name`` instead of
+    probing the network, so every tracker update below goes through the
+    production code path (ping counters, history, timestamps).
     """
-    from datetime import datetime
-
-    from chap_checker.daemon import worst
-
     report = RunReport(
         target_name=name,
         target_url=f"https://{name}.example",
         results=results,
     )
-    tracker = server.trackers.setdefault(name, TileTracker())
-    tracker.last_report = report
-    tracker.last_refresh = datetime.now()
-    ping = next((c for c in results if c.name == "dhis2_ping"), None)
-    if ping is not None and ping.status is not Status.SKIPPED:
-        tracker.ping_total += 1
-        if ping.status is Status.OK:
-            tracker.ping_ok += 1
-    ran: list[Status] = [c.status for c in results if c.status is not Status.SKIPPED]
-    if ran:
-        durations = [c.duration_ms for c in results if c.status is not Status.SKIPPED]
-        avg_latency = int(sum(durations) / len(durations)) if durations else None
-        tracker.history.append((worst(ran), avg_latency))
+
+    async def fake_run_targets(targets: list[TargetEntry], concurrency: int = 5) -> list[RunReport]:  # noqa: ARG001
+        return [report]
+
+    with patch("chap_checker.daemon.run_targets", new=fake_run_targets):
+        asyncio.run(server.refresh_once())
 
 
 def test_columns_for_adapts_to_count() -> None:
@@ -183,11 +171,33 @@ def test_format_relative_seconds() -> None:
     assert _format_relative(now, now + timedelta(seconds=5)) == "0s ago"
 
 
+def test_format_relative_compares_aware_utc_against_naive_local() -> None:
+    """An aware UTC timestamp from the daemon gives the right age on any local clock.
+
+    Naive values (older daemons) are read as local time, as before.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    now_utc = datetime.now(UTC)
+    then_utc = now_utc - timedelta(seconds=30)
+    assert _format_relative(now_utc, then_utc) == "30s ago"
+    # Naive local "now" vs aware UTC "then" (remote TUI in another zone).
+    naive_local_now = now_utc.astimezone().replace(tzinfo=None)
+    assert _format_relative(naive_local_now, then_utc) == "30s ago"
+    # Aware "now" vs naive local "then" (daemon from before the UTC fix).
+    naive_local_then = then_utc.astimezone().replace(tzinfo=None)
+    assert _format_relative(now_utc, naive_local_then) == "30s ago"
+
+
 def test_tracker_records_last_refresh_timestamp() -> None:
+    from datetime import timedelta
+
     server = _server()
     assert server.trackers["test"].last_refresh is None
     _feed_report(server, "test", [CheckResult(name="dhis2_ping", status=Status.OK, message="", duration_ms=1.0)])
-    assert server.trackers["test"].last_refresh is not None
+    stamp = server.trackers["test"].last_refresh
+    assert stamp is not None
+    assert stamp.utcoffset() == timedelta(0)
 
 
 def test_tracker_history_appends_worst_status_per_refresh() -> None:
@@ -283,7 +293,7 @@ def test_all_other_themes_are_dark_mode() -> None:
 
 
 @pytest.mark.parametrize("theme", list(_THEME_BUILDERS))
-def test_dashboard_app_mounts_under_every_theme(theme: str) -> None:
+def test_dashboard_app_mounts_under_every_theme(theme: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """Each ui.theme value must let the DashboardApp mount without a TCSS error.
 
     Regression for: the first cut used `$text-disabled` as a border colour
@@ -295,6 +305,12 @@ def test_dashboard_app_mounts_under_every_theme(theme: str) -> None:
     """
     from chap_checker.config import UiConfig
     from chap_checker.dashboard import DashboardApp
+
+    # Local mode refreshes on mount; keep that off the network.
+    async def fake_run_targets(targets: list[TargetEntry], concurrency: int = 5) -> list[RunReport]:  # noqa: ARG001
+        return []
+
+    monkeypatch.setattr("chap_checker.daemon.run_targets", fake_run_targets)
 
     cfg = CheckerConfig(
         instances={"x": Dhis2InstanceConfig(url=cast(HttpUrl, "https://x.example"), username="u", password="p")},
