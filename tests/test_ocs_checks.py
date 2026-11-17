@@ -163,3 +163,18 @@ async def test_runner_skips_info_when_health_fails(monkeypatch: pytest.MonkeyPat
     results = await run_checks(_target(), resolve_checks(["ocs_info"], kind="ocs"))
     assert [(r.name, r.status) for r in results] == [("ocs_health", Status.FAIL), ("ocs_info", Status.SKIPPED)]
     assert results[1].message == "Skipped: ocs_health not OK."
+
+
+async def test_info_requests_json_explicitly() -> None:
+    """`GET /` content-negotiates (HTML for browsers), so the check must ask for JSON."""
+    accepts: dict[str, str] = {}
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        accepts[request.url.path] = request.headers.get("accept", "")
+        if request.url.path == "/info":
+            return httpx2.Response(200, json={"app_version": "0.1.1", "read_only": True})
+        return httpx2.Response(200, json={"api_version": "1.2.0", "id": "demo"})
+
+    result = await _run(OcsInfoCheck(), handler)
+    assert result.status is Status.OK
+    assert accepts == {"/info": "application/json", "/": "application/json"}

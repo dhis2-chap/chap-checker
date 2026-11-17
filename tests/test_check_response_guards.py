@@ -333,3 +333,38 @@ def test_chap_ping_fails_when_chap_core_reports_failure() -> None:
     assert "failed" in result.message
     assert "GEE not configured" in result.message
     assert result.details["health_status"] == "failed"
+
+
+# ---------- dhis2_chap_system_info legacy fallback ----------
+
+
+def test_chap_system_info_falls_back_to_legacy_path_for_old_chap_core() -> None:
+    """chap-core 1.1.x - 1.2.0 only expose `/system-info`; a 404 on `/system/info` retries it."""
+    seen: list[str] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen.append(request.url.path)
+        if request.url.path.endswith("/system-info"):
+            return httpx2.Response(200, json={"chap_core_version": "1.2.0", "python_version": "3.12.1"})
+        return httpx2.Response(404, content=b"")
+
+    client = _client(handler)
+    result = asyncio.run(Dhis2ChapSystemInfoCheck().run(client, _ctx()))
+    assert result.status is Status.OK
+    assert "chap-core 1.2.0" in result.message
+    assert seen == ["/api/routes/chap/run/system/info", "/api/routes/chap/run/system-info"]
+
+
+def test_chap_system_info_does_not_try_legacy_path_on_success() -> None:
+    """A healthy current chap-core is asked once; `auth_required` is surfaced in details."""
+    seen: list[str] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen.append(request.url.path)
+        return httpx2.Response(200, json={"chap_core_version": "2.7.0", "auth_required": True})
+
+    client = _client(handler)
+    result = asyncio.run(Dhis2ChapSystemInfoCheck().run(client, _ctx()))
+    assert result.status is Status.OK
+    assert result.details["auth_required"] is True
+    assert seen == ["/api/routes/chap/run/system/info"]
