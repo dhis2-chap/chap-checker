@@ -8,7 +8,7 @@ the client its checks expect:
   :class:`dhis2w_client.Dhis2Client`. Checks call
   ``client.get_response(...)`` exactly like every other dhis2w-client
   consumer.
-- :class:`OcsTarget` (``kind = "ocs"``) opens a plain ``httpx2.AsyncClient``
+- :class:`OgsTarget` (``kind = "ogs"``) opens a plain ``httpx2.AsyncClient``
   rooted at an Open Geo Service deployment. OGS has no auth, so the
   client carries no credentials.
 """
@@ -21,10 +21,10 @@ import httpx2
 from dhis2w_client import AuthProvider, BasicAuth, Dhis2, Dhis2Client, PatAuth, RetryPolicy
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
-TargetKind = Literal["dhis2", "ocs"]
+TargetKind = Literal["dhis2", "ogs"]
 
 # Human-readable platform label per kind, shown on dashboard tiles.
-PLATFORM_LABELS: dict[str, str] = {"dhis2": "DHIS2", "ocs": "OGS"}
+PLATFORM_LABELS: dict[str, str] = {"dhis2": "DHIS2", "ogs": "OGS"}
 
 
 class BaseTarget(BaseModel):
@@ -48,14 +48,14 @@ class BaseTarget(BaseModel):
         raise NotImplementedError
 
 
-class OcsTarget(BaseTarget):
+class OgsTarget(BaseTarget):
     """An Open Geo Service (openEO backend) deployment under test.
 
     OGS exposes its API without authentication, so there are no
     credential fields. Retries are not supported for this kind yet.
     """
 
-    kind: ClassVar[TargetKind] = "ocs"
+    kind: ClassVar[TargetKind] = "ogs"
 
     def open(self) -> httpx2.AsyncClient:
         """Return an ``httpx2.AsyncClient`` rooted at the deployment; use as ``async with``."""

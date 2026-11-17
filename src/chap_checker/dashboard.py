@@ -436,11 +436,11 @@ class CheckRow(Horizontal):
         self.check_status = status
 
     def compose(self) -> ComposeResult:
-        # Strip the leading `dhis2_` / `ocs_` namespace; keep `chap_` so
+        # Strip the leading `dhis2_` / `ogs_` namespace; keep `chap_` so
         # chap-specific checks remain distinguishable from their DHIS2
         # counterparts in the condensed display (e.g. dhis2_ping -> ping,
-        # dhis2_chap_ping -> chap_ping, ocs_health -> health).
-        short = self.check_name.removeprefix("dhis2_").removeprefix("ocs_")
+        # dhis2_chap_ping -> chap_ping, ogs_health -> health).
+        short = self.check_name.removeprefix("dhis2_").removeprefix("ogs_")
         symbol = _SYMBOL_BY_STATUS.get(self.check_status, "?")
         color = _ACCENT if self.check_status is Status.OK else _color_for(self.check_status)
         yield Static(short, classes="check-name")

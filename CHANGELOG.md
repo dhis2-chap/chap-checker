@@ -8,7 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Changed
 
-- **Open Climate Service is now Open Geo Service** in help text, check messages, docs and the dashboard tile label (`OGS 0.1.0` instead of `OCS 0.1.0`), following the upstream rename. `kind = "ocs"` and the `ocs_health` / `ocs_info` check names are unchanged, so configs and state files need no edits.
+- **Open Climate Service is now Open Geo Service, identifiers included** (**breaking**). `kind = "ocs"` is now `kind = "ogs"`, and the `ocs_health` / `ocs_info` checks are `ogs_health` / `ogs_info`. The old names are rejected at config load and by `--check`, so update `[instances.<key>]` blocks and any `checks = [...]` lists. State-file entries for the old check names are no longer matched, so an Open Geo Service outage that spans the upgrade gets no recovery message. Help text, check messages, docs and the dashboard tile label (`OGS 0.1.0`) use the new name too.
 
 ## [0.11.0] — 2026-11-17
 

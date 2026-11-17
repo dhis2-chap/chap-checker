@@ -16,12 +16,12 @@ Four namespaces:
 - `dhis2_*` — probes against DHIS2 itself (`kind = "dhis2"`).
 - `dhis2_chap_*` — probes against the `chap-core` service behind the DHIS2
   `chap` route (`kind = "dhis2"`).
-- `ocs_*` — probes against an Open Geo Service deployment
-  (`kind = "ocs"`).
+- `ogs_*` — probes against an Open Geo Service deployment
+  (`kind = "ogs"`).
 
 | Check                       | Kinds        | Endpoint                                              | Requires             |
 | --------------------------- | ------------ | ----------------------------------------------------- | -------------------- |
-| `http_2xx`                  | dhis2, ocs   | `GET <base_url>` (unauthenticated, follows redirects) | —                    |
+| `http_2xx`                  | dhis2, ogs   | `GET <base_url>` (unauthenticated, follows redirects) | —                    |
 | `dhis2_ping`                | dhis2        | `/api/me`                                             | —                    |
 | `dhis2_system_info`         | dhis2        | `/api/system/info`                                    | `dhis2_ping`         |
 | `dhis2_chap_route`          | dhis2        | `/api/routes?filter=code:eq:chap`                     | `dhis2_ping`         |
@@ -29,17 +29,17 @@ Four namespaces:
 | `dhis2_chap_system_info`    | dhis2        | `/api/routes/chap/run/system/info` (parsed)           | `dhis2_chap_ping`    |
 | `dhis2_chap_modeling_app`   | dhis2        | `/api/apps` (matched by `app_hub_id`)                 | `dhis2_chap_route`   |
 | `dhis2_chap_climate_app`    | dhis2        | `/api/apps` (matched by `app_hub_id`)                 | `dhis2_chap_route`   |
-| `ocs_health`                | ocs          | `/health`                                             | —                    |
-| `ocs_info`                  | ocs          | `/info` + `/` (openEO capabilities)                   | `ocs_health`         |
+| `ogs_health`                | ogs          | `/health`                                             | —                    |
+| `ogs_info`                  | ogs          | `/info` + `/` (openEO capabilities)                   | `ogs_health`         |
 
 ### Open Geo Service checks
 
-- **`ocs_health`** is a liveness signal only. OGS's `/health` reports that the
+- **`ogs_health`** is a liveness signal only. OGS's `/health` reports that the
   API process is up; it does not probe storage, the job service or the
   scheduler. `degraded` maps to `WARN`, anything other than `healthy` to
   `FAIL`, and a 404 is reported as "does not look like an Open Climate
   Service" (a common sign of a wrong URL).
-- **`ocs_info`** reads the service version from `/info` (`app_version`) and the
+- **`ogs_info`** reads the service version from `/info` (`app_version`) and the
   openEO capabilities document from `/` (`api_version`, backend `id`). The
   version feeds the dashboard tile label (`OGS 0.1.0`), and `read_only` is
   reported in the message because public demo deployments run read-only on

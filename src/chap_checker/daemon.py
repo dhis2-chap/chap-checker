@@ -53,8 +53,8 @@ def worst(statuses: list[Status]) -> Status:
 # Per instance kind: which check's `details["version"]` feeds the tile's
 # version label, and which check counts as the "ping" behind the tile's
 # ping line and uptime percentage.
-VERSION_CHECK: dict[str, str] = {"dhis2": "dhis2_system_info", "ocs": "ocs_info"}
-PING_CHECK: dict[str, str] = {"dhis2": "dhis2_ping", "ocs": "ocs_health"}
+VERSION_CHECK: dict[str, str] = {"dhis2": "dhis2_system_info", "ogs": "ogs_info"}
+PING_CHECK: dict[str, str] = {"dhis2": "dhis2_ping", "ogs": "ogs_health"}
 
 
 def extract_version(results: list[CheckResult], kind: str = "dhis2") -> str | None:
@@ -413,7 +413,7 @@ class DashboardServer(BaseModel):
             last_refresh=t.last_refresh,
             checks=[
                 CheckRowModel(
-                    name=r.name.removeprefix("dhis2_").removeprefix("ocs_"),
+                    name=r.name.removeprefix("dhis2_").removeprefix("ogs_"),
                     status=r.status,
                     symbol=_STATUS_SYMBOL.get(r.status, "?"),
                     message=r.message,

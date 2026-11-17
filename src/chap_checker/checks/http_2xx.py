@@ -36,7 +36,7 @@ class Http2xxCheck:
     )
     order: ClassVar[int] = 5
     requires: ClassVar[list[str]] = []
-    kinds: ClassVar[frozenset[str]] = frozenset({"dhis2", "ocs"})
+    kinds: ClassVar[frozenset[str]] = frozenset({"dhis2", "ogs"})
 
     async def run(self, client: Any, ctx: CheckContext) -> CheckResult:  # noqa: ARG002 - probe is unauthenticated, builds its own client
         url = str(ctx.target.base_url)

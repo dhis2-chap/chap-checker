@@ -130,12 +130,12 @@ def test_diagnose_status_other_4xx_5xx_carries_status_in_details() -> None:
     assert details == {"http_status": 503, "path": "/api/system/info"}
 
 
-def test_builtin_ocs_checks_run_in_dependency_order() -> None:
-    names = [c.name for c in resolve_checks(None, kind="ocs")]
-    assert names == ["http_2xx", "ocs_health", "ocs_info"]
+def test_builtin_ogs_checks_run_in_dependency_order() -> None:
+    names = [c.name for c in resolve_checks(None, kind="ogs")]
+    assert names == ["http_2xx", "ogs_health", "ogs_info"]
 
 
 def test_every_builtin_check_declares_a_known_kind() -> None:
     for check in all_checks():
-        assert check_kinds(check) <= {"dhis2", "ocs"}, check.name
+        assert check_kinds(check) <= {"dhis2", "ogs"}, check.name
         assert check_kinds(check), check.name

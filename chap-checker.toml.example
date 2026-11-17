@@ -44,11 +44,11 @@ url = "https://dhis2.example.net"
 token_env = "EXAMPLE_DHIS2_TOKEN"
 
 # Open Geo Service (openEO backend) deployment. `kind` defaults to
-# "dhis2"; set it to "ocs" for OGS servers. OGS has no auth, so there are
+# "dhis2"; set it to "ogs" for OGS servers. OGS has no auth, so there are
 # no credential fields (setting one is a validation error), the top-level
-# [retry] block does not apply, and only the http_2xx / ocs_* checks run.
-[instances.nepal-ocs]
-kind = "ocs"
+# [retry] block does not apply, and only the http_2xx / ogs_* checks run.
+[instances.nepal-ogs]
+kind = "ogs"
 name = "Nepal climate service"
 url = "https://ocs-demo-nepal.dhis2.org"
 

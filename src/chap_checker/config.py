@@ -24,7 +24,7 @@ from pydantic import (
 )
 
 from chap_checker.checks.base import Status
-from chap_checker.client import BaseTarget, Dhis2Target, OcsTarget
+from chap_checker.client import BaseTarget, Dhis2Target, OgsTarget
 from chap_checker.logging import get_logger
 
 if TYPE_CHECKING:
@@ -283,19 +283,19 @@ class Dhis2InstanceConfig(BaseInstanceConfig):
         )
 
 
-class OcsInstanceConfig(BaseInstanceConfig):
-    """One Open Geo Service deployment to check (``kind = "ocs"``).
+class OgsInstanceConfig(BaseInstanceConfig):
+    """One Open Geo Service deployment to check (``kind = "ogs"``).
 
     OGS has no authentication, so there are no credential fields; setting
     one is a validation error. The top-level ``[retry]`` block does not
     apply to this kind.
     """
 
-    kind: Literal["ocs"]
+    kind: Literal["ogs"]
 
-    def to_target(self, *, default_retry_policy: RetryPolicy | None = None) -> OcsTarget:  # noqa: ARG002
-        """Build a runtime :class:`OcsTarget` from this entry."""
-        return OcsTarget(base_url=self.url, timeout_s=self.timeout_s, verify_tls=self.verify_tls)
+    def to_target(self, *, default_retry_policy: RetryPolicy | None = None) -> OgsTarget:  # noqa: ARG002
+        """Build a runtime :class:`OgsTarget` from this entry."""
+        return OgsTarget(base_url=self.url, timeout_s=self.timeout_s, verify_tls=self.verify_tls)
 
 
 def _instance_kind(value: Any) -> str:
@@ -306,7 +306,7 @@ def _instance_kind(value: Any) -> str:
 
 
 InstanceConfig = Annotated[
-    Annotated[Dhis2InstanceConfig, Tag("dhis2")] | Annotated[OcsInstanceConfig, Tag("ocs")],
+    Annotated[Dhis2InstanceConfig, Tag("dhis2")] | Annotated[OgsInstanceConfig, Tag("ogs")],
     Discriminator(_instance_kind),
 ]
 """Any ``[instances.<key>]`` block. ``kind`` picks the variant; omitted means ``"dhis2"``."""

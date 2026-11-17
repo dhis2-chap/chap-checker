@@ -21,7 +21,7 @@ _CAPABILITIES_PATH = "/"
 
 
 @register_check
-class OcsInfoCheck:
+class OgsInfoCheck:
     """Read the OGS version from ``/info`` and the openEO capabilities from ``/``.
 
     ``details["version"]`` carries the service version; the dashboard shows
@@ -30,11 +30,11 @@ class OcsInfoCheck:
     read-only on purpose.
     """
 
-    name: ClassVar[str] = "ocs_info"
+    name: ClassVar[str] = "ogs_info"
     description: ClassVar[str] = "Open Geo Service /info and openEO capabilities readable."
     order: ClassVar[int] = 20
-    requires: ClassVar[list[str]] = ["ocs_health"]
-    kinds: ClassVar[frozenset[str]] = frozenset({"ocs"})
+    requires: ClassVar[list[str]] = ["ogs_health"]
+    kinds: ClassVar[frozenset[str]] = frozenset({"ogs"})
 
     async def run(self, client: httpx2.AsyncClient, ctx: CheckContext) -> CheckResult:  # noqa: ARG002
         start = time.perf_counter()
