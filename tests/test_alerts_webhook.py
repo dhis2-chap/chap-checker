@@ -94,7 +94,7 @@ def test_empty_transitions_is_noop() -> None:
 
 
 def test_5xx_raises_so_dispatcher_skips_state_save() -> None:
-    """The dispatcher relies on the alerter raising on >=400 to skip the state save and retry next run."""
+    """The dispatcher relies on the alerter raising on non-2xx to skip the state save and retry next run."""
 
     def handler(_: httpx.Request) -> httpx.Response:
         return httpx.Response(503, text="overloaded")
@@ -115,6 +115,31 @@ def test_4xx_also_raises() -> None:
     )
     with pytest.raises(RuntimeError, match="401"):
         asyncio.run(alerter.notify([_failure()]))
+
+
+@pytest.mark.parametrize("status_code", [301, 302, 303, 307, 308])
+def test_3xx_redirect_raises(status_code: int) -> None:
+    """httpx doesn't follow redirects, so a 3xx means the alert never arrived."""
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        return httpx.Response(status_code, headers={"Location": "https://hook.example/moved"})
+
+    alerter = WebhookAlerter(url="https://hook.example", transport=httpx.MockTransport(handler))
+    with pytest.raises(RuntimeError, match=rf"{status_code}.*redirect not followed.*hook\.example/moved"):
+        asyncio.run(alerter.notify([_failure()]))
+    # Exactly one POST: the redirect is reported, not followed.
+    assert seen == ["https://hook.example"]
+
+
+@pytest.mark.parametrize("status_code", [200, 201, 202, 204])
+def test_any_2xx_is_delivered(status_code: int) -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(status_code)
+
+    alerter = WebhookAlerter(url="https://hook.example", transport=httpx.MockTransport(handler))
+    asyncio.run(alerter.notify([_failure()]))  # does not raise
 
 
 def test_subclass_overrides_payload_shape() -> None:

@@ -66,7 +66,8 @@ class SlackAlerter(WebhookAlerter):
     """POST a Block Kit message to a Slack Incoming Webhook URL.
 
     Behaviour identical to a generic `WebhookAlerter` for the transport
-    half (POST, timeout, raise on >=400) - this subclass only customises
+    half (POST, timeout, raise on any non-2xx response, including an
+    unfollowed 3xx redirect) - this subclass only customises
     the payload shape to use Slack Block Kit + colored attachments.
     """
 

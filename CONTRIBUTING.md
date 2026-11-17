@@ -48,7 +48,7 @@ src/chap_checker/
 ├── config.py              # TOML loader; CheckerConfig, InstanceConfig, *AlertConfig
 ├── runner.py              # parallel run_targets, RunReport, VerifyReport, TargetEntry
 ├── output.py              # Rich table + JSON renderers
-├── state_store.py         # state file load/save + compute_transitions
+├── state_store.py         # state file load/save + per-alerter transitions
 ├── daemon.py              # DashboardServer (refresh loop + per-tile trackers + DashboardState)
 ├── dashboard.py           # Textual TUI; embeds DashboardServer locally, httpx-polls in --connect mode
 ├── serve.py               # FastAPI app exposing the daemon's /api/state + browser bundle (chap-checker serve)

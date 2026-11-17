@@ -274,3 +274,113 @@ def test_slack_config_parses_notify_on_strings() -> None:
     )
     assert Status.FAIL in cfg.notify_on
     assert Status.WARN not in cfg.notify_on
+
+
+class _FakeSlack(_FakeAlerter):
+    name: ClassVar[str] = "slack"
+
+
+class _FakeWebhook(_FakeAlerter):
+    name: ClassVar[str] = "webhook"
+
+
+def _report_with(status: Status) -> RunReport:
+    return RunReport(
+        target_name="prod",
+        target_url="https://prod.example",
+        results=[CheckResult(name="ping", status=status, message=status.value, duration_ms=1.0)],
+    )
+
+
+def test_two_receivers_with_different_filters_are_tracked_independently(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Slack on warn/fail/error and a webhook on fail only, through the real dispatcher.
+
+    OK -> WARN -> FAIL -> OK: Slack gets failure (WARN) + recovery; the
+    webhook gets failure (FAIL) + recovery. Before the per-receiver ledger
+    the webhook never heard about the FAIL but still got the recovery.
+    """
+    slack = _FakeSlack()
+    webhook = _FakeWebhook()
+    monkeypatch.setattr(
+        "chap_checker.cli._build_alerters",
+        lambda _cfg: [
+            _binding(slack, Status.FAIL, Status.ERROR, Status.WARN),
+            _binding(webhook, Status.FAIL),
+        ],
+    )
+    state_path = tmp_path / "state.json"
+    targets = _targets(alerts=["slack", "webhook"])
+
+    for status in (Status.OK, Status.WARN, Status.FAIL, Status.OK):
+        _dispatch_alerts([_report_with(status)], targets, _alerts_cfg(), state_path)
+
+    assert [[(t.kind, t.current_status) for t in call] for call in slack.calls] == [
+        [("failure", Status.WARN)],
+        [("recovery", Status.OK)],
+    ]
+    assert [[(t.kind, t.previous_status, t.current_status) for t in call] for call in webhook.calls] == [
+        [("failure", Status.WARN, Status.FAIL)],
+        [("recovery", Status.FAIL, Status.OK)],
+    ]
+
+
+def test_webhook_redirect_is_a_delivery_failure_and_state_is_not_advanced(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A 3xx from the receiver must not be counted as delivered.
+
+    The state file stays as it was so the next run retries; once the
+    receiver answers 2xx the failure is delivered and recorded.
+    """
+    import httpx2
+
+    from chap_checker.alerts.webhook import WebhookAlerter
+
+    responses = [302, 200]
+    posts: list[int] = []
+
+    def handler(_: httpx2.Request) -> httpx2.Response:
+        code = responses[len(posts)]
+        posts.append(code)
+        return httpx2.Response(code, headers={"Location": "https://hook.example/moved"})
+
+    alerter = WebhookAlerter(url="https://hook.example", transport=httpx2.MockTransport(handler))
+    monkeypatch.setattr("chap_checker.cli._build_alerters", lambda _cfg: [_binding(alerter, Status.FAIL)])
+
+    state_path = tmp_path / "state.json"
+    save_state(
+        state_path,
+        StateFile(states={"prod::ping": CheckState(status=Status.OK, since=datetime.now(UTC))}, receivers={}),
+    )
+    before = state_path.read_bytes()
+    targets = _targets(alerts=["webhook"])
+
+    _dispatch_alerts([_failing_report()], targets, _alerts_cfg(), state_path)
+    assert posts == [302]
+    assert state_path.read_bytes() == before  # not advanced
+
+    _dispatch_alerts([_failing_report()], targets, _alerts_cfg(), state_path)
+    assert posts == [302, 200]  # retried
+    saved = load_state(state_path)
+    assert saved.states["prod::ping"].status is Status.FAIL
+    assert saved.receivers is not None
+    assert "prod::ping" in saved.receivers["webhook"]
+
+
+def test_unicode_corrupt_state_file_does_not_abort_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    fake = _FakeAlerter()
+    monkeypatch.setattr("chap_checker.cli._build_alerters", lambda _cfg: [_binding(fake, Status.FAIL)])
+    state_path = tmp_path / "state.json"
+    state_path.write_bytes(b"\xff\xfe\x00garbage\x80")
+
+    _dispatch_alerts([_failing_report()], _targets(), _alerts_cfg(), state_path)
+
+    assert [t.kind for call in fake.calls for t in call] == ["failure"]
+    assert load_state(state_path).states["prod::ping"].status is Status.FAIL
