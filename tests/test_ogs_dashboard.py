@@ -12,7 +12,7 @@ from chap_checker.runner import RunReport, TargetEntry
 _CFG = CheckerConfig.model_validate(
     {
         "instances": {
-            "nepal": {"kind": "ocs", "url": "https://ocs.example", "name": "Nepal"},
+            "nepal": {"kind": "ogs", "url": "https://ogs.example", "name": "Nepal"},
             "play": {"url": "https://play.example", "username": "u", "password": "p"},
         }
     }
@@ -32,14 +32,14 @@ def _reports(health: Status) -> list[RunReport]:
     return [
         RunReport(
             target_name="nepal",
-            target_kind="ocs",
-            target_url="https://ocs.example",
+            target_kind="ogs",
+            target_url="https://ogs.example",
             results=[
                 _ok("http_2xx"),
-                CheckResult(name="ocs_health", status=health, message="", duration_ms=10.0),
-                _ok("ocs_info", version="0.1.0")
+                CheckResult(name="ogs_health", status=health, message="", duration_ms=10.0),
+                _ok("ogs_info", version="0.1.0")
                 if health is Status.OK
-                else CheckResult(name="ocs_info", status=Status.SKIPPED, message="Skipped"),
+                else CheckResult(name="ogs_info", status=Status.SKIPPED, message="Skipped"),
             ],
         ),
         RunReport(
@@ -59,7 +59,7 @@ async def _refresh(server: DashboardServer, monkeypatch: pytest.MonkeyPatch, hea
 
 
 @pytest.mark.asyncio
-async def test_ocs_tile_uses_ocs_platform_version_and_ping(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_ogs_tile_uses_ogs_platform_version_and_ping(monkeypatch: pytest.MonkeyPatch) -> None:
     server = _server()
     await _refresh(server, monkeypatch, Status.OK)
     await _refresh(server, monkeypatch, Status.FAIL)
@@ -70,7 +70,7 @@ async def test_ocs_tile_uses_ocs_platform_version_and_ping(monkeypatch: pytest.M
     assert nepal.display_name == "Nepal"
     assert (nepal.ping_ok, nepal.ping_total) == (1, 2)
     assert nepal.uptime_pct == 50.0
-    # Last refresh had ocs_info SKIPPED, so no version is reported.
+    # Last refresh had ogs_info SKIPPED, so no version is reported.
     assert nepal.version is None
     assert [c.name for c in nepal.checks] == ["http_2xx", "health", "info"]
 
@@ -81,7 +81,7 @@ async def test_ocs_tile_uses_ocs_platform_version_and_ping(monkeypatch: pytest.M
 
 
 @pytest.mark.asyncio
-async def test_ocs_tile_version_from_ocs_info(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_ogs_tile_version_from_ogs_info(monkeypatch: pytest.MonkeyPatch) -> None:
     server = _server()
     await _refresh(server, monkeypatch, Status.OK)
     nepal = next(t for t in server.snapshot().tiles if t.name == "nepal")

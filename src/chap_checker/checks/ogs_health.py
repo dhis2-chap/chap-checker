@@ -20,7 +20,7 @@ _PATH = "/health"
 
 
 @register_check
-class OcsHealthCheck:
+class OgsHealthCheck:
     """Verify that the OGS service answers ``/health`` with ``{"status": "healthy"}``.
 
     This is a liveness signal only: upstream ``/health`` reports the API
@@ -29,11 +29,11 @@ class OcsHealthCheck:
     starts reporting more as soon as OGS does.
     """
 
-    name: ClassVar[str] = "ocs_health"
+    name: ClassVar[str] = "ogs_health"
     description: ClassVar[str] = "Open Geo Service /health reports healthy (liveness only)."
     order: ClassVar[int] = 10
     requires: ClassVar[list[str]] = []
-    kinds: ClassVar[frozenset[str]] = frozenset({"ocs"})
+    kinds: ClassVar[frozenset[str]] = frozenset({"ogs"})
 
     async def run(self, client: httpx2.AsyncClient, ctx: CheckContext) -> CheckResult:  # noqa: ARG002
         start = time.perf_counter()

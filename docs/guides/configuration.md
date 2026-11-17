@@ -98,16 +98,15 @@ before kinds existed keep working unchanged.
 | `kind`    | Server                                                                                   | Auth                                        | Checks                    |
 | --------- | ---------------------------------------------------------------------------------------- | ------------------------------------------- | ------------------------- |
 | `"dhis2"` | DHIS2 (optionally with the chap-core integration)                                         | required: password or token (see above)     | `http_2xx`, `dhis2_*`     |
-| `"ocs"`   | [Open Geo Service](https://github.com/dhis2/open-geo-service) (openEO backend)           | none                                        | `http_2xx`, `ocs_*`       |
+| `"ogs"`   | [Open Geo Service](https://github.com/dhis2/open-geo-service) (openEO backend)           | none                                        | `http_2xx`, `ogs_*`       |
 
-Open Geo Service was called Open Climate Service (OCS) until late 2026. The
-`kind` value and the `ocs_*` check names keep the old abbreviation so
-existing configs and state files keep working; only the displayed name
-changed.
+Open Geo Service was called Open Climate Service (OCS) until late 2026.
+chap-checker 0.11.x and earlier used `kind = "ocs"` and `ocs_health` /
+`ocs_info`; those names are no longer accepted (see the 0.12.0 changelog).
 
 ```toml
-[instances.nepal-ocs]
-kind = "ocs"
+[instances.nepal-ogs]
+kind = "ogs"
 name = "Nepal climate service"
 url = "https://ocs-demo-nepal.dhis2.org"
 alerts = ["slack"]

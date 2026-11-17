@@ -13,8 +13,8 @@ from chap_checker.checks import (
     dhis2_ping,
     dhis2_system_info,
     http_2xx,
-    ocs_health,
-    ocs_info,
+    ogs_health,
+    ogs_info,
 )
 from chap_checker.checks.base import (
     Check,
@@ -40,8 +40,8 @@ __all__ = [
     "dhis2_ping",
     "dhis2_system_info",
     "http_2xx",
-    "ocs_health",
-    "ocs_info",
+    "ogs_health",
+    "ogs_info",
     "register_check",
     "resolve_checks",
 ]

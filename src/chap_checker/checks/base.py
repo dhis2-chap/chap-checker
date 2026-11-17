@@ -149,7 +149,7 @@ class CheckContext(BaseModel):
     contents as a snapshot at the moment `run()` was called.
 
     `target` is the :class:`~chap_checker.client.BaseTarget` subclass for
-    the instance's kind (`Dhis2Target` or `OcsTarget`). Every kind carries
+    the instance's kind (`Dhis2Target` or `OgsTarget`). Every kind carries
     `base_url`, `timeout_s` and `verify_tls`.
 
     Custom checks that don't need any of this can ignore the `ctx`

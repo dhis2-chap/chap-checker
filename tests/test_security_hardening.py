@@ -29,7 +29,7 @@ from chap_checker.config import (
     AuthConfig,
     CheckerConfig,
     Dhis2InstanceConfig,
-    OcsInstanceConfig,
+    OgsInstanceConfig,
     SlackAlertConfig,
     WebhookAlertConfig,
     format_config_error,
@@ -292,7 +292,7 @@ def test_instance_url_with_userinfo_rejected(url: str) -> None:
     with pytest.raises(ValidationError, match="credentials embedded in the URL"):
         Dhis2InstanceConfig.model_validate({"url": url, "username": "u", "password": "p"})
     with pytest.raises(ValidationError, match="credentials embedded in the URL"):
-        OcsInstanceConfig.model_validate({"url": url, "kind": "ocs"})
+        OgsInstanceConfig.model_validate({"url": url, "kind": "ogs"})
 
 
 def test_slack_webhook_url_with_userinfo_rejected() -> None:

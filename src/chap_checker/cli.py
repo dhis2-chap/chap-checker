@@ -163,10 +163,10 @@ checks = ["dhis2_ping", "dhis2_system_info"]
 # token_env = "MY_DHIS2_TOKEN"
 
 # Open Geo Service (openEO backend) deployment. `kind` defaults to
-# "dhis2"; set it to "ocs" for OGS servers. OGS has no auth, so there are
-# no credential fields, and only the http_2xx / ocs_* checks run.
-# [instances.nepal-ocs]
-# kind = "ocs"
+# "dhis2"; set it to "ogs" for OGS servers. OGS has no auth, so there are
+# no credential fields, and only the http_2xx / ogs_* checks run.
+# [instances.nepal-ogs]
+# kind = "ogs"
 # name = "Nepal climate service"
 # url = "https://ocs-demo-nepal.dhis2.org"
 
