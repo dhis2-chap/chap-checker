@@ -107,7 +107,7 @@
 
     // Probe /api/auth eagerly on mount. If the daemon requires a token
     // AND we don't have one stored, show the modal immediately - before
-    // the artifact's first paint with INSTANCES_BASE mock data flashes
+    // the artifact's "connecting" loading panel flashes
     // through. The same probe returns the configured `[ui].theme` so the
     // modal renders with the operator's colours instead of phosphor.
     // The polling hook drives subsequent re-prompts via the "needs-token"
@@ -175,8 +175,9 @@
     return (
       <div
         style={{
-          // Fully opaque overlay so the artifact's INSTANCES_BASE mock
-          // (rendered behind the modal while live data is still 401-blocked)
+          // Fully opaque overlay so the artifact's loading panel (or the
+          // last good snapshot, rendered behind the modal while live data
+          // is 401-blocked)
           // doesn't leak through. Inline colour - we don't touch :root so
           // the artifact owns its theme variables end-to-end.
           position: "fixed",

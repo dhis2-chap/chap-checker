@@ -18,12 +18,41 @@ and by default serves a browser dashboard at `/`. Both the [TUI in
 `--connect` mode](dashboard.md#connect-mode-cross-machine-consistency)
 and any browser pointed at this server consume the same snapshot.
 
-![chap-checker browser dashboard against two DHIS2 play servers and an Open Climate Service deployment](../assets/web-dashboard.png)
+![chap-checker browser dashboard against a DHIS2 play server, an Open Climate Service deployment and an unreachable instance](../assets/web-dashboard.png)
 
 The `dhis2` theme (light mode, DHIS2 blue strip) for embedding in a DHIS2
 operations setup:
 
 ![chap-checker browser dashboard, dhis2 theme](../assets/web-dashboard-dhis2.png)
+
+## Connection and freshness (browser)
+
+The browser polls `/api/state` every 8 seconds. A chip in the header
+says what the page can vouch for:
+
+| Chip           | Meaning                                                                                       |
+| -------------- | --------------------------------------------------------------------------------------------- |
+| `CONNECTING`   | No answer from the daemon yet. A loading panel is shown instead of tiles.                     |
+| `UNREACHABLE`  | The first request failed (no data yet). Retries every poll.                                   |
+| `LIVE`         | The last poll succeeded and the daemon's data is current.                                     |
+| `RECONNECTING` | The last poll failed. The last good snapshot stays on screen under an amber banner.           |
+| `DISCONNECTED` | No successful poll for `max(4 x poll, 30s)`. Tiles are dimmed and greyed out.                 |
+| `STALE`        | The daemon answers, but its last check run is older than `2 x --interval + 30s`. Tiles dimmed. |
+
+"last refresh" in the footer and "updated" on each tile come from the
+daemon's own timestamps (`last_refresh` in `/api/state`), not from the
+browser's poll timer, so they keep counting up while the daemon is
+unreachable. The footer adds "last contact" while polls are failing. The
+page recovers to `LIVE` on its own once polls succeed again; no reload is
+needed. A `401` still opens the login modal.
+
+![Browser dashboard after losing the daemon: red banner, dimmed tiles](../assets/web-dashboard-stale.png)
+
+![The same state in the dhis2 theme](../assets/web-dashboard-stale-dhis2.png)
+
+The tiles never show sample data. Demonstration tiles are only rendered
+in explicit demo mode (`/?demo=1`), which does not poll the daemon and
+labels the header `DEMO DATA`.
 
 ## Keys (browser)
 
@@ -282,7 +311,10 @@ behind strict CSP without any third-party trust dependency.
   with `--no-ui` for an API-only daemon.
 - `_state.js` exposes `window.CK_useLiveState(pollSec)` — a React hook
   that polls `/api/state`, maps the server schema to the artifact's
-  `INSTANCES_BASE` shape, and returns the latest snapshot.
+  `INSTANCES_BASE` shape, and returns the latest snapshot plus the
+  connection state — and `window.CK_freshness(state, now)`, which
+  derives the `LIVE` / `RECONNECTING` / `STALE` / ... state described
+  above.
 
 The browser does *not* drive the actual probes — they happen on the
 server on its own schedule. The browser is just a view.

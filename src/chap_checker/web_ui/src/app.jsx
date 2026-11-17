@@ -77,6 +77,9 @@ const DENSITY = {
 const STRIP_WIDTH = { default:'6px', comfy:'8px', tv:'12px', wall:'16px' };
 
 // demo data
+// CK-WIRING: only rendered in explicit demo mode (`?demo=1`, or the
+// designer preview where _state.js is not loaded). Real users get a
+// loading panel until the first /api/state response, never these.
 const INSTANCES_BASE = [
   { id:'play-43', name:'PLAY-43', platform:'DHIS2', version:'2.43.0',
     url:'https://play.im.dhis2.org/stable-2-43-0', status:'ok',
@@ -170,8 +173,9 @@ function formatClock(d) {
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
-function Header({ instances, alertsOn, refreshSec, clock, reload, reloadState, title }) {
+function Header({ instances, alertsOn, refreshSec, clock, reload, reloadState, title, fresh, demoMode }) {
   const downCount = instances.filter(i => i.status === 'down').length;
+  const hasData = demoMode || fresh.state === 'live' || fresh.state === 'reconnecting' || fresh.state === 'stale';
   // `--header-bg` / `--header-ink` are dhis2-theme-only; other themes
   // fall through to a transparent strip with the body's accent text
   // colour, matching the pre-existing dark-mode look.
@@ -188,16 +192,24 @@ function Header({ instances, alertsOn, refreshSec, clock, reload, reloadState, t
       <div style={{ display:'flex', alignItems:'center', gap:14 }}>
         <span style={{ color: brandColor, fontWeight:700 }}>{title}</span>
         <Sep />
-        <span style={{ color: metaColor, opacity: 0.85 }}>
-          <span style={{ color: downCount > 0 ? 'var(--red)' : brandColor }}>{instances.length}</span>{' '}
-          instance(s){downCount > 0 && <span style={{ color:'var(--red)' }}> · {downCount} DOWN</span>}
-        </span>
-        <Sep />
-        <span style={{ color: metaColor, opacity: 0.85 }}>
-          alerts <span style={{ color: alertsOn ? brandColor : metaColor }}>{alertsOn ? 'ON' : 'OFF'}</span>
-        </span>
-        <Sep />
-        <span style={{ color: metaColor, opacity: 0.85 }}>refresh every {refreshSec}s</span>
+        {hasData && (
+          <>
+            <span style={{ color: metaColor, opacity: 0.85 }}>
+              <span style={{ color: downCount > 0 ? 'var(--red)' : brandColor }}>{instances.length}</span>{' '}
+              instance(s){downCount > 0 && <span style={{ color:'var(--red)' }}> · {downCount} DOWN</span>}
+            </span>
+            <Sep />
+            <span style={{ color: metaColor, opacity: 0.85 }}>
+              alerts <span style={{ color: alertsOn ? brandColor : metaColor }}>{alertsOn ? 'ON' : 'OFF'}</span>
+            </span>
+            <Sep />
+            <span style={{ color: metaColor, opacity: 0.85 }}>refresh every {refreshSec}s</span>
+            <Sep />
+          </>
+        )}
+        {/* CK-WIRING: connection / freshness chip. Always visible so an
+            operator can tell live data from a frozen snapshot at a glance. */}
+        <FreshnessChip fresh={fresh} demoMode={demoMode} />
       </div>
       <div style={{ display:'flex', alignItems:'center', gap:14 }}>
         {/* CK-WIRING: when auth is enabled (a token sits in localStorage),
@@ -299,7 +311,110 @@ function Sep() {
   return <span style={{ color:'var(--green-vdim)' }}>|</span>;
 }
 
-function Footer({ lastRefresh, paletteOpen }) {
+// CK-WIRING: connection / data-freshness surfaces. `fresh` comes from
+// window.CK_freshness (_state.js); see its docstring for the rules.
+const FRESH_TONES = {
+  warn: { bg:'var(--amber)', fg:'var(--badge-warn-fg, #1a1000)', soft:'var(--amber-dim)', accent:'var(--amber)' },
+  down: { bg:'var(--red)',   fg:'var(--badge-down-fg, #1a0000)', soft:'var(--red-dim)',   accent:'var(--red)' },
+};
+
+function freshnessChipSpec(fresh, demoMode) {
+  if (demoMode) return { label:'DEMO DATA', tone:'warn', title:'Demonstration data (demo mode), not a live daemon' };
+  switch (fresh.state) {
+    case 'live':         return { label:'LIVE', tone:null, title:'Polling the daemon; data is current' };
+    case 'reconnecting': return { label:'RECONNECTING', tone:'warn', title:`Last poll failed (${fresh.error || 'error'})` };
+    case 'stale':        return fresh.reason === 'disconnected'
+      ? { label:'DISCONNECTED', tone:'down', title:`Cannot reach the daemon (${fresh.error || 'error'})` }
+      : { label:'STALE', tone:'warn', title:'The daemon has not completed a check run recently' };
+    case 'unreachable':  return { label:'UNREACHABLE', tone:'down', title:`Cannot reach the daemon (${fresh.error || 'error'})` };
+    default:             return { label:'CONNECTING', tone:null, title:'Waiting for the first response from the daemon' };
+  }
+}
+
+function FreshnessChip({ fresh, demoMode }) {
+  const spec = freshnessChipSpec(fresh, demoMode);
+  const tone = spec.tone ? FRESH_TONES[spec.tone] : null;
+  const ink = 'var(--header-ink, var(--green))';
+  return (
+    <span
+      data-ck-chip={demoMode ? 'demo' : fresh.state}
+      title={spec.title}
+      style={{
+        display:'inline-flex', alignItems:'center', gap:6,
+        padding:'1px 8px', borderRadius:2, fontWeight:700, letterSpacing:'0.06em',
+        fontSize:'var(--fs-badge)', lineHeight:1.4,
+        background: tone ? tone.bg : 'transparent',
+        color: tone ? tone.fg : ink,
+        border: tone ? `1px solid ${tone.bg}` : '1px solid var(--header-ink, var(--green-dim))',
+      }}
+    >
+      {!tone && fresh.state === 'live' && (
+        <span style={{ width:7, height:7, borderRadius:'50%', background: ink, display:'inline-block' }} />
+      )}
+      {spec.label}
+    </span>
+  );
+}
+
+function FreshnessBanner({ fresh }) {
+  if (fresh.state !== 'reconnecting' && fresh.state !== 'stale') return null;
+  const disconnected = fresh.state === 'reconnecting' || fresh.reason === 'disconnected';
+  const tone = FRESH_TONES[fresh.state === 'stale' && disconnected ? 'down' : 'warn'];
+  const err = fresh.error ? ` (${fresh.error})` : '';
+  const contact = fresh.sinceContactMs != null ? humanizeDuration(fresh.sinceContactMs) : null;
+  const age = fresh.dataAgeMs != null ? humanizeDuration(fresh.dataAgeMs) : null;
+  let title, body;
+  if (fresh.state === 'reconnecting') {
+    title = 'Connection to the daemon lost';
+    body = `Last poll failed${err}. Showing the last data received${contact ? ` ${contact} ago` : ''}; retrying every ${fresh.pollSec}s.`;
+  } else if (disconnected) {
+    title = 'Disconnected - data is stale';
+    body = `No answer from the daemon${contact ? ` for ${contact}` : ''}${err}. `
+      + `The statuses below are from ${age ? `${age} ago` : 'the last successful poll'} and may no longer be accurate; retrying every ${fresh.pollSec}s.`;
+  } else {
+    title = 'Data is stale';
+    body = `The daemon is reachable but has not completed a check run${age ? ` for ${age}` : ''}. The statuses below may no longer be accurate.`;
+  }
+  return (
+    <div role="alert" data-ck-banner={fresh.state} style={{
+      display:'flex', alignItems:'baseline', gap:12, flexShrink:0,
+      padding:'8px 18px',
+      background: tone.soft, color:'var(--ink, #fff)',
+      borderBottom:`1px solid ${tone.accent}`, borderLeft:`6px solid ${tone.accent}`,
+      fontSize:'var(--fs-base)',
+    }}>
+      <span style={{ color: tone.accent, fontWeight:700, letterSpacing:'0.04em', textTransform:'uppercase', whiteSpace:'nowrap' }}>{title}</span>
+      <span>{body}</span>
+    </div>
+  );
+}
+
+function LoadingPanel({ fresh, connection }) {
+  const unreachable = fresh.state === 'unreachable';
+  const headline = unreachable
+    ? 'Cannot reach the chap-checker daemon'
+    : connection === 'auth'
+      ? 'Waiting for sign-in'
+      : 'Connecting to the chap-checker daemon';
+  const detail = unreachable
+    ? `${fresh.error || 'error'} · retrying every ${fresh.pollSec}s`
+    : 'No instance data yet - statuses appear after the first response.';
+  return (
+    <div data-ck-loading={fresh.state} style={{
+      flex:1, minHeight:0, display:'flex', flexDirection:'column',
+      alignItems:'center', justifyContent:'center', gap:12,
+      color:'var(--ink, var(--green))', textAlign:'center', padding:24,
+    }}>
+      <div style={{ fontSize:'var(--fs-title)', fontWeight:700, letterSpacing:'0.04em', color: unreachable ? 'var(--red)' : 'var(--ink, var(--green))' }}>
+        {headline}
+        {!unreachable && <span style={{ animation:'blink 1s step-end infinite', marginLeft:4 }}>_</span>}
+      </div>
+      <div style={{ color:'var(--ink-dim)', fontSize:'var(--fs-base)' }}>{detail}</div>
+    </div>
+  );
+}
+
+function Footer({ lastRefresh, lastContact, paletteOpen }) {
   // Footer mirrors the Header's `--header-bg`/`--header-ink` chain so on
   // dhis2 the chrome brackets the content with two matching blue
   // strips. Dark themes leave the vars unset and fall through to the
@@ -314,7 +429,10 @@ function Footer({ lastRefresh, paletteOpen }) {
       background: bg, color: ink,
       fontSize:'var(--fs-foot)', flexShrink:0,
     }}>
-      <span>last refresh <span style={{ color: accent }}>{lastRefresh}</span></span>
+      <span>
+        last refresh <span style={{ color: accent }}>{lastRefresh}</span>
+        {lastContact && <> · last contact <span style={{ color: accent }}>{lastContact}</span></>}
+      </span>
       <span style={{ display:'flex', gap:14 }}>
         <span><Kbd>r</Kbd> refresh</span>
         <span>·</span>
@@ -331,7 +449,9 @@ function Kbd({ children }) {
 function App() {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
   const [now, setNow] = React.useState(new Date());
-  const [lastRefreshAt, setLastRefreshAt] = React.useState(Date.now());
+  // CK-WIRING: demo-mode-only clock for the mock cards' "updated" field.
+  // Live mode derives freshness from server timestamps instead.
+  const [demoRefreshAt, setDemoRefreshAt] = React.useState(Date.now());
   const [paletteOpen, setPaletteOpen] = React.useState(false);
   const [refreshTick, setRefreshTick] = React.useState(0);
   const [reloadState, setReloadState] = React.useState({ status: 'idle', message: '' });
@@ -366,16 +486,25 @@ function App() {
   }, []);
   const refreshSec = 8;
 
-  // CK-WIRING: live data from FastAPI's /api/state. Hook is provided by
-  // web-ui/_state.js (loaded before this file) and is null'd before the
-  // first response arrives so the mock INSTANCES_BASE below is used for
-  // the initial paint. Replace this single block on next design-zip drop.
-  const live = (typeof window !== 'undefined' && typeof window.CK_useLiveState === 'function')
-    ? window.CK_useLiveState(refreshSec)
-    : null;
+  // CK-WIRING: live data from FastAPI's /api/state. The hook is provided
+  // by web_ui/_state.js (loaded before this file). It never yields mock
+  // data: until the first response `live.instances` is null and a loading
+  // panel renders. The mock INSTANCES_BASE is only used in explicit demo
+  // mode - `?demo=1` in the URL, or the designer preview where _state.js
+  // isn't loaded at all. Both conditions are fixed for the page's
+  // lifetime, so the hook call below is stable across renders.
+  const hasLiveHook = typeof window !== 'undefined' && typeof window.CK_useLiveState === 'function';
+  const demoMode = !hasLiveHook
+    || (typeof window !== 'undefined' && /^(1|true|yes)?$/i.test(new URLSearchParams(window.location.search).get('demo') ?? 'no'));
+  const live = hasLiveHook ? window.CK_useLiveState(refreshSec, { enabled: !demoMode }) : null;
+  const hasData = demoMode || !!(live && live.instances);
+  const fresh = (!demoMode && typeof window.CK_freshness === 'function')
+    ? window.CK_freshness(live, now.getTime())
+    : { state: 'live', stale: false, pollSec: refreshSec };
+  // Exposed for scripts/capture_browser.py (waits on it per scenario).
   React.useEffect(() => {
-    if (live && live.lastRefreshAt) setLastRefreshAt(live.lastRefreshAt);
-  }, [live && live.lastRefreshAt]);
+    document.documentElement.dataset.ckFreshness = demoMode ? 'demo' : fresh.state;
+  }, [demoMode, fresh.state]);
 
   // apply theme/density vars when tweaks change. After the first
   // post-bootstrap paint, set `window.CK_THEME_BOOTSTRAPPED` so the
@@ -424,34 +553,45 @@ function App() {
     const id = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(id);
   }, []);
+  // CK-WIRING: the artifact's fake "auto refresh" tick reset the
+  // last-refresh clock every 8s whether or not anything was fetched, so a
+  // dead daemon still looked fresh. It now only drives demo mode; live
+  // freshness comes from server timestamps (see `fresh` above).
   React.useEffect(() => {
+    if (!demoMode) return undefined;
     const id = setInterval(() => {
-      setLastRefreshAt(Date.now());
+      setDemoRefreshAt(Date.now());
       setRefreshTick(x => x+1);
     }, refreshSec * 1000);
     return () => clearInterval(id);
-  }, [refreshSec]);
+  }, [refreshSec, demoMode]);
 
-  // derive last refresh string
-  const lastRefresh = useLastRefreshString(lastRefreshAt, now);
+  // derive last refresh / last contact strings
+  const nowMs = now.getTime();
+  const lastRefresh = demoMode
+    ? humanizeSince(demoRefreshAt, nowMs)
+    : (live && live.serverLastRefreshAt != null)
+      ? humanizeSince(live.serverLastRefreshAt, nowMs)
+      : hasData ? 'pending (no check run yet)' : '—';
+  const lastContact = (!demoMode && live && live.connection === 'error' && live.lastSuccessAt != null)
+    ? humanizeSince(live.lastSuccessAt, nowMs)
+    : null;
 
   // build instances: apply demoDown to PLAY-41
   const instances = React.useMemo(() => {
-    // CK-WIRING: prefer live data; fall back to mock INSTANCES_BASE
-    // until the first /api/state response lands.
-    const base = (live && live.instances) ? live.instances : INSTANCES_BASE;
+    // CK-WIRING: live data only; the mock INSTANCES_BASE is for explicit
+    // demo mode. No data yet -> empty list (the loading panel renders).
+    const base = demoMode ? INSTANCES_BASE : ((live && live.instances) || []);
     return base.map(i => {
-      const downNow = t.demoDown && i.id === 'play-41';
-      // CK-WIRING: prefer real per-refresh ping history coming from the
-      // server. The artifact ships buildHistory() as a deterministic
-      // mulberry32 generator with a fake 3% hiccup chance per sample,
-      // which is fine for design previews but renders bogus red bars
-      // for instances that have actually been up. Fall back to the
-      // generator only when the server hasn't yet accumulated history
-      // (first /api/state response).
-      const history = (Array.isArray(i.history) && i.history.length > 0)
-        ? i.history
-        : buildHistory(i, downNow);
+      const downNow = demoMode && t.demoDown && i.id === 'play-41';
+      // CK-WIRING: live cards show the server's real per-refresh history
+      // (empty slots until it accumulates). The artifact's buildHistory()
+      // mulberry32 generator with its fake 3% hiccups is demo-only.
+      const history = !demoMode
+        ? (Array.isArray(i.history) ? i.history : [])
+        : (Array.isArray(i.history) && i.history.length > 0)
+          ? i.history
+          : buildHistory(i, downNow);
       if (downNow) {
         return {
           ...i,
@@ -464,19 +604,27 @@ function App() {
         };
       }
       // randomize latency slightly per refresh for realism (mock-data path only)
-      const jitter = live
+      const jitter = !demoMode
         ? 0
         : ((refreshTick * 17 + i.id.charCodeAt(5)) % 30) - 10;
-      return { ...i, latency: i.latency + jitter, updated: humanizeSince(lastRefreshAt, now), history };
+      // CK-WIRING: "updated" is the daemon's per-instance check time (or
+      // its global last refresh), aged against the browser clock, so it
+      // keeps growing when polls fail instead of resetting.
+      const updatedAt = demoMode
+        ? demoRefreshAt
+        : (i.updatedAt != null ? i.updatedAt : null);
+      const updated = updatedAt != null ? humanizeSince(updatedAt, nowMs) : '—';
+      return { ...i, latency: i.latency + jitter, updated, history };
     });
-  }, [live, t.demoDown, refreshTick, lastRefreshAt, now]);
+  }, [live, demoMode, t.demoDown, refreshTick, demoRefreshAt, nowMs]);
 
   // CK-WIRING: trigger a real server-side rerun via POST /api/refresh
   // and refetch /api/state. The artifact's `setRefreshTick` only nudges
   // local mock-jitter; without this call neither `r` nor the *Refresh
   // now* command pulled fresh data on a live deployment.
   const refreshNow = React.useCallback(async () => {
-    setLastRefreshAt(Date.now());
+    // No local "last refresh" reset here: the timestamp only moves when
+    // the daemon reports a newer last_refresh.
     setRefreshTick(x => x + 1);
     try {
       const headers = (window.CK_AUTH && window.CK_AUTH.headers) ? window.CK_AUTH.headers() : {};
@@ -592,10 +740,24 @@ function App() {
         reload={reload}
         reloadState={reloadState}
         title={(live && live.uiTitle) || 'DHIS2 / Climate Instance Checker'}
+        fresh={fresh}
+        demoMode={demoMode}
       />
 
-      {/* grid */}
-      <div style={gridStyle}>
+      {!demoMode && <FreshnessBanner fresh={fresh} />}
+
+      {/* CK-WIRING: no data yet -> explicit loading / unreachable panel
+          instead of demonstration cards. */}
+      {!hasData && <LoadingPanel fresh={fresh} connection={live && live.connection} />}
+
+      {/* grid. CK-WIRING: stale data is dimmed and desaturated so an old
+          all-green snapshot can't pass for a healthy fleet. */}
+      {hasData && <div
+        data-ck-grid={fresh.stale ? 'stale' : 'fresh'}
+        aria-disabled={fresh.stale || undefined}
+        style={fresh.stale
+          ? { ...gridStyle, opacity: 0.4, filter: 'grayscale(0.9)', transition: 'opacity 300ms, filter 300ms' }
+          : { ...gridStyle, transition: 'opacity 300ms, filter 300ms' }}>
         {instances.map((inst, i) => {
           // hairline dividers between cells (terminal feel) — suppressed
           // on card-layout themes where the gap itself separates panels.
@@ -629,9 +791,9 @@ function App() {
         {/* Unfilled grid cells show the body bg directly (no placeholder
             divs needed); on dhis2 that's the same darker grey as every
             gap, so empty slots blend into the surrounding tray. */}
-      </div>
+      </div>}
 
-      <Footer lastRefresh={lastRefresh} paletteOpen={paletteOpen} />
+      <Footer lastRefresh={lastRefresh} lastContact={lastContact} paletteOpen={paletteOpen} />
 
       <CommandPalette
         open={paletteOpen}
@@ -695,13 +857,17 @@ function App() {
   );
 }
 
-function humanizeSince(then, now) {
-  const s = Math.max(0, Math.floor((now - then) / 1000));
-  if (s < 60) return `${s}s ago`;
-  const m = Math.floor(s/60); return `${m}m ${s%60}s ago`;
+function humanizeDuration(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${s % 60}s`;
+  const h = Math.floor(m / 60);
+  if (h < 48) return `${h}h ${m % 60}m`;
+  return `${Math.floor(h / 24)}d ${h % 24}h`;
 }
-function useLastRefreshString(lastAt, now) {
-  return React.useMemo(() => humanizeSince(lastAt, now), [lastAt, now]);
+function humanizeSince(then, now) {
+  return `${humanizeDuration(now - then)} ago`;
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(<App />);

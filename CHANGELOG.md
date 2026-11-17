@@ -39,6 +39,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - **State file gains a `receivers` key** holding each alerter's open alerts. Existing state files load unchanged; on the first run each alerter's open alerts are rebuilt from the stored statuses, so outages in progress at upgrade time are neither re-announced nor left without a recovery. Older versions ignore the new key.
 - **Opting an instance into an alerter (or adding a new alerter) during an ongoing outage now announces it.** Previously the alerter stayed silent and later sent a recovery for a failure it had never reported.
 
+### Added
+
+- **`scripts/capture_browser.py` gains `--states`, `--palette`, `--suffix` and `--color-scheme`.** `--states` captures the loading, unreachable, reconnecting, stale (disconnected) and stale (stalled daemon) states by intercepting `/api/state` in the browser, and checks that the page recovers to live. `--suffix=-dhis2` names the dhis2-theme captures.
+
+### Fixed
+
+- **Browser dashboard no longer shows stale data as fresh.** The "last refresh" and per-tile "updated" times came from a browser timer that reset every 8 seconds whether or not a poll succeeded, and failed polls silently kept the previous snapshot, so a dashboard that lost its daemon after an all-green response stayed green with a recent timestamp forever. Freshness now comes from the daemon's `last_refresh` timestamps (offset-bearing or naive ISO, corrected for browser/daemon clock skew via the response `Date` header) and the time of the last successful poll. A header chip shows `LIVE` / `RECONNECTING` / `DISCONNECTED` / `STALE`, a banner explains failed polls, and tiles are dimmed once the data is stale (no successful poll for `max(4 x poll, 30s)`, or the daemon's last check run older than `2 x --interval + 30s`). The page recovers on its own when polls succeed again; a `401` still opens the login modal. Documented in `docs/guides/serve.md#connection-and-freshness-browser`.
+- **Browser dashboard no longer shows demonstration instances before the first response.** It shows a "connecting" (or "cannot reach the daemon") panel instead. The sample tiles and the fake uptime history are only rendered in explicit demo mode (`/?demo=1`), labelled `DEMO DATA`.
+
 ## [0.10.0] — 2026-10-01
 
 ### Added
