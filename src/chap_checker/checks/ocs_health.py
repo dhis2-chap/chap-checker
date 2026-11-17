@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from typing import Any, ClassVar
 
-import httpx2 as httpx
+import httpx2
 
 from chap_checker.checks.base import (
     CheckContext,
@@ -35,7 +35,7 @@ class OcsHealthCheck:
     requires: ClassVar[list[str]] = []
     kinds: ClassVar[frozenset[str]] = frozenset({"ocs"})
 
-    async def run(self, client: httpx.AsyncClient, ctx: CheckContext) -> CheckResult:  # noqa: ARG002
+    async def run(self, client: httpx2.AsyncClient, ctx: CheckContext) -> CheckResult:  # noqa: ARG002
         start = time.perf_counter()
         try:
             response = await client.get(_PATH)

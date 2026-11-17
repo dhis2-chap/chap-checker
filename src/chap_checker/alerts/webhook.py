@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, ClassVar
 
-import httpx2 as httpx
+import httpx2
 from pydantic import BaseModel
 
 from chap_checker import __version__
@@ -72,7 +72,7 @@ headers = { "X-Custom-Header" = "value" }   # Optional literal HTTP headers (aut
         url: str,
         timeout_s: float = 10.0,
         headers: dict[str, str] | None = None,
-        transport: httpx.AsyncBaseTransport | None = None,
+        transport: httpx2.AsyncBaseTransport | None = None,
     ) -> None:
         self._url = url
         self._timeout_s = timeout_s
@@ -84,7 +84,7 @@ headers = { "X-Custom-Header" = "value" }   # Optional literal HTTP headers (aut
         if not transitions:
             return
         payload = self._build_payload(transitions)
-        async with httpx.AsyncClient(timeout=self._timeout_s, transport=self._transport) as client:
+        async with httpx2.AsyncClient(timeout=self._timeout_s, transport=self._transport) as client:
             response = await client.post(self._url, json=payload, headers=self._headers or None)
         # Only 2xx counts as delivered. Redirects are not followed (a POST
         # body can't be safely replayed across them), so a 3xx means the

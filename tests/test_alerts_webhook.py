@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime
 
-import httpx2 as httpx
+import httpx2
 import pytest
 
 from chap_checker.alerts.base import Transition
@@ -45,16 +45,16 @@ def test_canonical_envelope_shape() -> None:
     """Body matches the documented canonical envelope; receiver can parse blind."""
     captured: dict[str, object] = {}
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         captured["url"] = str(request.url)
         captured["headers"] = dict(request.headers)
         captured["json"] = request.read().decode()
-        return httpx.Response(200)
+        return httpx2.Response(200)
 
     alerter = WebhookAlerter(
         url="https://hook.example/notify",
         headers={"Authorization": "Bearer secret-123"},
-        transport=httpx.MockTransport(handler),
+        transport=httpx2.MockTransport(handler),
     )
     asyncio.run(alerter.notify([_failure(), _recovery()]))
 
@@ -83,12 +83,12 @@ def test_empty_transitions_is_noop() -> None:
     """An empty list does not hit the wire (matches Slack semantics)."""
     calls = 0
 
-    def handler(_: httpx.Request) -> httpx.Response:
+    def handler(_: httpx2.Request) -> httpx2.Response:
         nonlocal calls
         calls += 1
-        return httpx.Response(200)
+        return httpx2.Response(200)
 
-    alerter = WebhookAlerter(url="https://hook.example", transport=httpx.MockTransport(handler))
+    alerter = WebhookAlerter(url="https://hook.example", transport=httpx2.MockTransport(handler))
     asyncio.run(alerter.notify([]))
     assert calls == 0
 
@@ -96,22 +96,22 @@ def test_empty_transitions_is_noop() -> None:
 def test_5xx_raises_so_dispatcher_skips_state_save() -> None:
     """The dispatcher relies on the alerter raising on non-2xx to skip the state save and retry next run."""
 
-    def handler(_: httpx.Request) -> httpx.Response:
-        return httpx.Response(503, text="overloaded")
+    def handler(_: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(503, text="overloaded")
 
-    alerter = WebhookAlerter(url="https://hook.example", transport=httpx.MockTransport(handler))
+    alerter = WebhookAlerter(url="https://hook.example", transport=httpx2.MockTransport(handler))
     with pytest.raises(RuntimeError, match="503"):
         asyncio.run(alerter.notify([_failure()]))
 
 
 def test_4xx_also_raises() -> None:
-    def handler(_: httpx.Request) -> httpx.Response:
-        return httpx.Response(401, text="bad token")
+    def handler(_: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(401, text="bad token")
 
     alerter = WebhookAlerter(
         url="https://hook.example",
         headers={"Authorization": "Bearer nope"},
-        transport=httpx.MockTransport(handler),
+        transport=httpx2.MockTransport(handler),
     )
     with pytest.raises(RuntimeError, match="401"):
         asyncio.run(alerter.notify([_failure()]))
@@ -122,11 +122,11 @@ def test_3xx_redirect_raises(status_code: int) -> None:
     """httpx doesn't follow redirects, so a 3xx means the alert never arrived."""
     seen: list[str] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         seen.append(str(request.url))
-        return httpx.Response(status_code, headers={"Location": "https://hook.example/moved"})
+        return httpx2.Response(status_code, headers={"Location": "https://hook.example/moved"})
 
-    alerter = WebhookAlerter(url="https://hook.example", transport=httpx.MockTransport(handler))
+    alerter = WebhookAlerter(url="https://hook.example", transport=httpx2.MockTransport(handler))
     with pytest.raises(RuntimeError, match=rf"{status_code}.*redirect not followed.*hook\.example/moved"):
         asyncio.run(alerter.notify([_failure()]))
     # Exactly one POST: the redirect is reported, not followed.
@@ -135,10 +135,10 @@ def test_3xx_redirect_raises(status_code: int) -> None:
 
 @pytest.mark.parametrize("status_code", [200, 201, 202, 204])
 def test_any_2xx_is_delivered(status_code: int) -> None:
-    def handler(_: httpx.Request) -> httpx.Response:
-        return httpx.Response(status_code)
+    def handler(_: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(status_code)
 
-    alerter = WebhookAlerter(url="https://hook.example", transport=httpx.MockTransport(handler))
+    alerter = WebhookAlerter(url="https://hook.example", transport=httpx2.MockTransport(handler))
     asyncio.run(alerter.notify([_failure()]))  # does not raise
 
 
@@ -146,15 +146,15 @@ def test_subclass_overrides_payload_shape() -> None:
     """The `_build_payload` hook is the documented extension point - subclasses keep the HTTP plumbing."""
     captured: dict[str, object] = {}
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         captured["body"] = request.read().decode()
-        return httpx.Response(200)
+        return httpx2.Response(200)
 
     class CustomWebhook(WebhookAlerter):
         def _build_payload(self, transitions: list[Transition]) -> dict[str, object]:
             return {"transitions_seen": len(transitions), "first_check": transitions[0].check_name}
 
-    alerter = CustomWebhook(url="https://hook.example", transport=httpx.MockTransport(handler))
+    alerter = CustomWebhook(url="https://hook.example", transport=httpx2.MockTransport(handler))
     asyncio.run(alerter.notify([_failure(), _failure()]))
 
     import json

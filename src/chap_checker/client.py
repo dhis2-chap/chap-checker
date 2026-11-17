@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Any, ClassVar, Literal
 
-import httpx2 as httpx
+import httpx2
 from dhis2w_client import AuthProvider, BasicAuth, Dhis2, Dhis2Client, PatAuth, RetryPolicy
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
@@ -57,9 +57,9 @@ class OcsTarget(BaseTarget):
 
     kind: ClassVar[TargetKind] = "ocs"
 
-    def open(self) -> httpx.AsyncClient:
+    def open(self) -> httpx2.AsyncClient:
         """Return an ``httpx2.AsyncClient`` rooted at the deployment; use as ``async with``."""
-        return httpx.AsyncClient(
+        return httpx2.AsyncClient(
             base_url=str(self.base_url).rstrip("/"),
             timeout=self.timeout_s,
             verify=self.verify_tls,
@@ -123,7 +123,7 @@ class Dhis2Target(BaseTarget):
         are exactly the states a health-checker wants to *observe* via a
         check, not have raised inside the context-manager opening.
         Callers reach for ``client.get_response(path)`` (returns the raw
-        ``httpx.Response`` without raising on 4xx/5xx) rather than the
+        ``httpx2.Response`` without raising on 4xx/5xx) rather than the
         typed accessors.
 
         ``version`` pins the generated module the client will use for

@@ -1,4 +1,4 @@
-import httpx2 as httpx
+import httpx2
 from dhis2w_client import Dhis2
 
 from chap_checker.checks import all_checks, check_kinds, resolve_checks
@@ -63,13 +63,13 @@ def test_chap_app_checks_require_chap_route() -> None:
 
 def test_format_request_error_carries_type_and_path() -> None:
     """Empty exception messages (e.g. ReadTimeout) still get a useful operator-facing line."""
-    msg = format_request_error(httpx.ReadTimeout(""), path="/api/me")
+    msg = format_request_error(httpx2.ReadTimeout(""), path="/api/me")
     assert msg.startswith("ReadTimeout (/api/me): ")
     assert msg.endswith("(no message)")
 
 
 def test_format_request_error_falls_back_without_path() -> None:
-    msg = format_request_error(httpx.ConnectError("nodename nor servname provided"))
+    msg = format_request_error(httpx2.ConnectError("nodename nor servname provided"))
     assert msg == "ConnectError: nodename nor servname provided"
 
 

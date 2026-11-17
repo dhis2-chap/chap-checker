@@ -28,7 +28,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-import httpx2 as httpx
+import httpx2
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -916,7 +916,7 @@ class DashboardApp(App[None]):
         self.config_path = config_path
         self.tiles: dict[str, InstanceTile] = {}
         self._refreshing = False
-        self._http_client: httpx.AsyncClient | None = None
+        self._http_client: httpx2.AsyncClient | None = None
         # Set once after the first auth-prompt cycle so a wrong-token 401
         # paints the auth-rejected banner instead of looping the modal.
         self._token_prompted = False
@@ -982,8 +982,8 @@ class DashboardApp(App[None]):
     async def on_mount(self) -> None:
         if self.connect_url is not None:
             headers = {"Authorization": f"Bearer {self.connect_token}"} if self.connect_token else None
-            self._http_client = httpx.AsyncClient(
-                timeout=httpx.Timeout(10.0),
+            self._http_client = httpx2.AsyncClient(
+                timeout=httpx2.Timeout(10.0),
                 headers=headers,
             )
             # Probe `/api/auth` synchronously before the first refresh so
@@ -1007,7 +1007,7 @@ class DashboardApp(App[None]):
         if self.connect_url is None:
             return
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(5.0)) as probe:
+            async with httpx2.AsyncClient(timeout=httpx2.Timeout(5.0)) as probe:
                 response = await probe.get(self.connect_url.rstrip("/") + "/api/auth")
             if response.status_code != 200:
                 return
@@ -1081,7 +1081,7 @@ class DashboardApp(App[None]):
         """Callback fired when TokenPromptScreen dismisses.
 
         Receives the operator-typed token (or `None` if they cancelled).
-        Builds a fresh `httpx.AsyncClient` with the bearer header (httpx
+        Builds a fresh `httpx2.AsyncClient` with the bearer header (httpx
         clients carry immutable headers per client, so updating means a
         new client) and kicks off an immediate refresh.
         """
@@ -1101,8 +1101,8 @@ class DashboardApp(App[None]):
     async def _reopen_client_and_refresh(self) -> None:
         if self._http_client is not None:
             await self._http_client.aclose()
-        self._http_client = httpx.AsyncClient(
-            timeout=httpx.Timeout(10.0),
+        self._http_client = httpx2.AsyncClient(
+            timeout=httpx2.Timeout(10.0),
             headers={"Authorization": f"Bearer {self.connect_token}"},
         )
         await self._poll()
@@ -1145,7 +1145,7 @@ class DashboardApp(App[None]):
         try:
             # The daemon answers only once every check has run, which can
             # outlast the client's default 10 s timeout.
-            response = await self._http_client.post(url, timeout=httpx.Timeout(_REMOTE_REFRESH_TIMEOUT_S))
+            response = await self._http_client.post(url, timeout=httpx2.Timeout(_REMOTE_REFRESH_TIMEOUT_S))
         except Exception as exc:  # noqa: BLE001 - any transport error becomes a toast
             self.notify(f"Refresh failed: {exc}", severity="error")
             return False

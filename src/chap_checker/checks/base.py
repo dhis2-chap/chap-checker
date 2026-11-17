@@ -40,7 +40,7 @@ def parse_dhis2_version(version_str: str) -> Dhis2 | None:
 def format_request_error(exc: BaseException, *, path: str | None = None) -> str:
     """Render a transport exception into a useful operator-facing message.
 
-    `str(httpx.TimeoutException)` is often empty - "Request failed: " on its
+    `str(httpx2.TimeoutException)` is often empty - "Request failed: " on its
     own tells the operator nothing. This helper always carries the exception
     type and falls back to "(no message)" when `str(exc)` is empty. Pass the
     request `path` when known so an operator can tell which endpoint failed
