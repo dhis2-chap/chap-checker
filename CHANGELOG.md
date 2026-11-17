@@ -21,6 +21,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - **Config reload no longer mixes old and new config.** A refresh that was checking targets when `POST /api/reload` (or `Ctrl+R` in the local TUI) swapped the config now discards its results instead of applying them, and dispatching alerts, against the new target list. An instance whose `url`, `kind` or `checks` list changes on reload starts with fresh ping counters and an empty uptime strip instead of showing the old server's history; renaming it or rotating credentials keeps history.
 - **Dashboard timestamps are now UTC with an explicit offset.** `last_refresh` in `/api/state` (overall and per tile) and in the `POST /api/refresh` response was a naive local time, so browsers and `tui --connect` clients in a different time zone showed wrong "updated N ago" ages. The TUI still accepts naive timestamps from older daemons and reads them as local time.
 
+### Fixed
+
+- **TUI config reload no longer crashes the app on a bad credential.** `Ctrl+R` now builds the whole replacement (parsed config plus every runtime target, which resolves `password_env` / `token_env`) before swapping anything in. An unset variable shows the "Reload failed" notification and the previous config keeps running.
+- **`tui --connect` manual refresh now re-runs the checks.** Pressing `r` (or *Refresh now*) POSTs `/api/refresh` on the daemon with the bearer token, then fetches `/api/state`; before, it only re-read the daemon's cached snapshot. The periodic tick still only reads `/api/state`. A 401 goes through the usual token prompt / auth-rejected banner, and other failures show a "Refresh failed" notification.
+- **`--token-env` / `--password-env` no longer conflict with an exported env var.** With `DHIS2_TOKEN` (or `CHAP_CHECKER_TOKEN` for `tui --connect`) or `DHIS2_PASSWORD` exported, `verify --token-env OTHER` / `--password-env OTHER` was rejected as "not both". The CLI now uses the parameter source, so an explicit flag beats the ambient env fallback and only two flags typed on the command line conflict.
+- **`dhis2_chap_ping` now validates the response body.** Any 2xx used to count as healthy, so an SSO or reverse proxy returning a 200 HTML login page passed. The check now requires chap-core's JSON health payload (`{"status": "success", ...}`); a non-JSON body, malformed JSON, an unexpected shape, or a `status` other than `success` is `FAIL`. The OK message reads `chap-core healthy (status 200).`, and `details` carries `health_status` / `health_message`.
+
 ## [0.10.0] — 2026-10-01
 
 ### Added
