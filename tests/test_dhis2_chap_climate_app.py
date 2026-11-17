@@ -12,7 +12,7 @@ import asyncio
 from collections.abc import Callable
 from typing import cast
 
-import httpx2 as httpx
+import httpx2
 from dhis2w_client import Dhis2Client
 from pydantic import HttpUrl
 
@@ -26,22 +26,22 @@ from chap_checker.client import Dhis2Target
 OTHER_APP_HUB_ID = "11111111-2222-3333-4444-555555555555"
 
 
-def _client(handler: Callable[[httpx.Request], httpx.Response]) -> Dhis2Client:
+def _client(handler: Callable[[httpx2.Request], httpx2.Response]) -> Dhis2Client:
     target = Dhis2Target(
         base_url=cast(HttpUrl, "https://x.example"),
         username="u",
         password="p",
     )
     client = target.open()
-    client._http = httpx.AsyncClient(
+    client._http = httpx2.AsyncClient(
         base_url=str(target.base_url).rstrip("/"),
         timeout=target.timeout_s,
-        transport=httpx.MockTransport(handler),
+        transport=httpx2.MockTransport(handler),
     )
     return client
 
 
-def _run(handler: Callable[[httpx.Request], httpx.Response]) -> object:
+def _run(handler: Callable[[httpx2.Request], httpx2.Response]) -> object:
     async def go() -> object:
         async with _client(handler) as c:
             target = Dhis2Target(
@@ -57,7 +57,7 @@ def _run(handler: Callable[[httpx.Request], httpx.Response]) -> object:
 def test_ok_when_climate_app_present_with_version() -> None:
     """An installed climate app with a populated version is OK."""
     result = _run(
-        lambda _r: httpx.Response(
+        lambda _r: httpx2.Response(
             200,
             json={
                 "apps": [
@@ -75,7 +75,7 @@ def test_ok_when_climate_app_present_with_version() -> None:
 def test_ok_when_response_is_bare_list() -> None:
     """DHIS2 versions that return a top-level list (no `apps` wrapper) still parse."""
     result = _run(
-        lambda _r: httpx.Response(
+        lambda _r: httpx2.Response(
             200,
             json=[{"name": "Climate", "app_hub_id": CLIMATE_APP_HUB_ID, "version": "2.0.0"}],
         )
@@ -87,7 +87,7 @@ def test_ok_when_response_is_bare_list() -> None:
 def test_warn_when_climate_app_has_no_version() -> None:
     """Matching app without a `version` field warns instead of failing."""
     result = _run(
-        lambda _r: httpx.Response(
+        lambda _r: httpx2.Response(
             200,
             json={"apps": [{"name": "Climate", "appHubId": CLIMATE_APP_HUB_ID}]},
         )
@@ -99,7 +99,7 @@ def test_warn_when_climate_app_has_no_version() -> None:
 def test_fail_when_climate_app_missing() -> None:
     """An /api/apps response without the climate UUID is a FAIL."""
     result = _run(
-        lambda _r: httpx.Response(
+        lambda _r: httpx2.Response(
             200,
             json={"apps": [{"name": "Other", "appHubId": OTHER_APP_HUB_ID, "version": "1.0.0"}]},
         )
@@ -110,6 +110,6 @@ def test_fail_when_climate_app_missing() -> None:
 
 def test_fail_when_apps_endpoint_returns_4xx() -> None:
     """A 4xx from `/api/apps` surfaces as FAIL, not an exception."""
-    result = _run(lambda _r: httpx.Response(403, json={"message": "forbidden"}))
+    result = _run(lambda _r: httpx2.Response(403, json={"message": "forbidden"}))
     assert result.status is Status.FAIL  # type: ignore[attr-defined]
     assert "403" in result.message  # type: ignore[attr-defined]

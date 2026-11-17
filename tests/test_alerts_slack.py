@@ -2,7 +2,7 @@ import asyncio
 import json
 from datetime import UTC, datetime
 
-import httpx2 as httpx
+import httpx2
 
 from chap_checker.alerts.base import Transition
 from chap_checker.alerts.slack import SlackAlerter
@@ -38,15 +38,15 @@ def _recovery() -> Transition:
 
 
 def test_slack_posts_blocks_to_webhook() -> None:
-    captured: list[httpx.Request] = []
+    captured: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         captured.append(request)
-        return httpx.Response(200, text="ok")
+        return httpx2.Response(200, text="ok")
 
     alerter = SlackAlerter(
         webhook_url="https://hooks.slack.com/services/T/B/X",
-        transport=httpx.MockTransport(handler),
+        transport=httpx2.MockTransport(handler),
     )
     asyncio.run(alerter.notify([_failure(), _recovery()]))
 
@@ -64,15 +64,15 @@ def test_slack_posts_blocks_to_webhook() -> None:
 
 
 def test_slack_empty_transitions_skips_post() -> None:
-    captured: list[httpx.Request] = []
+    captured: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         captured.append(request)
-        return httpx.Response(200)
+        return httpx2.Response(200)
 
     alerter = SlackAlerter(
         webhook_url="https://hooks.slack.com/x",
-        transport=httpx.MockTransport(handler),
+        transport=httpx2.MockTransport(handler),
     )
     asyncio.run(alerter.notify([]))
     assert captured == []
@@ -82,12 +82,12 @@ def test_slack_raises_on_5xx() -> None:
     """The alerter raises on non-2xx; the dispatcher decides what to do with it."""
     import pytest
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(500, text="boom")
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(500, text="boom")
 
     alerter = SlackAlerter(
         webhook_url="https://hooks.slack.com/x",
-        transport=httpx.MockTransport(handler),
+        transport=httpx2.MockTransport(handler),
     )
     with pytest.raises(RuntimeError, match="500"):
         asyncio.run(alerter.notify([_failure()]))
@@ -97,12 +97,12 @@ def test_slack_raises_on_3xx_redirect() -> None:
     """A redirect isn't followed, so it must not count as delivered."""
     import pytest
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(302, headers={"Location": "https://hooks.slack.com/elsewhere"})
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(302, headers={"Location": "https://hooks.slack.com/elsewhere"})
 
     alerter = SlackAlerter(
         webhook_url="https://hooks.slack.com/x",
-        transport=httpx.MockTransport(handler),
+        transport=httpx2.MockTransport(handler),
     )
     with pytest.raises(RuntimeError, match="302"):
         asyncio.run(alerter.notify([_failure()]))
@@ -111,27 +111,27 @@ def test_slack_raises_on_3xx_redirect() -> None:
 def test_slack_raises_on_transport_error() -> None:
     import pytest
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("nope")
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        raise httpx2.ConnectError("nope")
 
     alerter = SlackAlerter(
         webhook_url="https://hooks.slack.com/x",
-        transport=httpx.MockTransport(handler),
+        transport=httpx2.MockTransport(handler),
     )
-    with pytest.raises(httpx.ConnectError):
+    with pytest.raises(httpx2.ConnectError):
         asyncio.run(alerter.notify([_failure()]))
 
 
 def test_slack_pluralizes_recoveries() -> None:
-    captured: list[httpx.Request] = []
+    captured: list[httpx2.Request] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         captured.append(request)
-        return httpx.Response(200)
+        return httpx2.Response(200)
 
     alerter = SlackAlerter(
         webhook_url="https://hooks.slack.com/x",
-        transport=httpx.MockTransport(handler),
+        transport=httpx2.MockTransport(handler),
     )
     asyncio.run(alerter.notify([_recovery(), _recovery()]))
 

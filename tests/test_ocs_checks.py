@@ -3,7 +3,7 @@
 from collections.abc import Callable
 from typing import Any, cast
 
-import httpx2 as httpx
+import httpx2
 import pytest
 from pydantic import HttpUrl
 
@@ -18,20 +18,20 @@ _URL = "https://ocs.example"
 _CAPABILITIES = {"api_version": "1.2.0", "backend_version": "0.1.0", "id": "nepal-climate-service-demo"}
 _INFO = {"app_version": "0.1.0", "python_version": "3.12", "uvicorn_version": "0.46.0", "read_only": True}
 
-Handler = Callable[[httpx.Request], httpx.Response]
+Handler = Callable[[httpx2.Request], httpx2.Response]
 
 
 def _target() -> OcsTarget:
     return OcsTarget(base_url=cast(HttpUrl, _URL))
 
 
-def _client(handler: Handler) -> httpx.AsyncClient:
-    return httpx.AsyncClient(base_url=_URL, transport=httpx.MockTransport(handler))
+def _client(handler: Handler) -> httpx2.AsyncClient:
+    return httpx2.AsyncClient(base_url=_URL, transport=httpx2.MockTransport(handler))
 
 
-def _routes(routes: dict[str, httpx.Response]) -> Handler:
-    def handler(request: httpx.Request) -> httpx.Response:
-        return routes.get(request.url.path, httpx.Response(404))
+def _routes(routes: dict[str, httpx2.Response]) -> Handler:
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return routes.get(request.url.path, httpx2.Response(404))
 
     return handler
 
@@ -44,27 +44,27 @@ async def _run(check: Any, handler: Handler) -> CheckResult:
 
 @pytest.mark.asyncio
 async def test_health_ok() -> None:
-    result = await _run(OcsHealthCheck(), _routes({"/health": httpx.Response(200, json={"status": "healthy"})}))
+    result = await _run(OcsHealthCheck(), _routes({"/health": httpx2.Response(200, json={"status": "healthy"})}))
     assert result.status is Status.OK
     assert result.details["health_status"] == "healthy"
 
 
 @pytest.mark.asyncio
 async def test_health_degraded_is_warn() -> None:
-    result = await _run(OcsHealthCheck(), _routes({"/health": httpx.Response(200, json={"status": "degraded"})}))
+    result = await _run(OcsHealthCheck(), _routes({"/health": httpx2.Response(200, json={"status": "degraded"})}))
     assert result.status is Status.WARN
 
 
 @pytest.mark.asyncio
 async def test_health_unhealthy_is_fail() -> None:
-    result = await _run(OcsHealthCheck(), _routes({"/health": httpx.Response(200, json={"status": "unhealthy"})}))
+    result = await _run(OcsHealthCheck(), _routes({"/health": httpx2.Response(200, json={"status": "unhealthy"})}))
     assert result.status is Status.FAIL
     assert "unhealthy" in result.message
 
 
 @pytest.mark.asyncio
 async def test_health_non_json_is_fail() -> None:
-    result = await _run(OcsHealthCheck(), _routes({"/health": httpx.Response(200, text="<html>login</html>")}))
+    result = await _run(OcsHealthCheck(), _routes({"/health": httpx2.Response(200, text="<html>login</html>")}))
     assert result.status is Status.FAIL
     assert "non-JSON" in result.message
 
@@ -79,8 +79,8 @@ async def test_health_404_says_not_ocs() -> None:
 
 @pytest.mark.asyncio
 async def test_health_transport_error_is_error() -> None:
-    def boom(request: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("refused", request=request)
+    def boom(request: httpx2.Request) -> httpx2.Response:
+        raise httpx2.ConnectError("refused", request=request)
 
     result = await _run(OcsHealthCheck(), boom)
     assert result.status is Status.ERROR
@@ -91,7 +91,7 @@ async def test_health_transport_error_is_error() -> None:
 async def test_info_reports_version_and_capabilities() -> None:
     result = await _run(
         OcsInfoCheck(),
-        _routes({"/info": httpx.Response(200, json=_INFO), "/": httpx.Response(200, json=_CAPABILITIES)}),
+        _routes({"/info": httpx2.Response(200, json=_INFO), "/": httpx2.Response(200, json=_CAPABILITIES)}),
     )
     assert result.status is Status.OK
     assert result.message == "Open Climate Service 0.1.0 (openEO 1.2.0, read-only)."
@@ -109,8 +109,8 @@ async def test_info_falls_back_to_backend_version() -> None:
         OcsInfoCheck(),
         _routes(
             {
-                "/info": httpx.Response(200, json={"read_only": False}),
-                "/": httpx.Response(200, json=_CAPABILITIES),
+                "/info": httpx2.Response(200, json={"read_only": False}),
+                "/": httpx2.Response(200, json=_CAPABILITIES),
             }
         ),
     )
@@ -121,7 +121,7 @@ async def test_info_falls_back_to_backend_version() -> None:
 
 @pytest.mark.asyncio
 async def test_info_missing_endpoint_is_fail() -> None:
-    result = await _run(OcsInfoCheck(), _routes({"/": httpx.Response(200, json=_CAPABILITIES)}))
+    result = await _run(OcsInfoCheck(), _routes({"/": httpx2.Response(200, json=_CAPABILITIES)}))
     assert result.status is Status.FAIL
     assert result.details["path"] == "/info"
 
@@ -130,7 +130,7 @@ async def test_info_missing_endpoint_is_fail() -> None:
 async def test_info_non_object_is_fail() -> None:
     result = await _run(
         OcsInfoCheck(),
-        _routes({"/info": httpx.Response(200, json=_INFO), "/": httpx.Response(200, text="not json")}),
+        _routes({"/info": httpx2.Response(200, json=_INFO), "/": httpx2.Response(200, text="not json")}),
     )
     assert result.status is Status.FAIL
     assert "/ did not return a JSON object" in result.message
@@ -146,9 +146,9 @@ async def test_runner_runs_only_ocs_checks(monkeypatch: pytest.MonkeyPatch) -> N
         monkeypatch,
         _routes(
             {
-                "/health": httpx.Response(200, json={"status": "healthy"}),
-                "/info": httpx.Response(200, json=_INFO),
-                "/": httpx.Response(200, json=_CAPABILITIES),
+                "/health": httpx2.Response(200, json={"status": "healthy"}),
+                "/info": httpx2.Response(200, json=_INFO),
+                "/": httpx2.Response(200, json=_CAPABILITIES),
             }
         ),
     )
@@ -159,7 +159,7 @@ async def test_runner_runs_only_ocs_checks(monkeypatch: pytest.MonkeyPatch) -> N
 
 @pytest.mark.asyncio
 async def test_runner_skips_info_when_health_fails(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch_open(monkeypatch, _routes({"/health": httpx.Response(503)}))
+    _patch_open(monkeypatch, _routes({"/health": httpx2.Response(503)}))
     results = await run_checks(_target(), resolve_checks(["ocs_info"], kind="ocs"))
     assert [(r.name, r.status) for r in results] == [("ocs_health", Status.FAIL), ("ocs_info", Status.SKIPPED)]
     assert results[1].message == "Skipped: ocs_health not OK."

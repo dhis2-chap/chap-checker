@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from typing import Any, ClassVar
 
-import httpx2 as httpx
+import httpx2
 
 from chap_checker.checks.base import CheckContext, CheckResult, Status, format_request_error, register_check
 
@@ -42,7 +42,7 @@ class Http2xxCheck:
         url = str(ctx.target.base_url)
         start = time.perf_counter()
         try:
-            async with httpx.AsyncClient(
+            async with httpx2.AsyncClient(
                 timeout=ctx.target.timeout_s,
                 verify=ctx.target.verify_tls,
                 follow_redirects=True,

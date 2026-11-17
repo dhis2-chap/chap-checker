@@ -92,7 +92,7 @@ $ chap-checker verify [OPTIONS]
 * `--token-env <str>`: Name of the env var holding the DHIS2 PAT (ad-hoc mode). Recommended over --token.
 * `--timeout <float>`: HTTP timeout per request (seconds, ad-hoc mode).  [default: 10.0]
 * `--insecure`: Skip TLS certificate verification (ad-hoc mode).
-* `--check, --checks <str>`: Restrict to these check names (transitive `requires` are pulled in). Repeat the flag for multiple. Mirrors the per-instance `checks = [...]` config field.
+* `--check, --checks <list[str]>`: Restrict to these check names (transitive `requires` are pulled in). Repeat the flag for multiple. Mirrors the per-instance `checks = [...]` config field.
 * `--no-alerts, --no-alert`: Skip alert dispatch even if configured.
 * `--state <path>`: Path to the persisted state file (default: ./chap-checker.state.json next to the config).  [env var: CHAP_CHECKER_STATE]
 * `--concurrency <int range>`: Number of targets to check in parallel. Overrides the config value if given. Default 5.  [1&lt;=x&lt;=100]

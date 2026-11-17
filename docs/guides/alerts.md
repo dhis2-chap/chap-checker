@@ -29,18 +29,17 @@ for a failure it was never told about.
 ```toml
 [instances.prod]                              # fans out to both alerters on every transition
 url = "https://dhis2.example.com"
-alerts = ["slack", "ops-webhook"]
+alerts = ["slack", "webhook"]
 
 [instances.staging]                           # silent, tracked but never paged
 url = "https://staging.dhis2.example.com"
 # no `alerts =` line, default is []
 ```
 
-The string in `alerts = [...]` is the TOML section name, not the
-transport. `alerts = ["slack-prod", "slack-staging"]` works fine if you
-configure two `[alerts.slack-prod]` / `[alerts.slack-staging]` blocks
-(see [Per-channel routing](#per-channel-routing-fan-out-or-split-by-channel)
-below).
+The names in `alerts = [...]` are the alerter names: `slack` for the
+`[alerts.slack]` block and `webhook` for `[alerts.webhook]`. Each transport
+can be configured once per config file (see
+[Splitting alerts across channels](#splitting-alerts-across-channels)).
 
 ## Transports
 
@@ -119,36 +118,37 @@ batch looks roughly like:
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-#### Per-channel routing (fan out or split by channel)
+#### Splitting alerts across channels
 
-The `alerts = [...]` list takes section names, so two `[alerts.slack-*]`
-blocks let a single deployment page two different channels with
-different opt-in rules:
+Each transport has exactly one block, `[alerts.slack]` and
+`[alerts.webhook]`; other names under `[alerts.*]` are rejected when the
+config loads. To page two destinations with different filters, use one
+of each transport, for example Slack for the loud ops channel and the
+generic webhook for the on-call tool, and give each its own `notify_on`:
 
 ```toml
-# Loud channel — fires on warn / fail / error.
-[alerts.slack-ops]
+# Loud channel: fires on warn / fail / error.
+[alerts.slack]
 webhook_url_env = "SLACK_OPS_WEBHOOK_URL"
 notify_on = ["fail", "error", "warn"]
 
-# Quiet channel — only the high-severity stuff, for the on-call rotation.
-[alerts.slack-oncall]
-webhook_url_env = "SLACK_ONCALL_WEBHOOK_URL"
+# On-call tool: only the high-severity statuses.
+[alerts.webhook]
+url_env = "ONCALL_WEBHOOK_URL"
 notify_on = ["fail", "error"]
-timeout_s = 5.0
 
 [instances.prod]
 url = "https://dhis2.example.com"
-alerts = ["slack-ops", "slack-oncall"]
+alerts = ["slack", "webhook"]
 
 [instances.staging]
 url = "https://staging.dhis2.example.com"
-alerts = ["slack-ops"]                  # WARN/FAIL hit ops chat, on-call stays quiet
+alerts = ["slack"]                      # ops chat only, on-call stays quiet
 ```
 
-Both blocks register a `SlackAlerter`; the section name is just the
-opt-in key. Same pattern works for `webhook` (e.g.
-`[alerts.webhook-pagerduty]` and `[alerts.webhook-internal-bus]`).
+Two Slack channels with different filters need two chap-checker configs
+(for example two `serve` daemons), since only one `[alerts.slack]` block
+is accepted.
 
 #### Failure modes
 
@@ -158,7 +158,7 @@ opt-in key. Same pattern works for `webhook` (e.g.
 | `HTTP 404` from the webhook                              | Slack revoked the webhook (app deleted, channel archived, workspace token rotated). Generate a new URL and update `SLACK_WEBHOOK_URL`.                                    |
 | `HTTP 429`                                               | Slack's per-webhook rate limit. The dispatcher will log the failure and retry on the next refresh tick — no special handling. If sustained, route to a less-busy channel. |
 | `HTTP 500 / 502 / 503` from `hooks.slack.com`            | Slack incident. Retried on next tick (see [Delivery failure retry](#delivery-failure-retry)).                                                                             |
-| `httpx.ConnectError` / `httpx.TimeoutException`          | Network egress problem from the daemon. Retried on next tick.                                                                                                             |
+| `httpx2.ConnectError` / `httpx2.TimeoutException`        | Network egress problem from the daemon. Retried on next tick.                                                                                                             |
 | `2xx` but the message never lands in the channel         | Wrong webhook URL pointing at a different channel, or the channel was archived. Recreate the webhook against the right channel.                                           |
 
 #### Rate limits

@@ -84,12 +84,12 @@ Multiple instances in `./chap-checker.toml`:
 url = "https://dhis2.example.com"
 username = "ops"
 password_env = "PROD_PASS"
-alerts = ["slack", "ops-webhook"]   # fan out to as many alerters as you opt in
+alerts = ["slack", "webhook"]       # fan out to every alerter you opt in
 
 [alerts.slack]
 webhook_url_env = "SLACK_WEBHOOK_URL"
 
-[alerts.ops-webhook]
+[alerts.webhook]
 url_env = "OPS_WEBHOOK_URL"          # generic HTTP POST with the canonical envelope
 ```
 

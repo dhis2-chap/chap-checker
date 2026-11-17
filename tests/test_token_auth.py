@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import Any, cast
 
-import httpx2 as httpx
+import httpx2
 import pytest
 import typer
 from pydantic import HttpUrl, ValidationError
@@ -64,18 +64,18 @@ def test_client_sends_apitoken_header() -> None:
     header DHIS2 expects, NOT standard `Bearer`."""
     captured: dict[str, str] = {}
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         captured["authorization"] = request.headers.get("authorization", "")
-        return httpx.Response(200, json={})
+        return httpx2.Response(200, json={})
 
     target = Dhis2Target(base_url=cast(HttpUrl, "https://x.example"), token="abc123")
     client = target.open()
     # The auth header is built by dhis2w_client.PatAuth on every request,
     # so the MockTransport-backed AsyncClient does not need to set it.
-    client._http = httpx.AsyncClient(
+    client._http = httpx2.AsyncClient(
         base_url=str(target.base_url).rstrip("/"),
         timeout=target.timeout_s,
-        transport=httpx.MockTransport(handler),
+        transport=httpx2.MockTransport(handler),
     )
 
     import asyncio

@@ -9,7 +9,7 @@ import asyncio
 from typing import cast
 from unittest.mock import AsyncMock, patch
 
-import httpx2 as httpx
+import httpx2
 import pytest
 from pydantic import HttpUrl
 
@@ -365,13 +365,13 @@ def test_connect_mode_renders_remote_state() -> None:
     canned = _canned_state()
     # `raise_for_status` walks the response's request; construct one
     # explicitly so the mocked response behaves like the real thing.
-    request = httpx.Request("GET", "http://remote.example:8765/api/state")
+    request = httpx2.Request("GET", "http://remote.example:8765/api/state")
     mock_get = AsyncMock(
-        return_value=httpx.Response(200, content=canned.model_dump_json().encode(), request=request),
+        return_value=httpx2.Response(200, content=canned.model_dump_json().encode(), request=request),
     )
 
     async def _run() -> None:
-        with patch.object(httpx.AsyncClient, "get", new=mock_get):
+        with patch.object(httpx2.AsyncClient, "get", new=mock_get):
             app = DashboardApp(
                 interval_s=300.0,
                 connect_url="http://remote.example:8765",
@@ -391,7 +391,7 @@ def test_connect_mode_shows_disconnect_banner_on_failure() -> None:
     from chap_checker.dashboard import DashboardApp, DisconnectBanner
 
     async def _run() -> None:
-        with patch.object(httpx.AsyncClient, "get", new=AsyncMock(side_effect=httpx.ConnectError("nope"))):
+        with patch.object(httpx2.AsyncClient, "get", new=AsyncMock(side_effect=httpx2.ConnectError("nope"))):
             app = DashboardApp(
                 interval_s=300.0,
                 connect_url="http://nope.example:1",
@@ -419,13 +419,13 @@ def test_connect_mode_sends_bearer_token_header() -> None:
     from chap_checker.dashboard import DashboardApp
 
     canned = _canned_state()
-    request = httpx.Request("GET", "http://remote.example:8765/api/state")
+    request = httpx2.Request("GET", "http://remote.example:8765/api/state")
     mock_get = AsyncMock(
-        return_value=httpx.Response(200, content=canned.model_dump_json().encode(), request=request),
+        return_value=httpx2.Response(200, content=canned.model_dump_json().encode(), request=request),
     )
 
     async def _run() -> None:
-        with patch.object(httpx.AsyncClient, "get", new=mock_get):
+        with patch.object(httpx2.AsyncClient, "get", new=mock_get):
             app = DashboardApp(
                 interval_s=300.0,
                 connect_url="http://remote.example:8765",
@@ -437,7 +437,7 @@ def test_connect_mode_sends_bearer_token_header() -> None:
                 await pilot.pause()
                 # The bearer header is set once on the AsyncClient at
                 # construction time, so it ships on every call. The mock
-                # patches `httpx.AsyncClient.get` directly so we can't
+                # patches `httpx2.AsyncClient.get` directly so we can't
                 # capture the per-request headers, but the persistent
                 # client's `headers` attribute reflects what every call
                 # will carry.
@@ -451,11 +451,11 @@ def test_connect_mode_401_paints_auth_banner_not_generic_disconnect() -> None:
     """A 401 from the daemon means token is wrong/missing - distinct from a transport error."""
     from chap_checker.dashboard import DashboardApp, DisconnectBanner
 
-    request = httpx.Request("GET", "http://remote.example:8765/api/state")
-    mock_get = AsyncMock(return_value=httpx.Response(401, text="bad token", request=request))
+    request = httpx2.Request("GET", "http://remote.example:8765/api/state")
+    mock_get = AsyncMock(return_value=httpx2.Response(401, text="bad token", request=request))
 
     async def _run() -> None:
-        with patch.object(httpx.AsyncClient, "get", new=mock_get):
+        with patch.object(httpx2.AsyncClient, "get", new=mock_get):
             app = DashboardApp(
                 interval_s=300.0,
                 connect_url="http://remote.example:8765",
@@ -477,11 +477,11 @@ def test_connect_mode_401_without_token_pushes_modal() -> None:
     """First 401 with no `connect_token` shows the in-TUI token prompt instead of the banner."""
     from chap_checker.dashboard import DashboardApp, TokenPromptScreen
 
-    request = httpx.Request("GET", "http://remote.example:8765/api/state")
-    mock_get = AsyncMock(return_value=httpx.Response(401, text="bad token", request=request))
+    request = httpx2.Request("GET", "http://remote.example:8765/api/state")
+    mock_get = AsyncMock(return_value=httpx2.Response(401, text="bad token", request=request))
 
     async def _run() -> None:
-        with patch.object(httpx.AsyncClient, "get", new=mock_get):
+        with patch.object(httpx2.AsyncClient, "get", new=mock_get):
             app = DashboardApp(
                 interval_s=300.0,
                 connect_url="http://remote.example:8765",
@@ -500,20 +500,20 @@ def test_token_prompt_submit_updates_http_client_and_refetches() -> None:
     """Submitting the modal sets the bearer header and triggers an immediate refresh."""
     from chap_checker.dashboard import DashboardApp, TokenPromptScreen
 
-    request = httpx.Request("GET", "http://remote.example:8765/api/state")
-    probe_request = httpx.Request("GET", "http://remote.example:8765/api/auth")
+    request = httpx2.Request("GET", "http://remote.example:8765/api/state")
+    probe_request = httpx2.Request("GET", "http://remote.example:8765/api/auth")
     canned = _canned_state()
     # First call is the on_mount theme probe (`/api/auth`); then the 401 from
     # the initial refresh; then the 200 after the operator submits a token.
     responses = [
-        httpx.Response(200, content=b'{"required":true,"ui_theme":null,"ui_title":null}', request=probe_request),
-        httpx.Response(401, text="bad token", request=request),
-        httpx.Response(200, content=canned.model_dump_json().encode(), request=request),
+        httpx2.Response(200, content=b'{"required":true,"ui_theme":null,"ui_title":null}', request=probe_request),
+        httpx2.Response(401, text="bad token", request=request),
+        httpx2.Response(200, content=canned.model_dump_json().encode(), request=request),
     ]
     mock_get = AsyncMock(side_effect=responses)
 
     async def _run() -> None:
-        with patch.object(httpx.AsyncClient, "get", new=mock_get):
+        with patch.object(httpx2.AsyncClient, "get", new=mock_get):
             app = DashboardApp(
                 interval_s=300.0,
                 connect_url="http://remote.example:8765",
@@ -540,11 +540,11 @@ def test_token_prompt_cancel_paints_banner_and_stops_prompting() -> None:
     """Cancelling the modal (Escape) paints the auth-rejected banner and doesn't re-prompt."""
     from chap_checker.dashboard import DashboardApp, DisconnectBanner, TokenPromptScreen
 
-    request = httpx.Request("GET", "http://remote.example:8765/api/state")
-    mock_get = AsyncMock(return_value=httpx.Response(401, text="bad token", request=request))
+    request = httpx2.Request("GET", "http://remote.example:8765/api/state")
+    mock_get = AsyncMock(return_value=httpx2.Response(401, text="bad token", request=request))
 
     async def _run() -> None:
-        with patch.object(httpx.AsyncClient, "get", new=mock_get):
+        with patch.object(httpx2.AsyncClient, "get", new=mock_get):
             app = DashboardApp(
                 interval_s=300.0,
                 connect_url="http://remote.example:8765",
