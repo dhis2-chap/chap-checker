@@ -41,8 +41,11 @@ The command palette currently exposes:
 - **Refresh now**
 - **Reload config** — POST `/api/reload`; re-reads `chap-checker.toml`
   and swaps targets / cfg in place. The next `/api/state` poll picks up
-  any new / removed instance tiles automatically. Also reachable via
-  the **reload config** button in the header next to the clock.
+  any new / removed instance tiles automatically. A check run that was
+  in flight during the reload is discarded rather than applied to the
+  new config, and an instance whose `url`, `kind` or `checks` changed
+  starts with fresh counters and an empty uptime strip. Also reachable
+  via the **reload config** button in the header next to the clock.
 - **Toggle fullscreen**
 - **Density:** default / comfortable / TV / wall
 - **Theme:** phosphor green / amber / high contrast / tokyo / dhis2
@@ -267,7 +270,13 @@ behind strict CSP without any third-party trust dependency.
 - FastAPI runs the checks on a background `asyncio` task every
   `--interval` seconds via the shared `DashboardServer` in
   `chap_checker.daemon`.
-- `GET /api/state` returns the current snapshot as JSON.
+- Check runs never overlap. A `POST /api/refresh` that arrives while
+  a run is in flight (from the background loop or another client)
+  waits for that run and returns once it lands, instead of starting a
+  parallel one, so `concurrency` is a daemon-wide limit.
+- `GET /api/state` returns the current snapshot as JSON. Timestamps
+  (`last_refresh`, per tile and overall) are UTC with an explicit offset
+  (ISO 8601, `Z` suffix), so viewers in any time zone see correct ages.
 - The web UI is mounted via `StaticFiles(directory=web_ui, html=False)`
   with a dedicated `GET /` handler returning `index.html`; skip both
   with `--no-ui` for an API-only daemon.

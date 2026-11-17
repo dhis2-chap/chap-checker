@@ -1,17 +1,18 @@
 """Smoke tests for the web dashboard.
 
-The FastAPI app uses an asyncio background task that we do not want firing
-real HTTP probes during unit tests. The tests below build the server with an
-empty target list (or stubbed-in trackers) and inspect the snapshot model +
-the static index route. End-to-end refresh-loop testing is deferred to
-manual + integration coverage.
+Entering `TestClient` runs the app lifespan, whose background `run_loop()`
+refreshes immediately. The autouse `_no_network` fixture stubs the daemon's
+`run_targets` so those refreshes (and `POST /api/refresh`) never probe the
+configured targets over the network.
 """
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import cast
 
+import pytest
 from fastapi.testclient import TestClient
 from pydantic import HttpUrl
 
@@ -21,6 +22,25 @@ from chap_checker.config import CheckerConfig, Dhis2InstanceConfig
 from chap_checker.daemon import DashboardServer, TileTracker
 from chap_checker.runner import RunReport, TargetEntry
 from chap_checker.serve import make_app
+
+_RUN_TARGETS_CALLS: list[list[str]] = []
+
+
+@pytest.fixture(autouse=True)
+def _no_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Replace the daemon's `run_targets` with a stub that returns no reports.
+
+    Trackers stay empty (as if no refresh had completed), which is what the
+    snapshot assertions below expect, and the stub records each call so a
+    test can check a refresh actually ran.
+    """
+    _RUN_TARGETS_CALLS.clear()
+
+    async def fake_run_targets(targets: list[TargetEntry], concurrency: int = 5) -> list[RunReport]:  # noqa: ARG001
+        _RUN_TARGETS_CALLS.append([t.name for t in targets])
+        return []
+
+    monkeypatch.setattr("chap_checker.daemon.run_targets", fake_run_targets)
 
 
 def _cfg() -> CheckerConfig:
@@ -121,8 +141,7 @@ def test_state_endpoint_returns_json() -> None:
     app = make_app(server)
     with TestClient(app, raise_server_exceptions=False) as client:
         # The TestClient's context manager runs the lifespan, which spawns
-        # the background task. That's fine - it sleeps for interval_s before
-        # actually hitting the network.
+        # the background task; `_no_network` keeps its first refresh offline.
         r = client.get("/api/state")
         assert r.status_code == 200
         data = r.json()
@@ -424,8 +443,28 @@ def test_refresh_endpoint_runs_refresh_once() -> None:
         body = r.json()
         assert body["status"] == "ok"
         assert body["instance_count"] == 0
-        # last_refresh is populated by refresh_once even when there are no targets.
+        # last_refresh is populated by refresh_once even when there are no targets,
+        # and carries a UTC offset so clients in other zones read it correctly.
         assert body["last_refresh"] is not None
+        assert datetime.fromisoformat(body["last_refresh"]).utcoffset() == timedelta(0)
+
+
+def test_state_endpoint_timestamps_are_utc_with_offset() -> None:
+    """`/api/state` serializes `last_refresh` as ISO 8601 with an explicit UTC offset."""
+    server = DashboardServer(
+        targets=[_target()],
+        cfg=_cfg(),
+        state_path=None,
+        interval_s=30.0,
+        alerts_enabled=False,
+    )
+    app = make_app(server)
+    with TestClient(app, raise_server_exceptions=False) as client:
+        assert client.post("/api/refresh").status_code == 200
+        assert _RUN_TARGETS_CALLS, "refresh should have gone through the stub"
+        raw = client.get("/api/state").json()["last_refresh"]
+        assert raw.endswith("Z") or raw.endswith("+00:00")
+        assert datetime.fromisoformat(raw).utcoffset() == timedelta(0)
 
 
 def test_refresh_endpoint_requires_auth_when_token_set() -> None:
