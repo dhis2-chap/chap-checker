@@ -378,7 +378,7 @@ def test_connect_mode_renders_remote_state() -> None:
             )
             async with app.run_test(headless=True) as pilot:
                 await pilot.pause()
-                await app.action_refresh()
+                await app._poll()
                 await pilot.pause()
                 assert "alpha" in app.tiles
                 assert app.tiles["alpha"].tile_url == "https://alpha.example"
@@ -397,7 +397,7 @@ def test_connect_mode_shows_disconnect_banner_on_failure() -> None:
                 connect_url="http://nope.example:1",
             )
             async with app.run_test(headless=True) as pilot:
-                await app.action_refresh()
+                await app._poll()
                 await pilot.pause()
                 banner = app.query_one("#banner", DisconnectBanner)
                 assert banner.has_class("visible")
@@ -433,7 +433,7 @@ def test_connect_mode_sends_bearer_token_header() -> None:
             )
             async with app.run_test(headless=True) as pilot:
                 await pilot.pause()
-                await app.action_refresh()
+                await app._poll()
                 await pilot.pause()
                 # The bearer header is set once on the AsyncClient at
                 # construction time, so it ships on every call. The mock
@@ -462,7 +462,7 @@ def test_connect_mode_401_paints_auth_banner_not_generic_disconnect() -> None:
                 connect_token="wrong",
             )
             async with app.run_test(headless=True) as pilot:
-                await app.action_refresh()
+                await app._poll()
                 await pilot.pause()
                 banner = app.query_one("#banner", DisconnectBanner)
                 assert banner.has_class("visible")
@@ -488,7 +488,7 @@ def test_connect_mode_401_without_token_pushes_modal() -> None:
                 # connect_token=None - no token provided at CLI
             )
             async with app.run_test(headless=True) as pilot:
-                await app.action_refresh()
+                await app._poll()
                 await pilot.pause()
                 # Modal screen pushed; the active screen should be TokenPromptScreen.
                 assert isinstance(app.screen, TokenPromptScreen)
@@ -519,7 +519,7 @@ def test_token_prompt_submit_updates_http_client_and_refetches() -> None:
                 connect_url="http://remote.example:8765",
             )
             async with app.run_test(headless=True) as pilot:
-                await app.action_refresh()
+                await app._poll()
                 await pilot.pause()
                 assert isinstance(app.screen, TokenPromptScreen)
                 # Dismiss with a token value (same path as Sign in button).
@@ -550,7 +550,7 @@ def test_token_prompt_cancel_paints_banner_and_stops_prompting() -> None:
                 connect_url="http://remote.example:8765",
             )
             async with app.run_test(headless=True) as pilot:
-                await app.action_refresh()
+                await app._poll()
                 await pilot.pause()
                 assert isinstance(app.screen, TokenPromptScreen)
                 # Operator cancels without entering a token.
@@ -561,7 +561,7 @@ def test_token_prompt_cancel_paints_banner_and_stops_prompting() -> None:
                 assert "auth rejected" in str(banner.render()).lower()
                 # A subsequent refresh tick must NOT push the modal again -
                 # the `_token_prompted` flag gates re-prompting.
-                await app.action_refresh()
+                await app._poll()
                 await pilot.pause()
                 assert not isinstance(app.screen, TokenPromptScreen)
 

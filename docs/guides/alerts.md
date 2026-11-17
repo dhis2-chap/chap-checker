@@ -281,7 +281,7 @@ The same check coming back to OK on the next refresh:
       "check_name": "dhis2_chap_ping",
       "previous_status": "fail",
       "current_status": "ok",
-      "message": "chap-core responded (status 200).",
+      "message": "chap-core healthy (status 200).",
       "duration_ms": 87.1,
       "occurred_at": "2026-05-16T11:35:00Z"
     }

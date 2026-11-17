@@ -58,6 +58,10 @@ _extract_dhis2_version = extract_dhis2_version
 _worst = worst
 _HISTORY_LEN = HISTORY_LEN
 
+# `POST /api/refresh` returns only after the daemon has re-run every
+# check, so it gets a far longer timeout than the polling GETs.
+_REMOTE_REFRESH_TIMEOUT_S = 120.0
+
 # Primary accent. Used inside Static-rendered Rich markup as `[bold $success]…[/]`;
 # Textual's markup parser resolves `$success` to the active theme's success
 # colour at render time, so swapping themes hot-swaps the colour.
@@ -989,8 +993,8 @@ class DashboardApp(App[None]):
             # real theme only after sign-in. Same idea as the browser
             # SPA's eager /api/auth probe.
             await self._probe_remote_theme()
-        self.set_interval(self.interval_s, self.action_refresh)
-        self.call_after_refresh(self.action_refresh)
+        self.set_interval(self.interval_s, self._poll)
+        self.call_after_refresh(self._poll)
 
     async def _probe_remote_theme(self) -> None:
         """Best-effort fetch of `/api/auth` to learn the daemon's `[ui].theme`.
@@ -1043,17 +1047,21 @@ class DashboardApp(App[None]):
             # token is wrong / expired. Don't raise_for_status before
             # checking the status code ourselves.
             if response.status_code == 401:
-                if not self._token_prompted and self.connect_token is None:
-                    await self._prompt_for_token()
-                    return None
-                hint = "set --token-env" if self.connect_token is None else "check the token value"
-                self._set_disconnect_banner(f"auth rejected by {self.connect_url}: {hint}")
+                await self._handle_unauthorized()
                 return None
             response.raise_for_status()
             return DashboardState.model_validate_json(response.content)
         except Exception as exc:  # noqa: BLE001 - banner-paint covers any transport / parse error
             self._set_disconnect_banner(f"disconnected from {self.connect_url}: {exc}")
             return None
+
+    async def _handle_unauthorized(self) -> None:
+        """React to a 401 from the daemon (shared by state fetch and manual refresh)."""
+        if not self._token_prompted and self.connect_token is None:
+            await self._prompt_for_token()
+            return
+        hint = "set --token-env" if self.connect_token is None else "check the token value"
+        self._set_disconnect_banner(f"auth rejected by {self.connect_url}: {hint}")
 
     async def _prompt_for_token(self) -> None:
         """Pop the TokenPromptScreen non-blockingly; result is handled by callback.
@@ -1097,7 +1105,7 @@ class DashboardApp(App[None]):
             timeout=httpx.Timeout(10.0),
             headers={"Authorization": f"Bearer {self.connect_token}"},
         )
-        await self.action_refresh()
+        await self._poll()
 
     def _set_disconnect_banner(self, message: str | None) -> None:
         try:
@@ -1112,11 +1120,51 @@ class DashboardApp(App[None]):
             banner.add_class("visible")
 
     async def action_refresh(self) -> None:
+        """Manual refresh (`r` / command palette): re-run the checks, then repaint.
+
+        Local mode re-runs the embedded server's checks. Connect mode
+        asks the daemon to re-run its checks (`POST /api/refresh`) and
+        then fetches the new snapshot; a plain `GET /api/state` would
+        only return the daemon's cached state.
+        """
+        await self._refresh(trigger_remote=True)
+
+    async def _poll(self) -> None:
+        """Periodic tick: local mode runs the checks, connect mode only fetches state."""
+        await self._refresh(trigger_remote=False)
+
+    async def _trigger_remote_refresh(self) -> bool:
+        """POST `/api/refresh` on the daemon. Returns True on success.
+
+        A 401 goes through the same path as `/api/state` (token modal on
+        the first one, auth-rejected banner afterwards). Any other
+        failure shows an error toast; the caller skips the state fetch.
+        """
+        assert self.connect_url is not None and self._http_client is not None
+        url = self.connect_url.rstrip("/") + "/api/refresh"
+        try:
+            # The daemon answers only once every check has run, which can
+            # outlast the client's default 10 s timeout.
+            response = await self._http_client.post(url, timeout=httpx.Timeout(_REMOTE_REFRESH_TIMEOUT_S))
+        except Exception as exc:  # noqa: BLE001 - any transport error becomes a toast
+            self.notify(f"Refresh failed: {exc}", severity="error")
+            return False
+        if response.status_code == 401:
+            await self._handle_unauthorized()
+            return False
+        if response.status_code >= 400:
+            self.notify(f"Refresh failed: HTTP {response.status_code} from {url}", severity="error")
+            return False
+        return True
+
+    async def _refresh(self, *, trigger_remote: bool) -> None:
         """Drive one refresh: fetch a snapshot, reconcile tiles, update header."""
         if self._refreshing:
             return
         self._refreshing = True
         try:
+            if trigger_remote and self.server is None and not await self._trigger_remote_refresh():
+                return
             state = await self._fetch_state()
             if state is None:
                 return
@@ -1176,10 +1224,13 @@ class DashboardApp(App[None]):
         if self.config_path is None or self.server is None:
             self.notify("No config path - running with ad-hoc target.", severity="warning")
             return
+        # Build the whole replacement before touching any live state:
+        # parsing the TOML, then resolving each instance into a runtime
+        # target (which reads `password_env` / `token_env` and can raise
+        # for an unset variable). Any failure leaves the old config
+        # running and surfaces as a toast instead of killing the app.
         try:
             new_cfg = load_config(self.config_path)
-            # Inside the try: resolving `*_env` credentials can fail (unset or
-            # empty env var) and must not take the TUI down.
             new_targets = [
                 entry.to_target_entry(name, default_retry_policy=new_cfg.retry)
                 for name, entry in new_cfg.instances.items()

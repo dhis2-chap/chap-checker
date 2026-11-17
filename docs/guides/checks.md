@@ -100,8 +100,11 @@ check returns `WARN`.
 ### `dhis2_chap_ping`
 
 Hits `/api/routes/chap/run/health` — chap-core's `/health` endpoint behind the
-DHIS2 route. Cheap liveness check; doesn't parse the body. A 502 from the
-route layer is reported as a chap-core outage.
+DHIS2 route. Cheap liveness check. The body must be chap-core's JSON health
+payload (`{"status": "success", "message": "healthy"}`): a non-JSON 2xx
+(typically an SSO or reverse-proxy login page), malformed JSON, a JSON body
+without a `status` field, or a `status` other than `success` is `FAIL`. A 502
+from the route layer is reported as a chap-core outage.
 
 ### `dhis2_chap_system_info`
 

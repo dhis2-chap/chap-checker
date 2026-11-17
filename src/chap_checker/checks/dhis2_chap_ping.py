@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from dhis2w_client import Dhis2Client
 
@@ -70,9 +70,55 @@ class Dhis2ChapPingCheck:
                 duration_ms=duration_ms,
             )
 
+        return self._check_body(response, duration_ms)
+
+    def _check_body(self, response: Any, duration_ms: float) -> CheckResult:
+        """Validate a 2xx body is chap-core's `{"status", "message"}` health payload.
+
+        A 2xx alone is not proof chap-core answered: an SSO or reverse
+        proxy in front of DHIS2 (or of chap-core) can return a 200 HTML
+        login page. Anything other than a JSON object carrying chap-core's
+        `status` field is a FAIL.
+        """
+
+        def fail(message: str, **details: Any) -> CheckResult:
+            return CheckResult(
+                name=self.name,
+                status=Status.FAIL,
+                message=message,
+                details={"http_status": response.status_code, "path": PING_PATH, **details},
+                duration_ms=duration_ms,
+            )
+
+        content_type = response.headers.get("content-type", "")
+        if content_type and "json" not in content_type.lower():
+            return fail(
+                f"{PING_PATH} responded with a non-JSON body ({content_type.split(';')[0].strip()}) - "
+                "likely an SSO or proxy login page intercepted the request. chap-core was not reached.",
+                content_type=content_type,
+            )
+        try:
+            body: Any = response.json()
+        except ValueError:
+            return fail(f"{PING_PATH} returned malformed JSON - the response is not from chap-core.")
+        if not isinstance(body, dict) or not isinstance(body.get("status"), str):
+            return fail(
+                f"Unexpected {PING_PATH} response shape (expected a JSON object with a 'status' field) - "
+                "the response is not from chap-core.",
+            )
+
+        health_status: str = body["status"]
+        health_message = body.get("message") if isinstance(body.get("message"), str) else None
+        details: dict[str, Any] = {"health_status": health_status}
+        if health_message is not None:
+            details["health_message"] = health_message
+        if health_status != "success":
+            suffix = f": {health_message}" if health_message else ""
+            return fail(f"chap-core reported health status '{health_status}'{suffix}", **details)
         return CheckResult(
             name=self.name,
             status=Status.OK,
-            message=f"chap-core responded (status {response.status_code}).",
+            message=f"chap-core healthy (status {response.status_code}).",
+            details=details,
             duration_ms=duration_ms,
         )
