@@ -9,7 +9,7 @@ CLI --token / --token-env flags.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import cast
+from typing import Any, cast
 
 import httpx2 as httpx
 import pytest
@@ -17,9 +17,10 @@ import typer
 from pydantic import HttpUrl, ValidationError
 from typer.testing import CliRunner
 
-from chap_checker.cli import _resolve_adhoc_token, app
+from chap_checker.cli import _resolve_adhoc_password, _resolve_adhoc_token, app
 from chap_checker.client import Dhis2Target
 from chap_checker.config import Dhis2InstanceConfig
+from chap_checker.runner import RunReport, TargetEntry
 
 runner = CliRunner()
 
@@ -136,7 +137,17 @@ def test_instance_password_still_requires_username() -> None:
 
 @pytest.fixture
 def clean_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    for k in ("DHIS2_PASSWORD", "DHIS2_TOKEN", "TOK_FROM_ENV", "MISSING"):
+    for k in (
+        "DHIS2_PASSWORD",
+        "DHIS2_TOKEN",
+        "DHIS2_USERNAME",
+        "DHIS2_URL",
+        "CHAP_CHECKER_TOKEN",
+        "CHAP_CHECKER_CONFIG",
+        "TOK_FROM_ENV",
+        "PW_FROM_ENV",
+        "MISSING",
+    ):
         monkeypatch.delenv(k, raising=False)
     yield
 
@@ -160,6 +171,19 @@ def test_resolve_token_both_flags_raises(clean_env: None) -> None:
         _resolve_adhoc_token(token="t", token_env="ENV")
 
 
+def test_resolve_token_env_beats_ambient_token(monkeypatch: pytest.MonkeyPatch, clean_env: None) -> None:
+    """A `--token` value filled from `DHIS2_TOKEN` must not conflict with `--token-env`."""
+    monkeypatch.setenv("TOK_FROM_ENV", "from-env")
+    assert _resolve_adhoc_token(token="ambient", token_env="TOK_FROM_ENV", token_explicit=False) == "from-env"
+
+
+def test_resolve_password_env_beats_ambient_password(monkeypatch: pytest.MonkeyPatch, clean_env: None) -> None:
+    """A `--password` value filled from `DHIS2_PASSWORD` must not conflict with `--password-env`."""
+    monkeypatch.setenv("PW_FROM_ENV", "from-env")
+    resolved = _resolve_adhoc_password(password="ambient", password_env="PW_FROM_ENV", password_explicit=False)
+    assert resolved == "from-env"
+
+
 def test_resolve_token_non_tty_raises(monkeypatch: pytest.MonkeyPatch, clean_env: None) -> None:
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)
     with pytest.raises(typer.BadParameter, match="DHIS2_TOKEN"):
@@ -173,30 +197,57 @@ def test_resolve_token_tty_prompts(monkeypatch: pytest.MonkeyPatch, clean_env: N
 
 
 # ---------- CLI end-to-end ----------
+#
+# `verify` is driven through the real Typer app, but the check runner
+# is stubbed so no network call happens. The stub records the targets
+# the CLI built, which lets each test assert the selected auth mode and
+# the exact credential instead of inferring it from the exit code.
 
 
-def test_cli_token_and_password_mutex(clean_env: None) -> None:
-    result = runner.invoke(
-        app,
-        ["verify", "--url", "https://nope.example", "--password", "p", "--token", "t"],
-    )
+@pytest.fixture
+def captured_targets(monkeypatch: pytest.MonkeyPatch) -> list[TargetEntry]:
+    captured: list[TargetEntry] = []
+
+    def fake_run_targets_sync(targets: list[TargetEntry], **_kwargs: Any) -> list[RunReport]:
+        captured.extend(targets)
+        return []
+
+    monkeypatch.setattr("chap_checker.cli.run_targets_sync", fake_run_targets_sync)
+    # Never fall into an interactive prompt from inside CliRunner.
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    return captured
+
+
+def _only_dhis2_target(captured: list[TargetEntry]) -> Dhis2Target:
+    assert len(captured) == 1
+    target = captured[0].target
+    assert isinstance(target, Dhis2Target)
+    return target
+
+
+URL = "https://nope.example.invalid"
+
+
+def test_cli_token_and_password_mutex(clean_env: None, captured_targets: list[TargetEntry]) -> None:
+    result = runner.invoke(app, ["verify", "--url", URL, "--password", "p", "--token", "t"])
     assert result.exit_code == 2
-    assert "not both" in (result.stdout + result.output).lower()
+    assert "not both" in result.output.lower()
+    assert captured_targets == []
 
 
-def test_cli_token_works_without_username(monkeypatch: pytest.MonkeyPatch, clean_env: None) -> None:
-    """--token must be sufficient without --username (PATs are user-bound on the server)."""
+def test_cli_token_works_without_username(
+    monkeypatch: pytest.MonkeyPatch,
+    clean_env: None,
+    captured_targets: list[TargetEntry],
+) -> None:
+    """--token-env must be sufficient without --username (PATs are user-bound on the server)."""
     monkeypatch.setenv("TOK_FROM_ENV", "secret-pat")
-    # We expect the resolver path to accept this and fail later on the
-    # network call (unreachable host). Anything not a typer BadParameter
-    # exit (code 2) is success for this test.
-    result = runner.invoke(
-        app,
-        ["verify", "--url", "https://nope.example.invalid", "--token-env", "TOK_FROM_ENV"],
-    )
-    # The check probably FAILed at the network layer, so exit code is
-    # non-zero - but it MUST NOT be a BadParameter / typer error.
-    assert result.exit_code != 2 or "username" not in (result.stdout + result.output).lower()
+    result = runner.invoke(app, ["verify", "--url", URL, "--token-env", "TOK_FROM_ENV"])
+    assert result.exit_code == 0, result.output
+    target = _only_dhis2_target(captured_targets)
+    assert target.token == "secret-pat"
+    assert target.username is None
+    assert target.password is None
 
 
 def test_cli_token_env_flag_declared() -> None:
@@ -216,49 +267,104 @@ def test_cli_token_env_flag_declared() -> None:
 def test_dhis2_password_in_env_does_not_block_token_env_flag(
     monkeypatch: pytest.MonkeyPatch,
     clean_env: None,
+    captured_targets: list[TargetEntry],
 ) -> None:
-    """`--token-env FOO` with ambient `DHIS2_PASSWORD` must be accepted.
-
-    Regression for: env-backed Typer values were treated as explicit
-    flags, so any operator with `DHIS2_PASSWORD` exported in their
-    shell saw token auth fail with a spurious mutex error.
-    """
+    """`--token-env FOO` with ambient `DHIS2_PASSWORD` must select token mode."""
     monkeypatch.setenv("DHIS2_PASSWORD", "ambient-pw")
     monkeypatch.setenv("TOK_FROM_ENV", "the-token")
-    result = runner.invoke(
-        app,
-        ["verify", "--url", "https://nope.example.invalid", "--token-env", "TOK_FROM_ENV"],
-    )
-    # We don't care about the network outcome - just that the resolver
-    # didn't reject the invocation as a mutex error.
-    assert result.exit_code != 2 or "not both" not in (result.stdout + result.output).lower()
+    result = runner.invoke(app, ["verify", "--url", URL, "--token-env", "TOK_FROM_ENV"])
+    assert result.exit_code == 0, result.output
+    target = _only_dhis2_target(captured_targets)
+    assert target.token == "the-token"
+    assert target.password is None
 
 
 def test_dhis2_token_in_env_does_not_block_password_env_flag(
     monkeypatch: pytest.MonkeyPatch,
     clean_env: None,
+    captured_targets: list[TargetEntry],
 ) -> None:
-    """Symmetric: `--password-env FOO` + ambient `DHIS2_TOKEN` must work."""
+    """Symmetric: `--password-env FOO` + ambient `DHIS2_TOKEN` must select basic auth."""
     monkeypatch.setenv("DHIS2_TOKEN", "ambient-token")
     monkeypatch.setenv("PW_FROM_ENV", "the-pw")
+    result = runner.invoke(app, ["verify", "--url", URL, "--username", "u", "--password-env", "PW_FROM_ENV"])
+    assert result.exit_code == 0, result.output
+    target = _only_dhis2_target(captured_targets)
+    assert target.token is None
+    assert target.username == "u"
+    assert target.password == "the-pw"
+
+
+def test_token_env_beats_ambient_dhis2_token(
+    monkeypatch: pytest.MonkeyPatch,
+    clean_env: None,
+    captured_targets: list[TargetEntry],
+) -> None:
+    """`--token-env OTHER` with `DHIS2_TOKEN` exported must use OTHER, not error."""
+    monkeypatch.setenv("DHIS2_TOKEN", "ambient-token")
+    monkeypatch.setenv("TOK_FROM_ENV", "explicit-token")
+    result = runner.invoke(app, ["verify", "--url", URL, "--token-env", "TOK_FROM_ENV"])
+    assert result.exit_code == 0, result.output
+    assert _only_dhis2_target(captured_targets).token == "explicit-token"
+
+
+def test_password_env_beats_ambient_dhis2_password(
+    monkeypatch: pytest.MonkeyPatch,
+    clean_env: None,
+    captured_targets: list[TargetEntry],
+) -> None:
+    """`--password-env OTHER` with `DHIS2_PASSWORD` exported must use OTHER, not error."""
+    monkeypatch.setenv("DHIS2_PASSWORD", "ambient-pw")
+    monkeypatch.setenv("PW_FROM_ENV", "explicit-pw")
+    result = runner.invoke(app, ["verify", "--url", URL, "--username", "u", "--password-env", "PW_FROM_ENV"])
+    assert result.exit_code == 0, result.output
+    target = _only_dhis2_target(captured_targets)
+    assert target.password == "explicit-pw"
+    assert target.token is None
+
+
+def test_explicit_token_and_token_env_still_conflict(
+    monkeypatch: pytest.MonkeyPatch,
+    clean_env: None,
+    captured_targets: list[TargetEntry],
+) -> None:
+    monkeypatch.setenv("TOK_FROM_ENV", "explicit-token")
+    result = runner.invoke(app, ["verify", "--url", URL, "--token", "t", "--token-env", "TOK_FROM_ENV"])
+    assert result.exit_code == 2
+    assert "not both" in result.output.lower()
+    assert captured_targets == []
+
+
+def test_explicit_password_and_password_env_still_conflict(
+    monkeypatch: pytest.MonkeyPatch,
+    clean_env: None,
+    captured_targets: list[TargetEntry],
+) -> None:
+    monkeypatch.setenv("PW_FROM_ENV", "explicit-pw")
     result = runner.invoke(
         app,
-        [
-            "verify",
-            "--url",
-            "https://nope.example.invalid",
-            "--username",
-            "u",
-            "--password-env",
-            "PW_FROM_ENV",
-        ],
+        ["verify", "--url", URL, "--username", "u", "--password", "p", "--password-env", "PW_FROM_ENV"],
     )
-    assert result.exit_code != 2 or "not both" not in (result.stdout + result.output).lower()
+    assert result.exit_code == 2
+    assert "not both" in result.output.lower()
+    assert captured_targets == []
+
+
+def test_ambient_dhis2_token_alone_selects_token_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    clean_env: None,
+    captured_targets: list[TargetEntry],
+) -> None:
+    monkeypatch.setenv("DHIS2_TOKEN", "ambient-token")
+    result = runner.invoke(app, ["verify", "--url", URL])
+    assert result.exit_code == 0, result.output
+    assert _only_dhis2_target(captured_targets).token == "ambient-token"
 
 
 def test_both_env_vars_ambient_with_no_flags_errors_clearly(
     monkeypatch: pytest.MonkeyPatch,
     clean_env: None,
+    captured_targets: list[TargetEntry],
 ) -> None:
     """If only env vars are set and they collide, error with a helpful hint.
 
@@ -267,27 +373,81 @@ def test_both_env_vars_ambient_with_no_flags_errors_clearly(
     """
     monkeypatch.setenv("DHIS2_TOKEN", "t")
     monkeypatch.setenv("DHIS2_PASSWORD", "p")
-    result = runner.invoke(app, ["verify", "--url", "https://nope.example.invalid"])
+    result = runner.invoke(app, ["verify", "--url", URL])
     assert result.exit_code == 2
-    out = (result.stdout + result.output).lower()
+    out = result.output.lower()
     assert "dhis2_token" in out and "dhis2_password" in out
+    assert captured_targets == []
 
 
 def test_explicit_username_forces_password_mode_even_with_dhis2_token_env(
     monkeypatch: pytest.MonkeyPatch,
     clean_env: None,
+    captured_targets: list[TargetEntry],
 ) -> None:
     """`--username u` is an explicit "I want basic auth" signal.
 
     Even with `DHIS2_TOKEN` exported, the resolver must not flip to
-    token mode behind the user's back. We just need a non-mutex
-    error - the actual run will fail later at the network layer.
+    token mode behind the user's back; the password comes from the
+    ambient `DHIS2_PASSWORD`.
     """
     monkeypatch.setenv("DHIS2_TOKEN", "ambient-token")
     monkeypatch.setenv("DHIS2_PASSWORD", "ambient-pw")
-    result = runner.invoke(app, ["verify", "--url", "https://nope.example.invalid", "--username", "u"])
-    out = (result.stdout + result.output).lower()
-    # Should NOT see the mutex or the both-env-vars error - --username
-    # selects password mode definitively.
-    assert "not both" not in out
-    assert "are both set in the environment" not in out
+    result = runner.invoke(app, ["verify", "--url", URL, "--username", "u"])
+    assert result.exit_code == 0, result.output
+    target = _only_dhis2_target(captured_targets)
+    assert target.token is None
+    assert target.username == "u"
+    assert target.password == "ambient-pw"
+
+
+# ---------- tui --connect token flags ----------
+
+
+@pytest.fixture
+def captured_dashboard(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    captured: dict[str, Any] = {}
+
+    def fake_run(**kwargs: Any) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr("chap_checker.dashboard.run", fake_run)
+    return captured
+
+
+def test_tui_token_env_beats_ambient_chap_checker_token(
+    monkeypatch: pytest.MonkeyPatch,
+    clean_env: None,
+    captured_dashboard: dict[str, Any],
+) -> None:
+    monkeypatch.setenv("CHAP_CHECKER_TOKEN", "ambient")
+    monkeypatch.setenv("TOK_FROM_ENV", "explicit")
+    result = runner.invoke(app, ["tui", "--connect", "http://tv:8765", "--token-env", "TOK_FROM_ENV"])
+    assert result.exit_code == 0, result.output
+    assert captured_dashboard["connect_token"] == "explicit"
+
+
+def test_tui_ambient_chap_checker_token_used_without_flags(
+    monkeypatch: pytest.MonkeyPatch,
+    clean_env: None,
+    captured_dashboard: dict[str, Any],
+) -> None:
+    monkeypatch.setenv("CHAP_CHECKER_TOKEN", "ambient")
+    result = runner.invoke(app, ["tui", "--connect", "http://tv:8765"])
+    assert result.exit_code == 0, result.output
+    assert captured_dashboard["connect_token"] == "ambient"
+
+
+def test_tui_explicit_token_and_token_env_conflict(
+    monkeypatch: pytest.MonkeyPatch,
+    clean_env: None,
+    captured_dashboard: dict[str, Any],
+) -> None:
+    monkeypatch.setenv("TOK_FROM_ENV", "explicit")
+    result = runner.invoke(
+        app,
+        ["tui", "--connect", "http://tv:8765", "--token", "t", "--token-env", "TOK_FROM_ENV"],
+    )
+    assert result.exit_code == 2
+    assert "not both" in result.output.lower()
+    assert captured_dashboard == {}

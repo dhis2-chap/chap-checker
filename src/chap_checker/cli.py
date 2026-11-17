@@ -503,8 +503,10 @@ def tui_command(
                 "Those settings live on the remote daemon you're connecting to.",
             )
         # `--token` and `--token-env` are also mutually exclusive (same
-        # rationale as `verify`'s password / password_env pair).
-        if token is not None and token_env is not None:
+        # rationale as `verify`'s password / password_env pair). Only an
+        # explicit `--token` conflicts: a `CHAP_CHECKER_TOKEN` exported in
+        # the shell is an ambient fallback that `--token-env` overrides.
+        if token is not None and token_env is not None and _from_commandline(ctx, "token"):
             raise typer.BadParameter("Pass either --token or --token-env, not both.")
         connect_token: str | None = None
         if token_env is not None:
@@ -972,14 +974,20 @@ def _target_entries(cfg: CheckerConfig) -> list[TargetEntry]:
         raise typer.BadParameter(str(exc)) from exc
 
 
-def _resolve_adhoc_token(*, token: str | None, token_env: str | None) -> str:
+def _resolve_adhoc_token(*, token: str | None, token_env: str | None, token_explicit: bool = True) -> str:
     """Pick the ad-hoc-mode PAT from the safest source available.
 
-    Mirrors :func:`_resolve_adhoc_password` priority: explicit value,
-    named env var, ``DHIS2_TOKEN`` (auto-wired by typer onto
-    ``--token``), interactive prompt on a TTY, else helpful error.
+    Mirrors :func:`_resolve_adhoc_password` priority: named env var
+    (``--token-env``), explicit value, ``DHIS2_TOKEN`` (auto-wired by
+    typer onto ``--token``), interactive prompt on a TTY, else helpful
+    error.
+
+    ``token_explicit`` says whether ``token`` came from ``--token`` on
+    the command line (True) or from the ``DHIS2_TOKEN`` env fallback
+    (False). Only two explicit flags conflict; an explicit
+    ``--token-env`` silently beats an ambient ``DHIS2_TOKEN``.
     """
-    if token is not None and token_env is not None:
+    if token is not None and token_env is not None and token_explicit:
         raise typer.BadParameter("Pass either --token or --token-env, not both.")
     if token_env is not None:
         value = os.environ.get(token_env)
@@ -999,7 +1007,12 @@ def _resolve_adhoc_token(*, token: str | None, token_env: str | None) -> str:
     )
 
 
-def _resolve_adhoc_password(*, password: str | None, password_env: str | None) -> str:
+def _resolve_adhoc_password(
+    *,
+    password: str | None,
+    password_env: str | None,
+    password_explicit: bool = True,
+) -> str:
     """Pick the ad-hoc-mode password from the safest source available.
 
     Priority:
@@ -1011,8 +1024,14 @@ def _resolve_adhoc_password(*, password: str | None, password_env: str | None) -
 
     Otherwise raises a helpful ``BadParameter`` so cron / CI errors point
     at the missing flag rather than dropping into an unattainable prompt.
+
+    ``password_explicit`` says whether ``password`` came from
+    ``--password`` on the command line (True) or from the
+    ``DHIS2_PASSWORD`` env fallback (False). Only two explicit flags
+    conflict; an explicit ``--password-env`` beats an ambient
+    ``DHIS2_PASSWORD``.
     """
-    if password is not None and password_env is not None:
+    if password is not None and password_env is not None and password_explicit:
         raise typer.BadParameter("Pass either --password or --password-env, not both.")
     if password_env is not None:
         value = os.environ.get(password_env)
@@ -1094,7 +1113,13 @@ def _build_adhoc_target(
         use_token = False
 
     if use_token:
-        resolved_token = _resolve_adhoc_token(token=token, token_env=token_env)
+        resolved_token = _resolve_adhoc_token(
+            token=token,
+            token_env=token_env,
+            # No source info (direct callers / legacy tests): treat a
+            # populated value as explicit so the mutex still applies.
+            token_explicit=cli_source.get("token", token is not None),
+        )
         return Dhis2Target(
             base_url=url,  # type: ignore[arg-type]  # Pydantic coerces str -> HttpUrl
             token=resolved_token,
@@ -1105,7 +1130,11 @@ def _build_adhoc_target(
         raise typer.BadParameter(
             "--url requires --username (with a password) or one of --token / --token-env / DHIS2_TOKEN.",
         )
-    resolved_password = _resolve_adhoc_password(password=password, password_env=password_env)
+    resolved_password = _resolve_adhoc_password(
+        password=password,
+        password_env=password_env,
+        password_explicit=cli_source.get("password", password is not None),
+    )
     return Dhis2Target(
         base_url=url,  # type: ignore[arg-type]  # Pydantic coerces str -> HttpUrl
         username=username,

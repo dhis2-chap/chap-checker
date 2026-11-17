@@ -49,6 +49,14 @@ simply ignored). If neither auth flag is on the command line and
 **both** `DHIS2_TOKEN` and `DHIS2_PASSWORD` are exported, the CLI
 errors out asking you to pick a mode explicitly rather than guessing.
 
+The same rule applies within one auth family: an explicit
+`--token-env NAME` beats an exported `DHIS2_TOKEN`, and an explicit
+`--password-env NAME` beats an exported `DHIS2_PASSWORD`. Only two
+flags typed on the command line (`--token` with `--token-env`, or
+`--password` with `--password-env`) are rejected as a conflict.
+`tui --connect` treats `--token-env` and an exported
+`CHAP_CHECKER_TOKEN` the same way.
+
 | Flag                          | Purpose                                                                                                                                  |
 | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | `--config <path>` / `-c`      | Override the default `./chap-checker.toml`. Env: `CHAP_CHECKER_CONFIG`.                                                                   |
