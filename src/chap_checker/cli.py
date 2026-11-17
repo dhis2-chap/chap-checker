@@ -6,12 +6,13 @@ import asyncio
 import json
 import os
 import sys
+import tomllib
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 
 import typer
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from rich.console import Console
 from rich.table import Table
 
@@ -27,6 +28,7 @@ from chap_checker.config import (
     AlertsConfig,
     CheckerConfig,
     default_config_path,
+    format_config_error,
     load_config,
 )
 from chap_checker.logging import configure as configure_logging
@@ -199,6 +201,8 @@ checks = ["dhis2_ping", "dhis2_system_info"]
 # Optional bearer-token auth for `chap-checker serve` ONLY (the HTTP
 # daemon). No effect on `verify` or local `tui` - those run in your
 # terminal and aren't network-reachable. See docs/guides/serve.md#authentication.
+# The token must be non-empty printable ASCII without spaces; an empty or
+# unset token_env makes `serve` refuse to start.
 # [auth]
 # token_env = "CHAP_CHECKER_TOKEN"
 
@@ -534,7 +538,7 @@ def tui_command(
         raise typer.BadParameter(
             f"No config at {config_path}. Provide --config <path> or create a ./{DEFAULT_CONFIG_FILENAME}.",
         )
-    cfg = load_config(config_path)
+    cfg = _load_config_or_fail(config_path)
     if not cfg.instances:
         raise typer.BadParameter(f"{config_path} contains no [instances.<name>] entries.")
     # The `[auth]` block gates `chap-checker serve`'s HTTP surface; local
@@ -550,7 +554,7 @@ def tui_command(
             err=True,
         )
 
-    targets = [entry.to_target_entry(name, default_retry_policy=cfg.retry) for name, entry in cfg.instances.items()]
+    targets = _target_entries(cfg)
     state_path = state if state is not None else config_path.parent / DEFAULT_STATE_FILENAME
 
     run_dashboard(
@@ -704,7 +708,7 @@ def alerts_test_command(
         raise typer.BadParameter(
             f"No config at {config_path}. Provide --config <path> or create a ./{DEFAULT_CONFIG_FILENAME}.",
         )
-    cfg = load_config(config_path)
+    cfg = _load_config_or_fail(config_path)
     if cfg.alerts is None:
         raise typer.BadParameter(f"{config_path} has no [alerts.*] section.")
 
@@ -862,11 +866,11 @@ def serve_command(
         raise typer.BadParameter(
             f"No config at {config_path}. Provide --config <path> or create a ./{DEFAULT_CONFIG_FILENAME}.",
         )
-    cfg = load_config(config_path)
+    cfg = _load_config_or_fail(config_path)
     if not cfg.instances:
         raise typer.BadParameter(f"{config_path} contains no [instances.<name>] entries.")
 
-    targets = [entry.to_target_entry(name, default_retry_policy=cfg.retry) for name, entry in cfg.instances.items()]
+    targets = _target_entries(cfg)
     state_path = state if state is not None else config_path.parent / DEFAULT_STATE_FILENAME
     # `[auth]` block in the TOML opts the daemon into bearer-token auth on
     # /api/*. Resolved here so an env-var lookup failure is surfaced as a
@@ -945,6 +949,27 @@ checks_app.command("list", help="List registered checks.")(_checks_list_impl)
 checks_app.command("ls", hidden=True)(_checks_list_impl)
 
 app.add_typer(checks_app, name="checks")
+
+
+def _load_config_or_fail(config_path: Path) -> CheckerConfig:
+    """Load `config_path`, turning parse / validation errors into a clean CLI error.
+
+    An uncaught `pydantic.ValidationError` would print its default string,
+    which includes every rejected `input_value` (passwords, tokens, webhook
+    URLs). `format_config_error` keeps only the field location and message.
+    """
+    try:
+        return load_config(config_path)
+    except (ValidationError, tomllib.TOMLDecodeError) as exc:
+        raise typer.BadParameter(f"invalid config {config_path}:\n{format_config_error(exc)}") from None
+
+
+def _target_entries(cfg: CheckerConfig) -> list[TargetEntry]:
+    """Build every configured target, reporting unresolvable `*_env` credentials as a CLI error."""
+    try:
+        return [entry.to_target_entry(name, default_retry_policy=cfg.retry) for name, entry in cfg.instances.items()]
+    except RuntimeError as exc:
+        raise typer.BadParameter(str(exc)) from exc
 
 
 def _resolve_adhoc_token(*, token: str | None, token_env: str | None) -> str:
@@ -1147,7 +1172,7 @@ def _resolve_run_context(
             f"No config at {config_path}. Provide --config <path>, "
             f"create a ./{DEFAULT_CONFIG_FILENAME}, or use --url for ad-hoc mode.",
         )
-    cfg = load_config(config_path)
+    cfg = _load_config_or_fail(config_path)
     if not cfg.instances:
         raise typer.BadParameter(f"{config_path} contains no [instances.<name>] entries.")
 
@@ -1156,10 +1181,13 @@ def _resolve_run_context(
             entry = cfg.get(instance)
         except KeyError as exc:
             raise typer.BadParameter(str(exc)) from exc
-        target_entry = entry.to_target_entry(instance, default_retry_policy=cfg.retry)
+        try:
+            target_entry = entry.to_target_entry(instance, default_retry_policy=cfg.retry)
+        except RuntimeError as exc:
+            raise typer.BadParameter(str(exc)) from exc
         targets = [target_entry]
     else:
-        targets = [entry.to_target_entry(name, default_retry_policy=cfg.retry) for name, entry in cfg.instances.items()]
+        targets = _target_entries(cfg)
     if check_names:
         targets = _apply_check_override(targets, check_names)
     return targets, cfg, config_path

@@ -76,7 +76,7 @@ Slack's own full guide on Incoming Webhooks lives at
 
 | Field             | Type            | Default                       | Notes                                                                                                            |
 |---                |---              |---                            |---                                                                                                               |
-| `webhook_url`     | string          | —                             | Inline URL. Mutually exclusive with `webhook_url_env`.                                                           |
+| `webhook_url`     | string          | —                             | Inline URL. Mutually exclusive with `webhook_url_env`. Must not contain `user:pass@` credentials.                |
 | `webhook_url_env` | string          | —                             | Name of an env var holding the URL. Recommended. Mutually exclusive with `webhook_url`.                          |
 | `notify_on`       | list of Status  | `["fail", "error", "warn"]`   | Which target statuses fire. Drop `"warn"` if you want only hard failures to page. `"ok"` would fire on recovery. |
 | `timeout_s`       | float           | `10.0`                        | HTTP timeout for the POST. Must be > 0.                                                                          |
@@ -189,7 +189,7 @@ headers = { "Authorization" = "Bearer ..." }  # optional literal HTTP headers
 
 | Field        | Type                     | Default                       | Notes                                                                                                                              |
 |---           |---                       |---                            |---                                                                                                                                 |
-| `url`        | string                   | —                             | Inline URL. Mutually exclusive with `url_env`.                                                                                     |
+| `url`        | string                   | —                             | Inline URL. Mutually exclusive with `url_env`. Must not contain `user:pass@` credentials; use `headers` for auth.                   |
 | `url_env`    | string                   | —                             | Name of an env var holding the URL. Recommended. Mutually exclusive with `url`.                                                    |
 | `notify_on`  | list of Status           | `["fail", "error", "warn"]`   | Statuses that fire (same shape as Slack).                                                                                          |
 | `timeout_s`  | float                    | `10.0`                        | HTTP timeout for the POST.                                                                                                         |

@@ -40,7 +40,7 @@ from textual.widget import Widget
 from textual.widgets import Button, Input, Label, Static
 
 from chap_checker.checks.base import Status
-from chap_checker.config import CheckerConfig, load_config
+from chap_checker.config import CheckerConfig, format_config_error, load_config
 from chap_checker.daemon import (
     HISTORY_LEN,
     DashboardServer,
@@ -1162,14 +1162,18 @@ class DashboardApp(App[None]):
             return
         try:
             new_cfg = load_config(self.config_path)
+            # Inside the try: resolving `*_env` credentials can fail (unset or
+            # empty env var) and must not take the TUI down.
+            new_targets = [
+                entry.to_target_entry(name, default_retry_policy=new_cfg.retry)
+                for name, entry in new_cfg.instances.items()
+            ]
         except Exception as exc:  # noqa: BLE001 - any error surfaces as a toast
-            self.notify(f"Reload failed: {exc}", severity="error")
+            # `format_config_error` keeps rejected secret values out of the toast.
+            self.notify(f"Reload failed: {format_config_error(exc)}", severity="error")
             return
         # Apply the new config to the embedded server. The next tick will
         # pick up the new tiles via reconciliation.
-        new_targets = [
-            entry.to_target_entry(name, default_retry_policy=new_cfg.retry) for name, entry in new_cfg.instances.items()
-        ]
         old_names = {t.name for t in self.server.targets}
         new_names = {t.name for t in new_targets}
         old_theme = self.server.cfg.ui.theme

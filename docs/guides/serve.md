@@ -300,6 +300,8 @@ In `chap-checker.toml`:
 token_env = "CHAP_CHECKER_TOKEN"
 ```
 
+The token must be printable ASCII with no spaces (hex, base64 and URL-safe base64 all qualify) and no leading or trailing whitespace. An empty value is rejected too, so an `[auth]` block can never leave the daemon open by accident: a literal `token` that breaks these rules fails config validation, and a `token_env` that is unset, empty or invalid makes `serve` exit at startup. On `POST /api/reload` the same failures return 400 and the previous token stays in force. Error messages name the field and env var, never the token value.
+
 Restart the daemon. Every call to `/api/state` now needs the header:
 
 ```bash

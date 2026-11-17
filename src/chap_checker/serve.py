@@ -36,7 +36,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from chap_checker.config import CheckerConfig
+from chap_checker.config import CheckerConfig, format_config_error, validate_bearer_token
 from chap_checker.daemon import DashboardServer
 from chap_checker.logging import get_logger
 from chap_checker.runner import TargetEntry
@@ -70,7 +70,11 @@ def _make_auth_dependency(server: DashboardServer) -> Callable[..., Awaitable[No
                 headers={"WWW-Authenticate": "Bearer"},
             )
         provided = authorization.removeprefix("Bearer ").strip()
-        if not hmac.compare_digest(provided, token):
+        # Compare as bytes: `compare_digest` raises TypeError on non-ASCII
+        # `str` input, which would turn a junk header into a 500. An empty
+        # `provided` can never match because configured tokens are
+        # validated non-empty, but reject it explicitly as defence in depth.
+        if not provided or not hmac.compare_digest(provided.encode("utf-8", "surrogateescape"), token.encode("utf-8")):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="bad token",
@@ -134,6 +138,8 @@ def make_app(
     `auth_token=None` keeps the routes unauthenticated initially,
     matching 0.6.x behaviour - reload can still enable auth later.
     """
+    if auth_token is not None:
+        validate_bearer_token(auth_token, source_label="auth_token")
     server.resolved_auth_token = auth_token
 
     @asynccontextmanager
@@ -190,9 +196,13 @@ def make_app(
         try:
             added, removed = server.reload()
         except FileNotFoundError as exc:
-            return JSONResponse({"status": "error", "message": str(exc)}, status_code=404)
+            return JSONResponse({"status": "error", "message": format_config_error(exc)}, status_code=404)
         except Exception as exc:  # noqa: BLE001 - surface any parse / validation error
-            return JSONResponse({"status": "error", "message": str(exc)}, status_code=400)
+            # `format_config_error` drops pydantic's `input_value=...` so a
+            # rejected password / token / webhook URL is never echoed back.
+            message = format_config_error(exc)
+            _log.warning("config reload failed: %s", message)
+            return JSONResponse({"status": "error", "message": message}, status_code=400)
         return JSONResponse(
             {
                 "status": "ok",

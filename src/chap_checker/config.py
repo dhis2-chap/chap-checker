@@ -3,13 +3,25 @@
 from __future__ import annotations
 
 import os
+import re
 import stat
 import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal, Self
+from urllib.parse import urlsplit
 
 from dhis2w_client import RetryPolicy
-from pydantic import BaseModel, ConfigDict, Discriminator, Field, HttpUrl, Tag, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Discriminator,
+    Field,
+    HttpUrl,
+    Tag,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from chap_checker.checks.base import Status
 from chap_checker.client import BaseTarget, Dhis2Target, OcsTarget
@@ -31,6 +43,10 @@ def _resolve_value_or_env(value: str | None, env_var: str | None, *, source_labe
     it here keeps the error message shape consistent and avoids the
     pre-condition `assert` dance each caller used to do.
 
+    Every caller resolves a secret (password, token, webhook URL), and an
+    empty secret is never valid, so an env var that is set but empty or
+    whitespace-only is rejected rather than silently passed through.
+
     `source_label` names the field for error messages
     (e.g. `"password_env"`, `"auth.token_env"`).
     """
@@ -41,7 +57,73 @@ def _resolve_value_or_env(value: str | None, env_var: str | None, *, source_labe
     resolved = os.environ.get(env_var)
     if resolved is None:
         raise RuntimeError(f"Environment variable '{env_var}' is not set (referenced by {source_label}).")
+    if not resolved.strip():
+        raise RuntimeError(f"Environment variable '{env_var}' is set but empty (referenced by {source_label}).")
     return resolved
+
+
+# RFC 6750 allows a narrower b64token alphabet; we accept any printable,
+# non-space ASCII so hex / base64 / urlsafe tokens all work while keeping
+# the value comparable as bytes and safe to put in an HTTP header.
+_BEARER_TOKEN_RE = re.compile(r"[\x21-\x7e]+")
+
+
+def validate_bearer_token(token: str, *, source_label: str) -> str:
+    """Return `token` unchanged if it is usable as a bearer token, else raise `ValueError`.
+
+    Rejects empty values, surrounding whitespace, and anything outside
+    printable ASCII without spaces. The message never echoes the token.
+    """
+    if not token.strip():
+        raise ValueError(f"{source_label}: bearer token must not be empty.")
+    if token != token.strip():
+        raise ValueError(f"{source_label}: bearer token must not have leading or trailing whitespace.")
+    if _BEARER_TOKEN_RE.fullmatch(token) is None:
+        raise ValueError(
+            f"{source_label}: bearer token may only contain printable ASCII characters without spaces "
+            "(generate one with `openssl rand -hex 32`).",
+        )
+    return token
+
+
+_USERINFO_MESSAGE = (
+    "credentials embedded in the URL (https://user:pass@host) are not allowed; "
+    "they would be echoed in reports, /api/state and alerts."
+)
+
+
+def _reject_url_userinfo(url: str, *, hint: str) -> None:
+    """Raise `ValueError` if `url` carries a `user[:pass]@` component.
+
+    The message never includes the URL itself, since the userinfo is the secret.
+    """
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return  # malformed URLs are reported by the URL type itself
+    if parts.username is not None or parts.password is not None:
+        raise ValueError(f"{_USERINFO_MESSAGE} {hint}")
+
+
+def format_config_error(exc: BaseException) -> str:
+    """Return an operator-facing description of a config load / reload failure without secrets.
+
+    `pydantic.ValidationError`'s default string includes every rejected
+    `input_value`, which can be a password, token or webhook URL. This
+    renders only the location and message of each error. TOML parse
+    errors, missing files and our own `RuntimeError`s carry no secret
+    values (they name env vars and paths, never their contents), so their
+    text is kept. Anything else is reported by type only.
+    """
+    if isinstance(exc, ValidationError):
+        lines = [f"{exc.error_count()} validation error(s) for {exc.title}:"]
+        for err in exc.errors(include_url=False, include_input=False, include_context=False):
+            loc = ".".join(str(part) for part in err["loc"]) or "<root>"
+            lines.append(f"  {loc}: {err['msg']}")
+        return "\n".join(lines)
+    if isinstance(exc, (tomllib.TOMLDecodeError, OSError, RuntimeError)):
+        return str(exc)
+    return f"{type(exc).__name__} while loading config (details withheld)."
 
 
 class BaseInstanceConfig(BaseModel):
@@ -55,6 +137,15 @@ class BaseInstanceConfig(BaseModel):
     verify_tls: bool = True
     checks: list[str] | None = Field(default=None, min_length=1)
     alerts: list[str] = Field(default_factory=list)
+
+    @field_validator("url")
+    @classmethod
+    def _url_without_credentials(cls, value: HttpUrl) -> HttpUrl:
+        _reject_url_userinfo(
+            str(value),
+            hint="Use the 'username' + 'password' / 'password_env' or 'token' / 'token_env' fields instead.",
+        )
+        return value
 
     @model_validator(mode="after")
     def _checks_must_exist(self) -> Self:
@@ -126,6 +217,13 @@ class Dhis2InstanceConfig(BaseInstanceConfig):
     token_env: str | None = None
     retry_policy: RetryPolicy | None = None
 
+    @field_validator("password", "token")
+    @classmethod
+    def _literal_secret_not_empty(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError("must not be empty; remove the field or set a real value.")
+        return value
+
     @model_validator(mode="after")
     def _exactly_one_auth_mode(self) -> "Dhis2InstanceConfig":
         has_password = self.password is not None or self.password_env is not None
@@ -153,23 +251,11 @@ class Dhis2InstanceConfig(BaseInstanceConfig):
 
     def resolve_password(self) -> str:
         """Return the password, reading from env if ``password_env`` is set."""
-        if self.password is not None:
-            return self.password
-        assert self.password_env is not None  # guarded by validator
-        value = os.environ.get(self.password_env)
-        if value is None:
-            raise RuntimeError(f"Environment variable '{self.password_env}' is not set.")
-        return value
+        return _resolve_value_or_env(self.password, self.password_env, source_label="password_env")
 
     def resolve_token(self) -> str:
         """Return the PAT, reading from env if ``token_env`` is set."""
-        if self.token is not None:
-            return self.token
-        assert self.token_env is not None  # guarded by validator
-        value = os.environ.get(self.token_env)
-        if value is None:
-            raise RuntimeError(f"Environment variable '{self.token_env}' is not set.")
-        return value
+        return _resolve_value_or_env(self.token, self.token_env, source_label="token_env")
 
     def to_target(self, *, default_retry_policy: RetryPolicy | None = None) -> Dhis2Target:
         """Build a runtime :class:`Dhis2Target` from this entry.
@@ -226,6 +312,9 @@ InstanceConfig = Annotated[
 """Any ``[instances.<key>]`` block. ``kind`` picks the variant; omitted means ``"dhis2"``."""
 
 
+_SLACK_USERINFO_HINT = "Slack incoming-webhook URLs never need them."
+
+
 class SlackAlertConfig(BaseModel):
     """Slack Incoming Webhook alerter configuration."""
 
@@ -236,6 +325,13 @@ class SlackAlertConfig(BaseModel):
     notify_on: list[Status] = Field(default_factory=lambda: [Status.FAIL, Status.ERROR, Status.WARN])
     timeout_s: float = Field(default=10.0, gt=0)
 
+    @field_validator("webhook_url")
+    @classmethod
+    def _url_without_credentials(cls, value: HttpUrl | None) -> HttpUrl | None:
+        if value is not None:
+            _reject_url_userinfo(str(value), hint=_SLACK_USERINFO_HINT)
+        return value
+
     @model_validator(mode="after")
     def _exactly_one_webhook_source(self) -> "SlackAlertConfig":
         if (self.webhook_url is None) == (self.webhook_url_env is None):
@@ -244,13 +340,19 @@ class SlackAlertConfig(BaseModel):
 
     def resolve_webhook_url(self) -> str:
         """Return the webhook URL, reading from env if ``webhook_url_env`` is set."""
-        if self.webhook_url is not None:
-            return str(self.webhook_url)
-        assert self.webhook_url_env is not None  # guarded by validator
-        value = os.environ.get(self.webhook_url_env)
-        if value is None:
-            raise RuntimeError(f"Environment variable '{self.webhook_url_env}' is not set.")
+        literal = str(self.webhook_url) if self.webhook_url is not None else None
+        value = _resolve_value_or_env(literal, self.webhook_url_env, source_label="alerts.slack.webhook_url_env")
+        try:
+            _reject_url_userinfo(value, hint=_SLACK_USERINFO_HINT)
+        except ValueError as exc:
+            raise RuntimeError(f"alerts.slack.webhook_url_env: {exc}") from None
         return value
+
+
+_WEBHOOK_USERINFO_HINT = (
+    "Send credentials with the 'headers' table (e.g. Authorization); "
+    "secrets in the URL path or query string are still accepted."
+)
 
 
 class WebhookAlertConfig(BaseModel):
@@ -276,6 +378,13 @@ class WebhookAlertConfig(BaseModel):
     timeout_s: float = Field(default=10.0, gt=0)
     headers: dict[str, str] = Field(default_factory=dict)
 
+    @field_validator("url")
+    @classmethod
+    def _url_without_credentials(cls, value: HttpUrl | None) -> HttpUrl | None:
+        if value is not None:
+            _reject_url_userinfo(str(value), hint=_WEBHOOK_USERINFO_HINT)
+        return value
+
     @model_validator(mode="after")
     def _exactly_one_url_source(self) -> "WebhookAlertConfig":
         if (self.url is None) == (self.url_env is None):
@@ -284,12 +393,12 @@ class WebhookAlertConfig(BaseModel):
 
     def resolve_url(self) -> str:
         """Return the webhook URL, reading from env if ``url_env`` is set."""
-        if self.url is not None:
-            return str(self.url)
-        assert self.url_env is not None  # guarded by validator
-        value = os.environ.get(self.url_env)
-        if value is None:
-            raise RuntimeError(f"Environment variable '{self.url_env}' is not set.")
+        literal = str(self.url) if self.url is not None else None
+        value = _resolve_value_or_env(literal, self.url_env, source_label="alerts.webhook.url_env")
+        try:
+            _reject_url_userinfo(value, hint=_WEBHOOK_USERINFO_HINT)
+        except ValueError as exc:
+            raise RuntimeError(f"alerts.webhook.url_env: {exc}") from None
         return value
 
 
@@ -319,6 +428,13 @@ class AuthConfig(BaseModel):
     token: str | None = Field(default=None, repr=False)
     token_env: str | None = None
 
+    @field_validator("token")
+    @classmethod
+    def _token_is_valid_bearer(cls, value: str | None) -> str | None:
+        if value is not None:
+            validate_bearer_token(value, source_label="auth.token")
+        return value
+
     @model_validator(mode="after")
     def _exactly_one_token_source(self) -> "AuthConfig":
         if (self.token is None) == (self.token_env is None):
@@ -329,8 +445,20 @@ class AuthConfig(BaseModel):
         return self
 
     def resolve_token(self) -> str:
-        """Return the bearer token, reading from env if `token_env` is set."""
-        return _resolve_value_or_env(self.token, self.token_env, source_label="auth.token_env")
+        """Return the bearer token, reading from env if `token_env` is set.
+
+        Raises `RuntimeError` when the env var is missing, empty, or holds
+        a value that is not a valid bearer token (see
+        :func:`validate_bearer_token`). A literal `token` is already
+        validated when the model is built.
+        """
+        value = _resolve_value_or_env(self.token, self.token_env, source_label="auth.token_env")
+        if self.token is None:
+            try:
+                validate_bearer_token(value, source_label=f"auth.token_env ({self.token_env})")
+            except ValueError as exc:
+                raise RuntimeError(str(exc)) from None
+        return value
 
 
 UiTheme = Literal["phosphor", "amber", "high", "tokyo", "dhis2"]
