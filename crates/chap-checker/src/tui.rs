@@ -25,8 +25,8 @@ use sokkel_tui::cells::Width;
 use sokkel_tui::dashboard::grid;
 use sokkel_tui::{
     BannerTone, Binding, Button, ButtonVariant, Cell, Charset, Column, ColumnWidth, Command,
-    CommandGroup, CommandTone, DashboardPanel, Depth, DetailPane, Fact, Key, KeyPress, Keys, Look,
-    NoteTone, PageHeader, PaneSection, PanelRead, Pointer, PointerKind, Prompt, PromptEvent,
+    CommandGroup, CommandTone, Cut, DashboardPanel, Depth, DetailPane, Fact, Key, KeyPress, Keys,
+    Look, NoteTone, PageHeader, PaneSection, PanelRead, Pointer, PointerKind, Prompt, PromptEvent,
     PromptState, Rail, RailEntry, RailGroup, Row, RowTone, Scheme, Span, StatPanel, StatusLine,
     StatusTone, Table, TableState, Threshold, TopBar, snapshot,
 };
@@ -617,7 +617,8 @@ impl App {
         vec![
             Column::new("Instance")
                 .width(ColumnWidth::Fill(3))
-                .sortable(),
+                .sortable()
+                .cut(Cut::Middle),
             Column::new("Platform").width(ColumnWidth::Fill(1)),
             Column::new("Status").sortable(),
             Column::new("Checks"),
@@ -990,10 +991,13 @@ impl ShellApp for App {
         };
         let checked = self.state.as_ref().and_then(|s| s.last_refresh);
         Chrome {
-            rail: Rail::new(look, "C", "chap-checker").fit().groups([
-                RailGroup::new(None, [overview]),
-                RailGroup::new(Some("Instances"), instances),
-            ]),
+            rail: Rail::new(look, "C", "chap-checker")
+                .fit()
+                .cut(Cut::Middle)
+                .groups([
+                    RailGroup::new(None, [overview]),
+                    RailGroup::new(Some("Instances"), instances),
+                ]),
             top: TopBar::new(look).trail(trail),
             foot: foot.facts([
                 Fact::labeled("from", self.source.clone()).code(),

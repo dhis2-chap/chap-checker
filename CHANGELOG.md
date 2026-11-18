@@ -26,6 +26,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   flagged: "Instances up" turns amber and its note says "1 with warnings",
   and an instance's "Checks OK" tile is amber for a warning and red only for
   a failure.
+- Long instance names are cut in the middle in the TUI's rail and instances
+  table ("Chap Core master…Niamey region"), so the end that tells instances
+  apart stays visible.
 - The TUI's side panel wraps long values, such as an instance's URL, instead
   of cutting them.
 - The TUI's instances table gives the instance name more room than the
