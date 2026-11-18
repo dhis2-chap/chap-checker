@@ -170,14 +170,17 @@ dashboard:
 
 ![tui auth-token prompt, phosphor theme](../assets/tui-token-modal.svg)
 
-The field is masked and paste works. Enter (or *Sign in*) reconnects with the
-token. The prompt follows the daemon's theme:
+The field is masked and paste works; *Sign in* stays off while it is empty.
+Enter (or *Sign in*) sends the token, and the prompt waits with *Submitting*
+while the daemon checks it. A token the daemon accepts closes the prompt; one
+it turns down keeps the prompt open, with "Not accepted: check the token." in
+it and the token still there to correct. The prompt follows the daemon's
+theme:
 
 ![tui auth-token prompt, dhis2 theme](../assets/tui-token-modal-dhis2.svg)
 
-Escape (or *Cancel*) shows the "auth rejected" banner instead and stops
-prompting; *Sign in* in the palette opens it again. A token the daemon turns
-down shows "auth rejected by URL: check the token value".
+Escape (or *Cancel*) closes it and shows the "auth rejected" banner instead,
+and stops prompting; *Sign in* in the palette opens it again.
 
 ## How the TUI relates to `verify` and `serve`
 

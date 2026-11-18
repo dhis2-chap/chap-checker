@@ -436,6 +436,11 @@ pub struct App {
     last_contact: Option<DateTime<Utc>>,
     checks: TableState,
     prompt: Option<PromptState>,
+    /// The token prompt's round with the daemon: since when (ms) it has been checking the token,
+    /// and why the daemon turned the last one down.
+    prompt_busy: Option<u64>,
+    prompt_failed: Option<String>,
+    now: u64,
     prompt_at: Rect,
     /// The instances table's state, and where it stood, for keys and presses.
     instances: TableState,
@@ -474,6 +479,8 @@ impl App {
 
     fn token_prompt<'a>(&self, look: &'a Look, window: Rect) -> Prompt<'a> {
         Prompt::new(look, format!("Sign in to {}", self.source), "Bearer token")
+            .busy(self.prompt_busy.map(|since| self.now.saturating_sub(since)))
+            .failed(self.prompt_failed.clone().map(Some))
             .description("The chap-checker daemon asks for a token ([auth] in its config).")
             .field(|f| {
                 f.masked(true)
@@ -485,11 +492,18 @@ impl App {
 
     fn prompted(&mut self, event: PromptEvent, state: PromptState) {
         match event {
+            // The prompt stays open, busy, until the daemon answers: a sign-in closes it, a
+            // refusal says why in it and keeps the token for another try.
             PromptEvent::Submit(token) if !token.trim().is_empty() => {
                 let _ = self.asks.send(Ask::Token(token.trim().to_owned()));
                 lock(&self.shared).conn = Conn::Waiting;
+                self.prompt_busy = Some(self.now);
+                self.prompt_failed = None;
+                self.prompt = Some(state);
             }
             PromptEvent::Submit(_) | PromptEvent::Cancel => {
+                self.prompt_busy = None;
+                self.prompt_failed = None;
                 let _ = self.asks.send(Ask::Cancel);
             }
             _ => self.prompt = Some(state),
@@ -564,13 +578,14 @@ impl App {
                 .map(|t| StatPanel::new(look, t, None))
                 .collect();
         }
-        let read = |p: StatPanel<'a>| {
-            if waiting {
-                p.read(PanelRead::Loading(0))
-            } else {
-                p
-            }
-        };
+        // Before the first refresh: the tiles load, with nothing to note yet.
+        if waiting {
+            return ["Instances up", "Checks OK", "Failing checks", "Ping uptime"]
+                .into_iter()
+                .map(|t| StatPanel::new(look, t, None).read(PanelRead::Loading(0)))
+                .collect();
+        }
+        let read = |p: StatPanel<'a>| p;
         vec![
             mark(read(
                 StatPanel::new(look, "Instances up", Some(up as f64))
@@ -1331,7 +1346,8 @@ impl ShellApp for App {
         }
     }
 
-    fn tick(&mut self, _now: u64) {
+    fn tick(&mut self, now: u64) {
+        self.now = now;
         let s = lock(&self.shared);
         self.state.clone_from(&s.state);
         self.conn = s.conn.clone();
@@ -1347,6 +1363,25 @@ impl ShellApp for App {
         if needs_token && self.prompt.is_none() {
             self.prompt = Some(PromptState::default());
             lock(&self.shared).conn = Conn::Waiting;
+        }
+        // The daemon's answer to a token the prompt sent.
+        if self.prompt_busy.is_some() {
+            match &self.conn {
+                Conn::Live => {
+                    self.prompt = None;
+                    self.prompt_busy = None;
+                }
+                // Short words in the prompt's status row; the banner over the page says the rest.
+                Conn::Rejected(_) => {
+                    self.prompt_failed = Some("Not accepted: check the token.".to_owned());
+                    self.prompt_busy = None;
+                }
+                Conn::Disconnected(_) => {
+                    self.prompt_failed = Some("The daemon did not answer.".to_owned());
+                    self.prompt_busy = None;
+                }
+                _ => {}
+            }
         }
     }
 }
@@ -1426,6 +1461,9 @@ pub fn run(source: Source, options: TuiOptions) -> std::io::Result<()> {
         last_contact: None,
         checks: TableState::default(),
         prompt: None,
+        prompt_busy: None,
+        prompt_failed: None,
+        now: 0,
         prompt_at: Rect::default(),
         instances: overview_order(),
         table_at: Rect::default(),
@@ -1517,6 +1555,9 @@ mod tests {
             last_contact: None,
             checks: TableState::default(),
             prompt: None,
+            prompt_busy: None,
+            prompt_failed: None,
+            now: 0,
             prompt_at: Rect::default(),
             instances: overview_order(),
             table_at: Rect::default(),
@@ -1700,5 +1741,47 @@ mod tests {
         );
         assert!(!screen.contains("Refresh now"), "{screen}");
         assert!(screen.contains("Instances \u{203a} staging"), "{screen}");
+    }
+
+    #[test]
+    fn a_refused_token_says_why_in_the_prompt_and_a_good_one_closes_it() {
+        let look = Look::new("tidevann", Scheme::Dark).unwrap();
+        let mut a = app(None, Conn::NeedsToken);
+        assert!(a.prompt.is_some());
+        a.prompted(PromptEvent::Submit("wrong".into()), PromptState::default());
+        assert!(a.prompt.is_some() && a.prompt_busy.is_some());
+        lock(&a.shared).conn =
+            Conn::Rejected("auth rejected by http://daemon:8765: check the token value".into());
+        a.tick(1_000);
+        assert!(a.prompt.is_some() && a.prompt_busy.is_none());
+        let screen = snapshot::text(&app::shot(a, look.clone(), (150, 40), |_| {}, &[]));
+        assert!(
+            screen.contains("Not accepted: check the token."),
+            "{screen}"
+        );
+
+        let mut a = app(None, Conn::NeedsToken);
+        a.prompted(PromptEvent::Submit("right".into()), PromptState::default());
+        {
+            let mut s = lock(&a.shared);
+            s.state = Some(state());
+            s.conn = Conn::Live;
+        }
+        a.tick(1_000);
+        assert!(a.prompt.is_none());
+    }
+
+    #[test]
+    #[ignore = "writes the refused prompt as an SVG for a visual check"]
+    fn render_the_refused_prompt() {
+        let look = Look::new("tray", Scheme::Light).unwrap();
+        let mut a = app(None, Conn::NeedsToken);
+        a.prompted(PromptEvent::Submit("wrong".into()), PromptState::default());
+        lock(&a.shared).conn =
+            Conn::Rejected("auth rejected by http://daemon:8765: check the token value".into());
+        a.tick(1_000);
+        let buf = app::shot(a, look.clone(), (150, 40), |_| {}, &[]);
+        let out = std::env::var("PROMPT_SVG").unwrap_or_else(|_| "prompt.svg".into());
+        std::fs::write(out, snapshot::svg_in(&buf, &look)).unwrap();
     }
 }

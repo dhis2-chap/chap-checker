@@ -21,6 +21,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   mark; Enter presses a focused button, and closing the panel puts focus back
   on the checks. Left and Right still go back and forward from a table. On
   a daemon that never answered, *Retry* has focus, so Enter retries.
+- **The TUI's sign-in prompt waits for the daemon**: after Enter it shows
+  *Submitting* until the daemon answers, closes on a good token, and says
+  "Not accepted: check the token." in the prompt for a bad one, keeping it to
+  correct. *Sign in* is off while the field is empty.
 - **The TUI's rail gives way** to the tables: in a window too narrow for both,
   the rail narrows and then folds to its icons before a table turns into
   cards. A width you drag at the rail's edge still wins.
@@ -34,6 +38,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Long instance names are cut in the middle in the TUI's rail and instances
   table ("Chap Core master…Niamey region"), so the end that tells instances
   apart stays visible.
+- The TUI's summary tiles no longer show notes such as "all up" while the
+  first refresh is still loading.
 - The TUI's side panel wraps long values, such as an instance's URL, instead
   of cutting them.
 - The TUI's instances table gives the instance name more room than the
