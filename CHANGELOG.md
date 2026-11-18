@@ -12,6 +12,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   for the Chap team, and how to move an install pinned to an exact version
   (`uv tool install chap-checker@latest`; `uv tool upgrade` keeps the pin).
 
+### Fixed
+
+- The TUI's rail is as wide as its longest instance name (up to 45 columns),
+  so names that differ only at the end, such as "Chap Core master,
+  climate-demo" and "Chap Core master, climate-demo-niger", no longer read
+  the same. A name still cut short shows in full in the status line while
+  its entry has focus, and a width you drag at the rail's edge is kept
+  across runs.
+- The TUI's count tiles read "3 of 3" on one line, with a note under them
+  ("all passing", "2 down") instead of the total on a line of its own.
+
 ## [1.0.0] — 2026-11-18
 
 chap-checker is now a single Rust binary, organised as an uptime monitor with

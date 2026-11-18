@@ -483,11 +483,18 @@ impl App {
         vec![
             mark(read(
                 StatPanel::new(look, "Instances up", Some(up as f64))
-                    .note(format!("of {n}"))
+                    .unit(format!("of {n}"))
+                    .note(if up == n {
+                        "all up".to_owned()
+                    } else {
+                        format!("{} down", n - up)
+                    })
                     .color(if up == n { "good" } else { "critical" }),
             )),
             mark(read(
-                StatPanel::new(look, "Checks OK", Some(ok as f64)).note(format!("of {checks}")),
+                StatPanel::new(look, "Checks OK", Some(ok as f64))
+                    .unit(format!("of {checks}"))
+                    .note(format!("across {n} instance(s)")),
             )),
             mark(read(
                 StatPanel::new(look, "Failing checks", Some(failing as f64))
@@ -646,7 +653,11 @@ impl App {
         vec![
             mark(
                 StatPanel::new(look, "Checks OK", Some(tile.ok_count as f64))
-                    .note(format!("of {}", tile.total_count))
+                    .unit(format!("of {}", tile.total_count))
+                    .note(match tile.total_count - tile.ok_count {
+                        0 => "all passing".to_owned(),
+                        k => format!("{k} not OK"),
+                    })
                     .color(if tile.worst_status == Status::Ok {
                         "good"
                     } else {
@@ -668,7 +679,8 @@ impl App {
             ),
             mark(
                 StatPanel::new(look, "Clean refreshes", Some(good_runs as f64))
-                    .note(format!("of the last {}", tile.history.len())),
+                    .unit(format!("of {}", tile.history.len()))
+                    .note("with every check OK"),
             ),
         ]
     }
@@ -889,7 +901,7 @@ impl ShellApp for App {
         };
         let checked = self.state.as_ref().and_then(|s| s.last_refresh);
         Chrome {
-            rail: Rail::new(look, "C", "chap-checker").groups([
+            rail: Rail::new(look, "C", "chap-checker").fit().groups([
                 RailGroup::new(None, [overview]),
                 RailGroup::new(Some("Instances"), instances),
             ]),
