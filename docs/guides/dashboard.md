@@ -68,7 +68,7 @@ A failing check opened in the side panel:
 | `,`        | Settings: the theme, light or dark, density, the frame.          |
 | `?`        | Every key.                                                       |
 | `/`        | Search.                                                          |
-| `Tab`      | Move through the rail and the page.                              |
+| `Tab`      | Move through the rail, the page's table and the side panel's buttons (Enter presses one). |
 | `Escape`   | Close what's open, then go back a page; leave full screen.       |
 | `Left`     | Back a page (while no control on the page has focus).           |
 | `Right`    | Forward again, after going back.                                 |

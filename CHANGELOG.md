@@ -16,6 +16,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - **Status in the TUI's headers and side panel**, as sokkel says a status:
   the overview's header shows the fleet's health, an instance's page its
   worst check's, and the side panel the check's, each with its dot and word.
+- **Keyboard focus in the TUI**: Tab moves between the rail, the page's
+  table and the side panel's *Refresh now* and *Close*, with sokkel's focus
+  mark; Enter presses a focused button, and closing the panel puts focus back
+  on the checks. Left and Right still go back and forward from a table.
 - **The TUI's rail gives way** to the tables: in a window too narrow for both,
   the rail narrows and then folds to its icons before a table turns into
   cards. A width you drag at the rail's edge still wins.

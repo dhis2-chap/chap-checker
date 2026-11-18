@@ -25,10 +25,10 @@ use sokkel_tui::cells::Width;
 use sokkel_tui::dashboard::grid;
 use sokkel_tui::{
     BannerTone, Binding, Button, ButtonVariant, Cell, Charset, Column, ColumnWidth, Command,
-    CommandGroup, CommandTone, Cut, DashboardPanel, Depth, DetailPane, Fact, Key, KeyPress, Keys,
-    Look, NoteTone, PageHeader, PaneSection, PanelRead, Pointer, PointerKind, Prompt, PromptEvent,
-    PromptState, Rail, RailEntry, RailGroup, Row, RowTone, Scheme, Span, StatPanel, StatusLine,
-    StatusTone, Table, TableState, Threshold, TopBar, snapshot,
+    CommandGroup, CommandTone, Cut, DashboardPanel, Depth, DetailPane, Fact, FocusId, Key,
+    KeyPress, Keys, Look, NoteTone, PageHeader, PaneSection, PanelRead, Pointer, PointerKind,
+    Prompt, PromptEvent, PromptState, Rail, RailEntry, RailGroup, Row, RowTone, Scheme, Span,
+    StatPanel, StatusLine, StatusTone, Table, TableState, Threshold, TopBar, snapshot,
 };
 use tokio::sync::mpsc;
 
@@ -333,6 +333,12 @@ fn platform(tile: &Tile) -> String {
         None => tile.platform.clone(),
     }
 }
+
+/// The page's focus stops: the two tables pass Left and Right on to back and forward when they
+/// don't use them; the side panel's verbs keep theirs.
+const INSTANCES: &str = "instances";
+const CHECKS: &str = "checks";
+const PANE_VERBS: [&str; 2] = ["pane-refresh", "pane-close"];
 
 /// See [`App::page_width`].
 const PAGE_WIDTH: u16 = 77;
@@ -708,9 +714,10 @@ impl App {
             self.table_at = body;
             let columns = Self::instance_columns();
             let rows = self.instance_rows();
+            let focused = cx.focus.stop_passing(FocusId::new(INSTANCES), body) && cx.active;
             let table = Table::new(look, &columns, &rows)
                 .framed(false)
-                .focused(true);
+                .focused(focused);
             f.render_stateful_widget(&table, body.intersection(area), &mut self.instances);
         }
     }
@@ -812,8 +819,9 @@ impl App {
         }
         if let Some(r) = rects.get(stats.len()) {
             let (columns, rows) = (Self::check_columns(), Self::check_rows(&tile));
-            let table = Table::new(look, &columns, &rows);
             self.checks_at = r.intersection(area);
+            let focused = cx.focus.stop_passing(FocusId::new(CHECKS), self.checks_at) && cx.active;
+            let table = Table::new(look, &columns, &rows).focused(focused);
             f.render_stateful_widget(&table, self.checks_at, &mut self.checks);
         }
     }
@@ -850,7 +858,7 @@ impl App {
     }
 
     /// The side panel: the opened check in full, with its instance.
-    fn check_pane<'a>(&self, look: &'a Look) -> Option<DetailPane<'a>> {
+    fn check_pane<'a>(&self, look: &'a Look, ring: [bool; 2]) -> Option<DetailPane<'a>> {
         let (tile, check) = self.opened_check()?;
         Some(
             DetailPane::new(look)
@@ -867,8 +875,12 @@ impl App {
                     ]),
                 ])
                 .actions([
-                    Button::new(look, "Refresh now").variant(ButtonVariant::Secondary),
-                    Button::new(look, "Close").variant(ButtonVariant::Outline),
+                    Button::new(look, "Refresh now")
+                        .variant(ButtonVariant::Secondary)
+                        .focused(ring[0]),
+                    Button::new(look, "Close")
+                        .variant(ButtonVariant::Outline)
+                        .focused(ring[1]),
                 ]),
         )
     }
@@ -901,6 +913,12 @@ impl App {
             },
             failed: false,
         }
+    }
+
+    /// Close the side panel, focus back on the checks it was opened from.
+    fn close_pane(&mut self, cx: &mut Cx) {
+        self.checks.opened = None;
+        cx.focus.set(FocusId::new(CHECKS));
     }
 
     fn open(&mut self, name: &str) {
@@ -1035,7 +1053,8 @@ impl ShellApp for App {
     }
 
     fn panel(&mut self, f: &mut Frame, area: Rect, cx: &mut Cx) {
-        let Some(pane) = self.check_pane(cx.look) else {
+        let ring = PANE_VERBS.map(|id| cx.focus.ring(FocusId::new(id)));
+        let Some(pane) = self.check_pane(cx.look, ring) else {
             return;
         };
         self.pane_at = Rect {
@@ -1043,6 +1062,11 @@ impl ShellApp for App {
             ..area
         };
         f.render_widget(&pane, self.pane_at);
+        for (k, r) in pane.layout(self.pane_at).actions {
+            if let Some(id) = PANE_VERBS.get(k) {
+                cx.focus.stop(FocusId::new(id), r);
+            }
+        }
     }
 
     fn palette_search(&mut self, query: &str) {
@@ -1195,9 +1219,24 @@ impl ShellApp for App {
             self.prompted(event, state);
             return Flow::Handled;
         }
-        if let Route::Instance(name) = &self.route {
-            if key.is(Key::Escape) && self.checks.opened.take().is_some() {
+        // The side panel's verbs, from the keyboard.
+        if key.is(Key::Enter) || key.is(Key::Char(' ')) {
+            if cx.focus.is(FocusId::new(PANE_VERBS[0])) {
+                let _ = self.asks.send(Ask::Refresh);
                 return Flow::Handled;
+            }
+            if cx.focus.is(FocusId::new(PANE_VERBS[1])) {
+                self.close_pane(cx);
+                return Flow::Handled;
+            }
+        }
+        if let Route::Instance(name) = &self.route {
+            if key.is(Key::Escape) && self.checks.opened.is_some() {
+                self.close_pane(cx);
+                return Flow::Handled;
+            }
+            if !cx.focus.is(FocusId::new(CHECKS)) {
+                return Flow::Ignored;
             }
             let Some(tile) = self.tile(name) else {
                 return Flow::Ignored;
@@ -1209,7 +1248,7 @@ impl ShellApp for App {
                 _ => Flow::Handled,
             };
         }
-        if self.route == Route::Overview {
+        if self.route == Route::Overview && cx.focus.is(FocusId::new(INSTANCES)) {
             let (columns, rows) = (Self::instance_columns(), self.instance_rows());
             let table = Table::new(cx.look, &columns, &rows).framed(false);
             match self.instances.handle(&table, key) {
@@ -1246,14 +1285,14 @@ impl ShellApp for App {
             return;
         }
         if p.kind == PointerKind::Press
-            && let Some(pane) = self.check_pane(cx.look)
+            && let Some(pane) = self.check_pane(cx.look, [false; 2])
             && self.pane_at.contains(p.at)
         {
             match pane.press(self.pane_at, p.at) {
                 Some(0) => {
                     let _ = self.asks.send(Ask::Refresh);
                 }
-                Some(_) => self.checks.opened = None,
+                Some(_) => self.close_pane(cx),
                 None => {}
             }
             return;
@@ -1635,5 +1674,20 @@ mod tests {
             "{screen}"
         );
         assert!(screen.contains("1 with warnings"), "{screen}");
+    }
+
+    #[test]
+    fn tab_reaches_the_panels_close_and_enter_presses_it() {
+        let screen = text(
+            app(Some(state()), Conn::Live),
+            &["enter", "enter", "tab", "tab"],
+        );
+        assert!(screen.contains("Close"), "{screen}");
+        let screen = text(
+            app(Some(state()), Conn::Live),
+            &["enter", "enter", "tab", "tab", "enter"],
+        );
+        assert!(!screen.contains("Refresh now"), "{screen}");
+        assert!(screen.contains("Instances \u{203a} staging"), "{screen}");
     }
 }
