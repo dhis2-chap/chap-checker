@@ -307,8 +307,10 @@ async fn transport_errors_are_errors() {
     };
     let results = run(&unused).await;
     assert_eq!(results[1].status, Status::Error);
+    // A closed port is refused on Linux and macOS; Windows retries the connect until it times out.
+    let m = &results[1].message;
     assert!(
-        results[1].message.starts_with("ConnectError (/health): "),
+        m.starts_with("ConnectError (/health): ") || m.starts_with("ConnectTimeout (/health): "),
         "{}",
         results[1].message
     );
