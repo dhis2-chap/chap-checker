@@ -30,12 +30,20 @@ ops environment:
       Up and Down move through it, Enter or a click opens the instance.
 - **Instance page**: its URL and version, tiles for checks OK, ping uptime,
   latency (with a sparkline of the last refreshes) and clean refreshes, then
-  every check with its full message. Escape goes back.
+  every check with its message. Up and Down move through the checks; Enter or
+  a click opens one in a side panel: its full message and status, the
+  instance's URL, version and when it was checked, and *Refresh now*. Below
+  90 columns the panel covers the page. Escape closes the panel, then goes
+  back.
 - **Status line** (bottom): *Live*, *Refreshing*, *Disconnected* or
   *Signed out*, where the data comes from (`local` or the daemon's URL), when
   it was last checked, and the interval.
 
 ![An instance's page, dhis2 theme](../assets/dashboard-instance-dhis2.svg)
+
+A failing check opened in the side panel:
+
+![A check in the side panel, dhis2 theme](../assets/dashboard-check-dhis2.svg)
 
 ## Keys
 
@@ -63,7 +71,10 @@ failed reload leaves the previous config running.
 - **Open &lt;instance&gt;** for every instance.
 - The frame's: the theme, full screen, the rail, the settings.
 
-Type to filter.
+Type to filter. What you type also searches every instance's checks, by name
+and by message (`404`, `timeout`, `system_info`): the matches show under
+*Checks*, and choosing one opens its instance with the check in the side
+panel.
 
 ## Alerts decision is at launch
 
