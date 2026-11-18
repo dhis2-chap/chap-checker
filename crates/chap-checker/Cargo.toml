@@ -26,7 +26,7 @@ rpassword = "7.5.5"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 serde_path_to_error = "0.1.20"
-sokkel-tui = { git = "https://github.com/winterop-com/sokkel-tui", rev = "64f4b19f0a2f60f1fdd77851a73afde123bfe47c", version = "0.1.0" }
+sokkel-tui = { git = "https://github.com/winterop-com/sokkel-tui", rev = "b99664f562d7f87e38ce47833c8a783f7a7388e2", version = "0.1.0" }
 tempfile = "3.27.0"
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "time", "sync", "fs", "signal", "net"] }
 toml = { version = "1.2.1", features = ["preserve_order"] }

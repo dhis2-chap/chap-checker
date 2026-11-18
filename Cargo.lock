@@ -2589,7 +2589,7 @@ dependencies = [
 [[package]]
 name = "sokkel-tui"
 version = "0.1.0"
-source = "git+https://github.com/winterop-com/sokkel-tui?rev=64f4b19f0a2f60f1fdd77851a73afde123bfe47c#64f4b19f0a2f60f1fdd77851a73afde123bfe47c"
+source = "git+https://github.com/winterop-com/sokkel-tui?rev=b99664f562d7f87e38ce47833c8a783f7a7388e2#b99664f562d7f87e38ce47833c8a783f7a7388e2"
 dependencies = [
  "ratatui",
  "serde_json",
