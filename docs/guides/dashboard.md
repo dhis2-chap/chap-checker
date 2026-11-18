@@ -25,11 +25,17 @@ ops environment:
   across runs; Enter on the edge puts it back). Below 90 columns the rail
   becomes a drawer; `«` collapses it to icons.
 - **Overview**:
-    - four summary tiles: instances up (`9 of 10`), checks OK (`38 of 40`),
-      failing checks (filled red when there are any), and ping uptime;
+    - four summary tiles: instances up (`9 of 10`, with a note on how many
+      are down or have warnings; an instance with only a warning counts as up
+      but turns the tile amber), checks OK (`38 of 40`), failing checks
+      (filled red when there are any, naming the first: `ping on DHIS2 play`),
+      and ping uptime;
     - the instances table: name, platform and version (`DHIS2 2.42.6`,
       `Chap Core 2.7.0`, `CAPS 3.2.2`), status, checks OK, ping uptime,
-      latency and the last check. A row is tinted when its instance is failing.
+      latency and the last check. Failing instances come first, then those
+      with warnings, then the rest in config order; a row is tinted when its
+      instance is failing. Instance, Status and Latency sort from their
+      headings.
       Up and Down move through it, Enter or a click opens the instance.
 - **Instance page**: its URL and version, tiles for checks OK, ping uptime,
   latency (with a sparkline of the last refreshes) and clean refreshes, then

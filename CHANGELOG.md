@@ -6,6 +6,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Changed
+
+- **The TUI's overview leads with what is wrong.** Failing instances come
+  first in the instances table, then those with warnings (Instance, Status
+  and Latency sort from their headings). The failing-checks tile names the
+  first failure, and the header says how many instances are down.
+
+### Fixed
+
+- The TUI counted an instance with only a warning as down. It is now up but
+  flagged: "Instances up" turns amber and its note says "1 with warnings",
+  and an instance's "Checks OK" tile is amber for a warning and red only for
+  a failure.
+- The TUI's instances table gives the instance name more room than the
+  platform and version, so names are cut later in narrow windows.
+
 ## [1.1.0] — 2026-11-18
 
 ### Added
