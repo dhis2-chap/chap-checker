@@ -208,13 +208,21 @@ pub fn build_http(
 ) -> Result<reqwest::Client, RequestError> {
     let timeout = seconds(timeout_s);
     reqwest::Client::builder()
-        .connect_timeout(timeout)
+        .connect_timeout(connect_timeout(timeout))
         .read_timeout(timeout)
         .tls_danger_accept_invalid_certs(!verify_tls)
         .redirect(redirects)
         .user_agent(concat!("chap-checker/", env!("CARGO_PKG_VERSION")))
         .build()
         .map_err(|e| RequestError::from_reqwest(&e))
+}
+
+/// reqwest starts the read timeout with the request, not once connected, so with equal
+/// timeouts a host that never answers trips the read timeout first and reads as a
+/// `ReadTimeout`. Ending the connect a little earlier keeps it a `ConnectTimeout`, as httpx
+/// reports it.
+fn connect_timeout(timeout: Duration) -> Duration {
+    timeout.saturating_sub((timeout / 20).min(Duration::from_millis(100)))
 }
 
 /// A response with its body read.
@@ -423,6 +431,14 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn connect_ends_before_the_read_timeout() {
+        let ms = |n| Duration::from_millis(n);
+        assert_eq!(connect_timeout(ms(10_000)), ms(9_900));
+        assert_eq!(connect_timeout(ms(1_000)), ms(950));
+        assert_eq!(connect_timeout(Duration::ZERO), Duration::ZERO);
+    }
 
     #[test]
     fn delay_backs_off_and_caps() {

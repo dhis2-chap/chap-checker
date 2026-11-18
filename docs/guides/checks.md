@@ -161,7 +161,7 @@ from the route layer is reported as a chap-core outage.
 ### `dhis2_chap_system_info`
 
 Hits `/api/routes/chap/run/system/info` and parses the chap-core response.
-Surfaces `chap_core_version` (aliased to `version`), `python_version`,
+Surfaces `chap_core_version`, `python_version`,
 `revision`, `server_date` and `auth_required` (chap-core 2.2+) in `details`.
 If `/system/info` returns 404, the check retries the older
 `/api/routes/chap/run/system-info` path, so chap-core 1.1.x - 1.2.0

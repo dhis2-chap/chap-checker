@@ -541,9 +541,10 @@ sharing one state file — could each read the same prior state and
 re-emit the same transition, duplicating every alert to every receiver.
 
 - **Acquisition**: each runner opens the lock file `O_RDWR | O_CREAT`,
-  takes an exclusive non-blocking flock, and polls with
-  `asyncio.sleep(0.1)` so the daemon's event loop keeps serving HTTP
-  while it waits.
+  takes an exclusive non-blocking lock (`flock` on Linux and macOS, the
+  same lock 0.12 and earlier took, so old and new versions can share a
+  state file), and retries every 0.1 s without blocking, so the daemon
+  keeps serving HTTP while it waits.
 - **Timeout**: 30 seconds by default. On timeout the dispatcher logs at
   WARNING and skips that tick's dispatch (state is left as-is so the
   next tick recomputes the same transitions). The check loop and the

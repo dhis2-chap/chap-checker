@@ -33,9 +33,17 @@ impl std::fmt::Display for ConfigError {
         match self {
             // Python's `OSError` text: `[Errno 2] No such file or directory: '/path'`.
             ConfigError::Io(path, e) => {
-                let text = e.to_string();
-                let reason = text.split(" (os error").next().unwrap_or(&text);
-                match e.raw_os_error() {
+                // Python maps Windows' codes to errno and words them the same everywhere.
+                let (code, reason) = match e.kind() {
+                    std::io::ErrorKind::NotFound => (Some(2), "No such file or directory".into()),
+                    std::io::ErrorKind::PermissionDenied => (Some(13), "Permission denied".into()),
+                    _ => {
+                        let text = e.to_string();
+                        let reason = text.split(" (os error").next().unwrap_or(&text).to_string();
+                        (e.raw_os_error(), reason)
+                    }
+                };
+                match code {
                     Some(code) => write!(f, "[Errno {code}] {reason}: '{}'", path.display()),
                     None => write!(f, "{reason}: '{}'", path.display()),
                 }
