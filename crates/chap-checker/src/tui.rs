@@ -25,10 +25,10 @@ use sokkel_tui::cells::Width;
 use sokkel_tui::dashboard::grid;
 use sokkel_tui::{
     BannerTone, Binding, Button, ButtonVariant, Cell, Charset, Column, ColumnWidth, Command,
-    CommandGroup, DashboardPanel, Depth, DetailPane, Fact, Key, KeyPress, Keys, Look, NoteTone,
-    PageHeader, PaneSection, PanelRead, Pointer, PointerKind, Prompt, PromptEvent, PromptState,
-    Rail, RailEntry, RailGroup, Row, RowTone, Scheme, Span, StatPanel, StatusLine, StatusTone,
-    Table, TableState, Threshold, TopBar, snapshot,
+    CommandGroup, CommandTone, DashboardPanel, Depth, DetailPane, Fact, Key, KeyPress, Keys, Look,
+    NoteTone, PageHeader, PaneSection, PanelRead, Pointer, PointerKind, Prompt, PromptEvent,
+    PromptState, Rail, RailEntry, RailGroup, Row, RowTone, Scheme, Span, StatPanel, StatusLine,
+    StatusTone, Table, TableState, Threshold, TopBar, snapshot,
 };
 use tokio::sync::mpsc;
 
@@ -1016,20 +1016,43 @@ impl ShellApp for App {
     }
 
     fn commands(&self) -> Vec<CommandGroup> {
-        let mut own = vec![
-            Command::new("refresh", "Refresh now").icon("\u{21bb}"),
-            Command::new("reload", "Reload the config"),
+        let overview = Command::new("overview", "Overview")
+            .icon("\u{25eb}")
+            .keys(Keys::Then('g', 'o'));
+        let instances = self.tiles().iter().map(|t| {
+            let (status, tone) = if t.total_count == 0 {
+                ("waiting".to_owned(), CommandTone::Info)
+            } else {
+                (
+                    t.worst_status.as_str().to_owned(),
+                    match t.worst_status {
+                        Status::Ok => CommandTone::Good,
+                        Status::Warn => CommandTone::Warning,
+                        Status::Skipped => CommandTone::Info,
+                        _ => CommandTone::Critical,
+                    },
+                )
+            };
+            Command::new(format!("open:{}", t.name), label(t).to_owned())
+                .icon("\u{25aa}")
+                .hint(platform(t))
+                .meta(status, Some(tone))
+                .keywords([t.name.clone(), t.url.clone()])
+        });
+        let mut actions = vec![
+            Command::new("refresh", "Refresh now")
+                .icon("\u{21bb}")
+                .keys(Keys::Char('r')),
+            Command::new("reload", "Reload the config")
+                .icon("\u{21ba}")
+                .keys(Keys::Mod('r')),
         ];
         if self.source != "local" {
-            own.push(Command::new("signin", "Sign in"));
+            actions.push(Command::new("signin", "Sign in").icon("\u{2192}"));
         }
-        let instances = self
-            .tiles()
-            .iter()
-            .map(|t| Command::new(format!("open:{}", t.name), format!("Open {}", label(t))));
         vec![
-            CommandGroup::new("chap-checker", own),
-            CommandGroup::new("Instances", instances),
+            CommandGroup::new("Go to", std::iter::once(overview).chain(instances)),
+            CommandGroup::new("Actions", actions),
         ]
     }
 
@@ -1042,6 +1065,7 @@ impl ShellApp for App {
                 let _ = self.asks.send(Ask::Reload);
             }
             "signin" => self.prompt = Some(PromptState::default()),
+            "overview" => self.route = Route::Overview,
             other => {
                 if let Some(name) = other.strip_prefix("open:") {
                     self.open(name);
@@ -1053,6 +1077,11 @@ impl ShellApp for App {
 
     fn shortcuts(&self) -> Vec<Binding<String>> {
         vec![
+            Binding::new(
+                Keys::Then('g', 'o'),
+                "overview".to_owned(),
+                "Go to the overview",
+            ),
             Binding::new(Keys::Char('r'), "refresh".to_owned(), "Refresh now"),
             Binding::new(Keys::Mod('r'), "reload".to_owned(), "Reload the config"),
         ]
@@ -1461,6 +1490,25 @@ mod tests {
             app.opened_check()
                 .map(|(t, c)| (t.name.as_str(), c.name.as_str())),
             Some(("staging", "ping"))
+        );
+    }
+
+    #[test]
+    fn left_goes_back_right_forward_and_g_o_goes_to_the_overview() {
+        let screen = text(app(Some(state()), Conn::Live), &["down", "enter", "left"]);
+        assert!(
+            screen.contains("chap-checker \u{203a} Overview"),
+            "{screen}"
+        );
+        let screen = text(
+            app(Some(state()), Conn::Live),
+            &["down", "enter", "left", "right"],
+        );
+        assert!(screen.contains("Instances \u{203a} staging"), "{screen}");
+        let screen = text(app(Some(state()), Conn::Live), &["down", "enter", "g", "o"]);
+        assert!(
+            screen.contains("chap-checker \u{203a} Overview"),
+            "{screen}"
         );
     }
 }
