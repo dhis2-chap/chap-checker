@@ -1,9 +1,10 @@
 //! `chap-checker tui`: the dashboard in a terminal, drawn with sokkel-tui.
 //!
 //! The app is a [`ShellApp`] in sokkel's frame. The rail lists the instances, each with its
-//! worst status. The overview page leads with four summary tiles, then a panel per instance with
-//! its checks. Choosing an instance (the rail, a press on its panel, the palette) opens its page:
-//! its checks in full, its uptime and its latency over the last refreshes.
+//! worst status. The overview page leads with four summary tiles, then a table of the instances.
+//! Choosing an instance (the rail, its row, the palette) opens its page: its checks, its uptime
+//! and its latency over the last refreshes. A check opened there (or found by the palette's
+//! search) shows in full in the side panel.
 //!
 //! The data comes from a background task on a tokio runtime, in one of two modes:
 //!
@@ -19,20 +20,21 @@ use chrono::{DateTime, Local, Utc};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::widgets::Widget;
-use sokkel_tui::app::{self, Chrome, Cx, Flow, Ran, ShellApp};
+use sokkel_tui::app::{self, Chrome, Cx, Flow, Ran, SearchAnswer, ShellApp};
 use sokkel_tui::cells::Width;
 use sokkel_tui::dashboard::grid;
 use sokkel_tui::{
-    BannerTone, Binding, Cell, Charset, Column, ColumnWidth, Command, CommandGroup, DashboardPanel,
-    Depth, Fact, KeyPress, Keys, Look, NoteTone, PageHeader, PanelRead, Pointer, PointerKind,
-    Prompt, PromptEvent, PromptState, Rail, RailEntry, RailGroup, Row, RowTone, Scheme, Span,
-    StatPanel, StatusLine, StatusTone, Table, TableState, Threshold, TopBar, snapshot,
+    BannerTone, Binding, Button, ButtonVariant, Cell, Charset, Column, ColumnWidth, Command,
+    CommandGroup, DashboardPanel, Depth, DetailPane, Fact, Key, KeyPress, Keys, Look, NoteTone,
+    PageHeader, PaneSection, PanelRead, Pointer, PointerKind, Prompt, PromptEvent, PromptState,
+    Rail, RailEntry, RailGroup, Row, RowTone, Scheme, Span, StatPanel, StatusLine, StatusTone,
+    Table, TableState, Threshold, TopBar, snapshot,
 };
 use tokio::sync::mpsc;
 
 use crate::checks::Status;
 use crate::config::UiTheme;
-use crate::daemon::{Daemon, DashboardState, Tile};
+use crate::daemon::{CheckRow, Daemon, DashboardState, Tile};
 
 /// Where the dashboard's data comes from.
 pub enum Source {
@@ -358,6 +360,11 @@ pub struct App {
     instances: TableState,
     table_at: Rect,
     panel_at: Rect,
+    /// Where the instance page's checks table and the side panel stood, for presses.
+    checks_at: Rect,
+    pane_at: Rect,
+    /// The palette search's answer to the last query.
+    found: Option<SearchAnswer>,
 }
 
 impl App {
@@ -700,25 +707,97 @@ impl App {
             s.render(r.intersection(area), f.buffer_mut());
         }
         if let Some(r) = rects.get(stats.len()) {
-            let columns = vec![
-                Column::new("Check").width(ColumnWidth::Content),
-                Column::new("Status"),
-                Column::new("Message").width(ColumnWidth::Fill(1)),
-            ];
-            let rows: Vec<Row> = tile
-                .checks
-                .iter()
-                .map(|c| {
-                    Row::new([
-                        Cell::text(&c.name),
-                        Cell::toned(c.status.as_str(), tone(c.status)),
-                        Cell::text(&c.message),
-                    ])
-                    .tone(row_tone(c.status))
-                })
-                .collect();
+            let (columns, rows) = (Self::check_columns(), Self::check_rows(&tile));
             let table = Table::new(look, &columns, &rows);
-            f.render_stateful_widget(&table, r.intersection(area), &mut self.checks);
+            self.checks_at = r.intersection(area);
+            f.render_stateful_widget(&table, self.checks_at, &mut self.checks);
+        }
+    }
+
+    fn check_columns() -> Vec<Column> {
+        vec![
+            Column::new("Check").width(ColumnWidth::Content),
+            Column::new("Status"),
+            Column::new("Message").width(ColumnWidth::Fill(1)),
+        ]
+    }
+
+    fn check_rows(tile: &Tile) -> Vec<Row> {
+        tile.checks
+            .iter()
+            .map(|c| {
+                Row::new([
+                    Cell::text(&c.name),
+                    Cell::toned(c.status.as_str(), tone(c.status)),
+                    Cell::text(&c.message),
+                ])
+                .tone(row_tone(c.status))
+            })
+            .collect()
+    }
+
+    /// The check opened on the instance page (Enter or a press on its row), with its instance.
+    fn opened_check(&self) -> Option<(&Tile, &CheckRow)> {
+        let Route::Instance(name) = &self.route else {
+            return None;
+        };
+        let tile = self.tile(name)?;
+        Some((tile, tile.checks.get(self.checks.opened?)?))
+    }
+
+    /// The side panel: the opened check in full, with its instance.
+    fn check_pane<'a>(&self, look: &'a Look) -> Option<DetailPane<'a>> {
+        let (tile, check) = self.opened_check()?;
+        Some(
+            DetailPane::new(look)
+                .sections([
+                    PaneSection::new("Check")
+                        .summary(check.message.clone())
+                        .facts([
+                            ("Name", Some(check.name.clone())),
+                            ("Status", Some(check.status.as_str().to_owned())),
+                        ]),
+                    PaneSection::new("Instance").facts([
+                        ("Name", Some(label(tile).to_owned())),
+                        ("URL", Some(tile.url.clone())),
+                        ("Version", Some(platform(tile))),
+                        ("Checked", Some(clock(tile.last_refresh))),
+                    ]),
+                ])
+                .actions([
+                    Button::new(look, "Refresh now").variant(ButtonVariant::Secondary),
+                    Button::new(look, "Close").variant(ButtonVariant::Outline),
+                ]),
+        )
+    }
+
+    /// The palette search: every instance's checks by name or message (the instances themselves
+    /// are the palette's own Open commands).
+    fn find(&self, query: &str) -> SearchAnswer {
+        let q = query.to_lowercase();
+        let has = |w: &str| w.to_lowercase().contains(&q);
+        let checks = self
+            .tiles()
+            .iter()
+            .flat_map(|t| t.checks.iter().enumerate().map(move |(i, c)| (t, i, c)))
+            .filter(|(_, _, c)| has(&c.name) || has(&c.message))
+            .take(10)
+            .map(|(t, i, c)| {
+                Command::new(
+                    format!("check:{i}:{}", t.name),
+                    format!("{} on {}", c.name, label(t)),
+                )
+                .detail(format!("{}: {}", c.status.as_str(), one_line(&c.message)))
+            });
+        let group = CommandGroup::new("Checks", checks);
+        SearchAnswer {
+            query: query.to_owned(),
+            groups: if group.commands.is_empty() {
+                Vec::new()
+            } else {
+                vec![group]
+            },
+            failed: false,
         }
     }
 
@@ -838,6 +917,42 @@ impl ShellApp for App {
         }
     }
 
+    /// The side panel, while a check is opened on the instance page.
+    fn panel_width(&self) -> Option<u16> {
+        self.opened_check().map(|_| 44)
+    }
+
+    fn panel(&mut self, f: &mut Frame, area: Rect, cx: &mut Cx) {
+        let Some(pane) = self.check_pane(cx.look) else {
+            return;
+        };
+        self.pane_at = Rect {
+            height: pane.height(area.width).min(area.height),
+            ..area
+        };
+        f.render_widget(&pane, self.pane_at);
+    }
+
+    fn palette_search(&mut self, query: &str) {
+        self.found = Some(self.find(query));
+    }
+
+    fn palette_answer(&self) -> Option<SearchAnswer> {
+        self.found.clone()
+    }
+
+    fn palette_open(&mut self, id: &str) {
+        if let Some((i, name)) = id
+            .strip_prefix("check:")
+            .and_then(|rest| rest.split_once(':'))
+            && let Ok(i) = i.parse::<usize>()
+        {
+            self.open(name);
+            self.checks.active = i;
+            self.checks.opened = Some(i);
+        }
+    }
+
     fn page_rows(&self, look: &Look, width: u16) -> Option<u16> {
         let (hh, spans) = match &self.route {
             Route::Overview => (
@@ -939,6 +1054,20 @@ impl ShellApp for App {
             self.prompted(event, state);
             return Flow::Handled;
         }
+        if let Route::Instance(name) = &self.route {
+            if key.is(Key::Escape) && self.checks.opened.take().is_some() {
+                return Flow::Handled;
+            }
+            let Some(tile) = self.tile(name) else {
+                return Flow::Ignored;
+            };
+            let (columns, rows) = (Self::check_columns(), Self::check_rows(tile));
+            let table = Table::new(cx.look, &columns, &rows);
+            return match self.checks.handle(&table, key) {
+                sokkel_tui::TableEvent::Ignored => Flow::Ignored,
+                _ => Flow::Handled,
+            };
+        }
         if self.route == Route::Overview {
             let (columns, rows) = (Self::instance_columns(), self.instance_rows());
             let table = Table::new(cx.look, &columns, &rows).framed(false);
@@ -973,6 +1102,30 @@ impl ShellApp for App {
                 == Some(sokkel_tui::PanelTool::Retry)
         {
             let _ = self.asks.send(Ask::Refresh);
+            return;
+        }
+        if p.kind == PointerKind::Press
+            && let Some(pane) = self.check_pane(cx.look)
+            && self.pane_at.contains(p.at)
+        {
+            match pane.press(self.pane_at, p.at) {
+                Some(0) => {
+                    let _ = self.asks.send(Ask::Refresh);
+                }
+                Some(_) => self.checks.opened = None,
+                None => {}
+            }
+            return;
+        }
+        if p.kind == PointerKind::Press
+            && let Route::Instance(name) = &self.route
+            && let Some(tile) = self.tile(name)
+        {
+            let (columns, rows) = (Self::check_columns(), Self::check_rows(tile));
+            let table = Table::new(cx.look, &columns, &rows);
+            if let Some(hit) = table.hit(self.checks_at, p.at, &self.checks) {
+                table.press(&mut self.checks, hit);
+            }
             return;
         }
         if p.kind == PointerKind::Press && self.route == Route::Overview {
@@ -1086,6 +1239,9 @@ pub fn run(source: Source, options: TuiOptions) -> std::io::Result<()> {
         instances: TableState::default(),
         table_at: Rect::default(),
         panel_at: Rect::default(),
+        checks_at: Rect::default(),
+        pane_at: Rect::default(),
+        found: None,
     };
     let look = look_for(options.theme);
     if let Some((size, out, keys)) = options.frame {
@@ -1174,6 +1330,9 @@ mod tests {
             instances: TableState::default(),
             table_at: Rect::default(),
             panel_at: Rect::default(),
+            checks_at: Rect::default(),
+            pane_at: Rect::default(),
+            found: None,
         };
         app.tick(0);
         app
@@ -1260,5 +1419,36 @@ mod tests {
         );
         assert!(Look::new("phosphor-bright", Scheme::Dark).is_some());
         assert!(Look::new("tray", Scheme::Light).is_some());
+    }
+
+    #[test]
+    fn enter_on_a_check_opens_it_in_the_side_panel_and_escape_closes_it() {
+        let screen = text(app(Some(state()), Conn::Live), &["down", "enter", "enter"]);
+        assert!(screen.contains("CHECK"), "{screen}");
+        assert!(screen.contains("Refresh now"), "{screen}");
+        let screen = text(
+            app(Some(state()), Conn::Live),
+            &["down", "enter", "enter", "esc"],
+        );
+        assert!(!screen.contains("Refresh now"), "{screen}");
+        assert!(screen.contains("Instances \u{203a} staging"), "{screen}");
+    }
+
+    #[test]
+    fn the_palette_search_finds_checks_by_message_and_opens_one() {
+        let mut app = app(Some(state()), Conn::Live);
+        let found = app.find("SAYS FAIL");
+        assert_eq!(found.groups.len(), 1);
+        let hits = &found.groups[0].commands;
+        assert_eq!(hits.len(), 1);
+        assert!(app.find("nothing like it").groups.is_empty());
+        let id = hits[0].id.clone();
+        app.palette_open(&id);
+        assert_eq!(app.route(), "instance/staging");
+        assert_eq!(
+            app.opened_check()
+                .map(|(t, c)| (t.name.as_str(), c.name.as_str())),
+            Some(("staging", "ping"))
+        );
     }
 }

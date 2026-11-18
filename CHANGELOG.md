@@ -27,6 +27,12 @@ answers every route with the same status and JSON.
   and a copy-paste `[instances.<key>]` table.
 - **`chap-checker tui --kiosk`**: start full screen, without the rail and the
   top bar, for a wall display.
+- **A side panel in the TUI**: Enter or a click on a check on an instance's
+  page opens it beside the page, with its full message, status and instance,
+  and *Refresh now*.
+- **Check search in the TUI's command palette**: what you type also finds
+  every instance's checks by name and message; choosing one opens it in the
+  side panel.
 - **Wheels for Linux (x86_64 and aarch64, glibc and musl), macOS (Intel and
   Apple silicon) and Windows**; no Python needed at run time.
 
