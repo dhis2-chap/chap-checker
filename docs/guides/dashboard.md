@@ -19,11 +19,14 @@ ops environment:
 ## Layout
 
 - **Rail** (left): *Overview*, then every instance with a dot in its worst
-  status's colour (ok, warn, fail, error). Below 90 columns the rail becomes a
-  drawer; `«` collapses it to icons.
+  status's colour (ok, warn, fail, error). The rail is as wide as the longest
+  name, up to 45 columns; a name still cut short shows in full in the status
+  line while its entry has focus. Drag the rail's edge to resize it (kept
+  across runs; Enter on the edge puts it back). Below 90 columns the rail
+  becomes a drawer; `«` collapses it to icons.
 - **Overview**:
-    - four summary tiles: instances up, checks OK, failing checks (filled red
-      when there are any), and ping uptime;
+    - four summary tiles: instances up (`9 of 10`), checks OK (`38 of 40`),
+      failing checks (filled red when there are any), and ping uptime;
     - the instances table: name, platform and version (`DHIS2 2.42.6`,
       `Chap Core 2.7.0`, `CAPS 3.2.2`), status, checks OK, ping uptime,
       latency and the last check. A row is tinted when its instance is failing.
