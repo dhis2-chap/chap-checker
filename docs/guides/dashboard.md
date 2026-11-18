@@ -20,8 +20,9 @@ ops environment:
 
 - **Rail** (left): *Overview*, then every instance with a dot in its worst
   status's colour (ok, warn, fail, error). The rail is as wide as the longest
-  name, up to 45 columns; a name still cut short shows in full in the status
-  line while its entry has focus. Drag the rail's edge to resize it (kept
+  name, up to 45 columns; a longer name is cut in the middle, keeping its
+  start and its end, and shows in full in the status line while its entry
+  has focus. Drag the rail's edge to resize it (kept
   across runs; Enter on the edge puts it back). When the window is too
   narrow for both the rail and the tables, the rail narrows and then folds
   to its icons, so the tables stay tables. Below 90 columns the rail becomes
