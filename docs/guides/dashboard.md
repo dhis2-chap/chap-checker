@@ -53,6 +53,7 @@ A failing check opened in the side panel:
 | Key        | Action                                                           |
 | ---------- | ---------------------------------------------------------------- |
 | `r`        | Refresh now (otherwise every `--interval` seconds).              |
+| `g` `o`    | Go to the overview.                                              |
 | `Ctrl+R`   | Reload `chap-checker.toml` from disk (on the daemon in connect mode). |
 | `Ctrl+K`   | The command palette.                                             |
 | `,`        | Settings: the theme, light or dark, density, the frame.          |
@@ -60,6 +61,8 @@ A failing check opened in the side panel:
 | `/`        | Search.                                                          |
 | `Tab`      | Move through the rail and the page.                              |
 | `Escape`   | Close what's open, then go back a page; leave full screen.       |
+| `Left`     | Back a page (when the page itself doesn't use the key).          |
+| `Right`    | Forward again, after going back.                                 |
 | `Ctrl+Q`   | Quit.                                                            |
 
 A reload's outcome shows in a banner for a few seconds: the instances added
@@ -70,9 +73,17 @@ failed reload leaves the previous config running.
 
 `Ctrl+K` lists chap-checker's commands before the frame's own:
 
-- **Refresh now**, **Reload the config**, and in connect mode **Sign in**.
-- **Open &lt;instance&gt;** for every instance.
-- The frame's: the theme, full screen, the rail, the settings.
+![The command palette, dhis2 theme](../assets/tui-palette-dhis2.svg)
+
+- **Go to**: the *Overview* (`g` then `o`) and every instance, each with its
+  platform and version and its status in its colour.
+- **Actions**: *Refresh now* (`r`), *Reload the config* (`Ctrl+R`), and in
+  connect mode *Sign in*.
+- The frame's: *Back* and *Forward*, the theme, full screen, the rail, the
+  settings.
+
+The palette is as wide as its longest command, up to 60% of the window; a
+row still cut short shows in full in its footer while it is active.
 
 Type to filter. What you type also searches every instance's checks, by name
 and by message (`404`, `timeout`, `system_info`): the matches show under

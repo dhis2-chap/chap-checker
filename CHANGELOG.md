@@ -6,6 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+
+- **Back and forward in the TUI**: Left goes back a page and Right forward
+  again (when the page itself doesn't use the key), and *Back* / *Forward*
+  are in the command palette.
+- **A "Go to" group in the TUI's command palette**: the overview (`g` then
+  `o`) and every instance with its platform, version and status in its
+  colour; *Refresh now* and *Reload the config* show their keys.
+
 ### Changed
 
 - The README and the docs say that chap-checker is mostly an internal tool
@@ -20,6 +29,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   the same. A name still cut short shows in full in the status line while
   its entry has focus, and a width you drag at the rail's edge is kept
   across runs.
+- The TUI's command palette is as wide as its longest command (up to 60% of
+  the window), so long instance names are no longer cut.
 - The TUI's count tiles read "3 of 3" on one line, with a note under them
   ("all passing", "2 down") instead of the total on a line of its own.
 
