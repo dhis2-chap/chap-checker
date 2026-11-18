@@ -339,6 +339,8 @@ fn platform(tile: &Tile) -> String {
 const INSTANCES: &str = "instances";
 const CHECKS: &str = "checks";
 const PANE_VERBS: [&str; 2] = ["pane-refresh", "pane-close"];
+/// The instances panel's Retry, while it reads failed (a daemon that never answered).
+const RETRY: &str = "retry";
 
 /// See [`App::page_width`].
 const PAGE_WIDTH: u16 = 77;
@@ -705,6 +707,11 @@ impl App {
         }
         if let Some(r) = rects.get(summary.len()) {
             let p = self.instances_panel(look);
+            let retry = p
+                .layout(*r)
+                .retry
+                .is_some_and(|at| cx.focus.stop(FocusId::new(RETRY), at));
+            let p = p.focus(retry.then_some(sokkel_tui::PanelTool::Retry));
             (&p).render(r.intersection(area), f.buffer_mut());
             self.panel_at = *r;
             if self.tiles().is_empty() {
@@ -1219,8 +1226,12 @@ impl ShellApp for App {
             self.prompted(event, state);
             return Flow::Handled;
         }
-        // The side panel's verbs, from the keyboard.
+        // The side panel's verbs and the failed panel's Retry, from the keyboard.
         if key.is(Key::Enter) || key.is(Key::Char(' ')) {
+            if cx.focus.is(FocusId::new(RETRY)) {
+                let _ = self.asks.send(Ask::Refresh);
+                return Flow::Handled;
+            }
             if cx.focus.is(FocusId::new(PANE_VERBS[0])) {
                 let _ = self.asks.send(Ask::Refresh);
                 return Flow::Handled;

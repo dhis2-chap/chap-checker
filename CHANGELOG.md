@@ -19,7 +19,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - **Keyboard focus in the TUI**: Tab moves between the rail, the page's
   table and the side panel's *Refresh now* and *Close*, with sokkel's focus
   mark; Enter presses a focused button, and closing the panel puts focus back
-  on the checks. Left and Right still go back and forward from a table.
+  on the checks. Left and Right still go back and forward from a table. On
+  a daemon that never answered, *Retry* has focus, so Enter retries.
 - **The TUI's rail gives way** to the tables: in a window too narrow for both,
   the rail narrows and then folds to its icons before a table turns into
   cards. A width you drag at the rail's edge still wins.
