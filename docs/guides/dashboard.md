@@ -61,7 +61,7 @@ A failing check opened in the side panel:
 | `/`        | Search.                                                          |
 | `Tab`      | Move through the rail and the page.                              |
 | `Escape`   | Close what's open, then go back a page; leave full screen.       |
-| `Left`     | Back a page (when the page itself doesn't use the key).          |
+| `Left`     | Back a page (while no control on the page has focus).           |
 | `Right`    | Forward again, after going back.                                 |
 | `Ctrl+Q`   | Quit.                                                            |
 

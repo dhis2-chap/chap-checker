@@ -6,10 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-11-18
+
 ### Added
 
 - **Back and forward in the TUI**: Left goes back a page and Right forward
-  again (when the page itself doesn't use the key), and *Back* / *Forward*
+  again (while no control on the page has focus), and *Back* / *Forward*
   are in the command palette.
 - **A "Go to" group in the TUI's command palette**: the overview (`g` then
   `o`) and every instance with its platform, version and status in its
@@ -385,7 +387,8 @@ answers every route with the same status and JSON.
 
 For 0.1.x / 0.2.x release notes, see the [GitHub Releases page](https://github.com/dhis2-chap/chap-checker/releases).
 
-[Unreleased]: https://github.com/dhis2-chap/chap-checker/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/dhis2-chap/chap-checker/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/dhis2-chap/chap-checker/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/dhis2-chap/chap-checker/compare/v0.12.0...v1.0.0
 [0.12.0]: https://github.com/dhis2-chap/chap-checker/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.11.0
