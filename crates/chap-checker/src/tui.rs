@@ -334,6 +334,9 @@ fn platform(tile: &Tile) -> String {
     }
 }
 
+/// See [`App::page_width`].
+const PAGE_WIDTH: u16 = 77;
+
 /// An instance's health for the summaries, from its worst check: a failure or error is down, a
 /// warning is up but flagged, and one that hasn't answered yet is waiting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -378,6 +381,24 @@ fn fleet_color(down: usize, warning: usize) -> &'static str {
         (0, 0) => "good",
         (0, _) => "warning",
         _ => "critical",
+    }
+}
+
+/// A check status as sokkel says it: the contract's health map gives ok, warn, fail and error
+/// their tones; skipped is quiet.
+fn state_of(status: Status) -> sokkel_tui::Status {
+    match status {
+        Status::Skipped => sokkel_tui::Status::toned("skipped", StatusTone::Quiet),
+        s => sokkel_tui::Status::of(s.as_str()),
+    }
+}
+
+/// An instance's status for its header: its worst check's, or waiting before its first answer.
+fn tile_state(tile: &Tile) -> sokkel_tui::Status {
+    if tile.total_count == 0 {
+        sokkel_tui::Status::toned("waiting", StatusTone::Quiet)
+    } else {
+        state_of(tile.worst_status)
     }
 }
 
@@ -483,15 +504,22 @@ impl App {
             };
             return PageHeader::new(look, title.to_owned()).description(words);
         }
-        PageHeader::new(look, title.to_owned()).description(format!(
-            "{up} of {n} instance(s) up{}. Checked every {}s; alerts {}.",
-            match (down, warning) {
-                (0, 0) => String::new(),
-                _ => format!(" ({})", fleet_note(down, warning)),
-            },
-            self.interval,
-            if alerts { "on" } else { "off" }
-        ))
+        let lead = match (down, warning) {
+            (0, 0) => sokkel_tui::Status::of("ok"),
+            (0, _) => sokkel_tui::Status::of("warn"),
+            _ => sokkel_tui::Status::of("fail"),
+        };
+        PageHeader::new(look, title.to_owned())
+            .lead_status(lead)
+            .description(format!(
+                "{up} of {n} instance(s) up{}. Checked every {}s; alerts {}.",
+                match (down, warning) {
+                    (0, 0) => String::new(),
+                    _ => format!(" ({})", fleet_note(down, warning)),
+                },
+                self.interval,
+                if alerts { "on" } else { "off" }
+            ))
     }
 
     fn summary<'a>(&self, look: &'a Look) -> Vec<StatPanel<'a>> {
@@ -688,6 +716,7 @@ impl App {
 
     fn instance_header<'a>(&self, look: &'a Look, tile: &Tile) -> PageHeader<'a> {
         PageHeader::new(look, label(tile).to_owned())
+            .lead_status(tile_state(tile))
             .code(tile.url.clone())
             .description(platform(tile))
             .meta([
@@ -827,10 +856,8 @@ impl App {
                 .sections([
                     PaneSection::new("Check")
                         .summary(check.message.clone())
-                        .facts([
-                            ("Name", Some(check.name.clone())),
-                            ("Status", Some(check.status.as_str().to_owned())),
-                        ]),
+                        .facts([("Name", Some(check.name.clone()))])
+                        .status("Status", state_of(check.status)),
                     PaneSection::new("Instance").facts([
                         ("Name", Some(label(tile).to_owned())),
                         ("URL", Some(tile.url.clone())),
@@ -989,6 +1016,13 @@ impl ShellApp for App {
             Route::Overview => self.draw_overview(f, page, cx),
             Route::Instance(name) => self.draw_instance(f, page, cx, &name),
         }
+    }
+
+    /// The room both pages need for their tables to stay tables (sokkel's 69 columns, plus the
+    /// panel's frame and the page's padding): the rail gives way to it before the rows turn into
+    /// cards.
+    fn page_width(&self) -> Option<u16> {
+        Some(PAGE_WIDTH)
     }
 
     /// The side panel, while a check is opened on the instance page.

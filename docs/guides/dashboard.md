@@ -22,8 +22,10 @@ ops environment:
   status's colour (ok, warn, fail, error). The rail is as wide as the longest
   name, up to 45 columns; a name still cut short shows in full in the status
   line while its entry has focus. Drag the rail's edge to resize it (kept
-  across runs; Enter on the edge puts it back). Below 90 columns the rail
-  becomes a drawer; `«` collapses it to icons.
+  across runs; Enter on the edge puts it back). When the window is too
+  narrow for both the rail and the tables, the rail narrows and then folds
+  to its icons, so the tables stay tables. Below 90 columns the rail becomes
+  a drawer; `«` collapses it to icons.
 - **Overview**:
     - four summary tiles: instances up (`9 of 10`, with a note on how many
       are down or have warnings; an instance with only a warning counts as up
