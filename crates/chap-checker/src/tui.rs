@@ -334,6 +334,58 @@ fn platform(tile: &Tile) -> String {
     }
 }
 
+/// An instance's health for the summaries, from its worst check: a failure or error is down, a
+/// warning is up but flagged, and one that hasn't answered yet is waiting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Health {
+    Up,
+    Waiting,
+    Warning,
+    Down,
+}
+
+fn health(tile: &Tile) -> Health {
+    if tile.total_count == 0 {
+        return Health::Waiting;
+    }
+    match tile.worst_status {
+        Status::Fail | Status::Error => Health::Down,
+        Status::Warn => Health::Warning,
+        _ => Health::Up,
+    }
+}
+
+/// How many instances are down, have warnings, and are up (warnings included).
+fn fleet(tiles: &[Tile]) -> (usize, usize, usize) {
+    let count = |h| tiles.iter().filter(|t| health(t) == h).count();
+    let (down, warning) = (count(Health::Down), count(Health::Warning));
+    (down, warning, count(Health::Up) + warning)
+}
+
+/// The note under a count: what is wrong, or that nothing is.
+fn fleet_note(down: usize, warning: usize) -> String {
+    match (down, warning) {
+        (0, 0) => "all up".to_owned(),
+        (d, 0) => format!("{d} down"),
+        (0, w) => format!("{w} with warnings"),
+        (d, w) => format!("{d} down, {w} with warnings"),
+    }
+}
+
+/// The token a tile's value takes: critical while anything is down, warning while anything warns.
+fn fleet_color(down: usize, warning: usize) -> &'static str {
+    match (down, warning) {
+        (0, 0) => "good",
+        (0, _) => "warning",
+        _ => "critical",
+    }
+}
+
+/// The instances table's first order: the worst health first, then as configured.
+fn overview_order() -> TableState {
+    TableState::default().sorted_by(2, sokkel_tui::SortDir::Descending)
+}
+
 #[derive(Debug, Clone, PartialEq)]
 enum Route {
     Overview,
@@ -421,11 +473,7 @@ impl App {
             .as_ref()
             .map_or("chap-checker", |s| s.ui_title.as_str());
         let n = self.tiles().len();
-        let up = self
-            .tiles()
-            .iter()
-            .filter(|t| t.worst_status == Status::Ok)
-            .count();
+        let (down, warning, up) = fleet(self.tiles());
         let alerts = self.state.as_ref().is_some_and(|s| s.alerts_enabled);
         if self.state.is_none() {
             let words = if self.never_answered() {
@@ -436,7 +484,11 @@ impl App {
             return PageHeader::new(look, title.to_owned()).description(words);
         }
         PageHeader::new(look, title.to_owned()).description(format!(
-            "{up} of {n} instance(s) up. Checked every {}s; alerts {}.",
+            "{up} of {n} instance(s) up{}. Checked every {}s; alerts {}.",
+            match (down, warning) {
+                (0, 0) => String::new(),
+                _ => format!(" ({})", fleet_note(down, warning)),
+            },
             self.interval,
             if alerts { "on" } else { "off" }
         ))
@@ -445,17 +497,20 @@ impl App {
     fn summary<'a>(&self, look: &'a Look) -> Vec<StatPanel<'a>> {
         let tiles = self.tiles();
         let n = tiles.len();
-        let up = tiles
-            .iter()
-            .filter(|t| t.worst_status == Status::Ok)
-            .count();
+        let (down, warning, up) = fleet(tiles);
         let checks: usize = tiles.iter().map(|t| t.total_count).sum();
         let ok: usize = tiles.iter().map(|t| t.ok_count).sum();
-        let failing = tiles
+        let failures: Vec<(&Tile, &CheckRow)> = tiles
             .iter()
-            .flat_map(|t| &t.checks)
-            .filter(|c| matches!(c.status, Status::Fail | Status::Error))
-            .count();
+            .flat_map(|t| t.checks.iter().map(move |c| (t, c)))
+            .filter(|(_, c)| matches!(c.status, Status::Fail | Status::Error))
+            .collect();
+        let failing = failures.len();
+        // The failing tile names the first failure (the worst rows lead the table below), as
+        // sokkel's dashboard example does; the value already says how many there are.
+        let failing_note = failures
+            .first()
+            .map(|(t, c)| format!("{} on {}", c.name, label(t)));
         let uptimes: Vec<f64> = tiles.iter().filter_map(|t| t.uptime_pct).collect();
         let uptime =
             (!uptimes.is_empty()).then(|| uptimes.iter().sum::<f64>() / uptimes.len() as f64);
@@ -484,12 +539,8 @@ impl App {
             mark(read(
                 StatPanel::new(look, "Instances up", Some(up as f64))
                     .unit(format!("of {n}"))
-                    .note(if up == n {
-                        "all up".to_owned()
-                    } else {
-                        format!("{} down", n - up)
-                    })
-                    .color(if up == n { "good" } else { "critical" }),
+                    .note(fleet_note(down, warning))
+                    .color(fleet_color(down, warning)),
             )),
             mark(read(
                 StatPanel::new(look, "Checks OK", Some(ok as f64))
@@ -497,13 +548,19 @@ impl App {
                     .note(format!("across {n} instance(s)")),
             )),
             mark(read(
-                StatPanel::new(look, "Failing checks", Some(failing as f64))
-                    .color(if failing == 0 { "good" } else { "critical" })
-                    .color_mode(if failing == 0 {
-                        sokkel_tui::ColorMode::Value
-                    } else {
-                        sokkel_tui::ColorMode::Background
-                    }),
+                {
+                    let p = StatPanel::new(look, "Failing checks", Some(failing as f64));
+                    match failing_note {
+                        Some(words) => p.note(words),
+                        None => p,
+                    }
+                }
+                .color(if failing == 0 { "good" } else { "critical" })
+                .color_mode(if failing == 0 {
+                    sokkel_tui::ColorMode::Value
+                } else {
+                    sokkel_tui::ColorMode::Background
+                }),
             )),
             mark(read(
                 StatPanel::new(look, "Ping uptime", uptime)
@@ -530,12 +587,16 @@ impl App {
 
     fn instance_columns() -> Vec<Column> {
         vec![
-            Column::new("Instance").width(ColumnWidth::Fill(3)),
-            Column::new("Platform").width(ColumnWidth::Content),
-            Column::new("Status"),
+            Column::new("Instance")
+                .width(ColumnWidth::Fill(3))
+                .sortable(),
+            Column::new("Platform").width(ColumnWidth::Fill(1)),
+            Column::new("Status").sortable(),
             Column::new("Checks"),
             Column::new("Ping"),
-            Column::new("Latency").align(sokkel_tui::Align::End),
+            Column::new("Latency")
+                .align(sokkel_tui::Align::End)
+                .sortable(),
             Column::new("Checked"),
         ]
     }
@@ -548,7 +609,8 @@ impl App {
                     Cell::toned("waiting", StatusTone::Quiet)
                 } else {
                     Cell::toned(t.worst_status.as_str(), tone(t.worst_status))
-                };
+                }
+                .sort_by(health(t) as u8 as f64);
                 let ping = t
                     .uptime_pct
                     .map(|p| format!("{p:.0}% ({}/{})", t.ping_ok, t.ping_total));
@@ -658,10 +720,10 @@ impl App {
                         0 => "all passing".to_owned(),
                         k => format!("{k} not OK"),
                     })
-                    .color(if tile.worst_status == Status::Ok {
-                        "good"
-                    } else {
-                        "critical"
+                    .color(match health(tile) {
+                        Health::Down => "critical",
+                        Health::Warning => "warning",
+                        _ => "good",
                     }),
             ),
             mark(
@@ -1277,7 +1339,7 @@ pub fn run(source: Source, options: TuiOptions) -> std::io::Result<()> {
         checks: TableState::default(),
         prompt: None,
         prompt_at: Rect::default(),
-        instances: TableState::default(),
+        instances: overview_order(),
         table_at: Rect::default(),
         panel_at: Rect::default(),
         checks_at: Rect::default(),
@@ -1368,7 +1430,7 @@ mod tests {
             checks: TableState::default(),
             prompt: None,
             prompt_at: Rect::default(),
-            instances: TableState::default(),
+            instances: overview_order(),
             table_at: Rect::default(),
             panel_at: Rect::default(),
             checks_at: Rect::default(),
@@ -1413,7 +1475,7 @@ mod tests {
 
     #[test]
     fn enter_opens_the_active_instance() {
-        let screen = text(app(Some(state()), Conn::Live), &["down", "enter"]);
+        let screen = text(app(Some(state()), Conn::Live), &["enter"]);
         assert!(screen.contains("Instances \u{203a} staging"), "{screen}");
         assert!(screen.contains("staging says fail"), "{screen}");
         assert!(screen.contains("https://staging.example.org"), "{screen}");
@@ -1464,13 +1526,10 @@ mod tests {
 
     #[test]
     fn enter_on_a_check_opens_it_in_the_side_panel_and_escape_closes_it() {
-        let screen = text(app(Some(state()), Conn::Live), &["down", "enter", "enter"]);
+        let screen = text(app(Some(state()), Conn::Live), &["enter", "enter"]);
         assert!(screen.contains("CHECK"), "{screen}");
         assert!(screen.contains("Refresh now"), "{screen}");
-        let screen = text(
-            app(Some(state()), Conn::Live),
-            &["down", "enter", "enter", "esc"],
-        );
+        let screen = text(app(Some(state()), Conn::Live), &["enter", "enter", "esc"]);
         assert!(!screen.contains("Refresh now"), "{screen}");
         assert!(screen.contains("Instances \u{203a} staging"), "{screen}");
     }
@@ -1495,20 +1554,48 @@ mod tests {
 
     #[test]
     fn left_goes_back_right_forward_and_g_o_goes_to_the_overview() {
-        let screen = text(app(Some(state()), Conn::Live), &["down", "enter", "left"]);
+        let screen = text(app(Some(state()), Conn::Live), &["enter", "left"]);
         assert!(
             screen.contains("chap-checker \u{203a} Overview"),
             "{screen}"
         );
-        let screen = text(
-            app(Some(state()), Conn::Live),
-            &["down", "enter", "left", "right"],
-        );
+        let screen = text(app(Some(state()), Conn::Live), &["enter", "left", "right"]);
         assert!(screen.contains("Instances \u{203a} staging"), "{screen}");
-        let screen = text(app(Some(state()), Conn::Live), &["down", "enter", "g", "o"]);
+        let screen = text(app(Some(state()), Conn::Live), &["enter", "g", "o"]);
         assert!(
             screen.contains("chap-checker \u{203a} Overview"),
             "{screen}"
         );
+    }
+
+    #[test]
+    fn failures_come_first_and_the_summary_names_them() {
+        let screen = text(app(Some(state()), Conn::Live), &[]);
+        let first = screen
+            .lines()
+            .position(|l| l.contains("staging") && l.contains("fail"))
+            .unwrap();
+        let second = screen
+            .lines()
+            .position(|l| l.contains("prod") && l.contains(" ok "))
+            .unwrap();
+        assert!(first < second, "{screen}");
+        assert!(
+            screen.contains("1 of 2 instance(s) up (1 down)"),
+            "{screen}"
+        );
+        assert!(screen.contains("ping on staging"), "{screen}");
+    }
+
+    #[test]
+    fn a_warning_is_up_but_flagged() {
+        let mut s = state();
+        s.tiles[1] = tile("staging", Status::Warn);
+        let screen = text(app(Some(s), Conn::Live), &[]);
+        assert!(
+            screen.contains("2 of 2 instance(s) up (1 with warnings)"),
+            "{screen}"
+        );
+        assert!(screen.contains("1 with warnings"), "{screen}");
     }
 }
