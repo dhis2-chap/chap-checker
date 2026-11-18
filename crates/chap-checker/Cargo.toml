@@ -1,6 +1,6 @@
 [package]
 name = "chap-checker"
-version = "0.12.0"
+version = "1.0.0"
 edition = "2024"
 description = "Health-check CLI for DHIS2 instances integrated with chap-core, and Open Geo Service deployments."
 license = "AGPL-3.0-or-later"
