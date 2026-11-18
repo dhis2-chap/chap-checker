@@ -13,12 +13,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   and Latency sort from their headings). The failing-checks tile names the
   first failure, and the header says how many instances are down.
 
+- **Status in the TUI's headers and side panel**, as sokkel says a status:
+  the overview's header shows the fleet's health, an instance's page its
+  worst check's, and the side panel the check's, each with its dot and word.
+- **The TUI's rail gives way** to the tables: in a window too narrow for both,
+  the rail narrows and then folds to its icons before a table turns into
+  cards. A width you drag at the rail's edge still wins.
+
 ### Fixed
 
 - The TUI counted an instance with only a warning as down. It is now up but
   flagged: "Instances up" turns amber and its note says "1 with warnings",
   and an instance's "Checks OK" tile is amber for a warning and red only for
   a failure.
+- The TUI's side panel wraps long values, such as an instance's URL, instead
+  of cutting them.
 - The TUI's instances table gives the instance name more room than the
   platform and version, so names are cut later in narrow windows.
 
