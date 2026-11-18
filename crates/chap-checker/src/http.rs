@@ -117,16 +117,16 @@ impl RetryPolicy {
         } else if self.max_attempts > 10 {
             out.push(("max_attempts", le("10")));
         }
-        if self.base_delay < 0.0 {
+        if !at_least(self.base_delay, 0.0) {
             out.push(("base_delay", ge("0")));
         }
-        if self.max_delay <= 0.0 {
+        if self.max_delay.is_nan() || self.max_delay <= 0.0 {
             out.push(("max_delay", "Input should be greater than 0".to_owned()));
         }
-        if self.backoff_factor < 1.0 {
+        if !at_least(self.backoff_factor, 1.0) {
             out.push(("backoff_factor", ge("1")));
         }
-        if self.jitter < 0.0 {
+        if self.jitter.is_nan() || self.jitter < 0.0 {
             out.push(("jitter", ge("0")));
         } else if self.jitter > 1.0 {
             out.push(("jitter", le("1")));
@@ -144,7 +144,7 @@ impl RetryPolicy {
         } else {
             capped
         };
-        Duration::from_secs_f64(seconds.max(0.0))
+        self::seconds(seconds)
     }
 }
 
@@ -185,13 +185,28 @@ impl Target {
     }
 }
 
+/// Finite and at least `min` (NaN is neither).
+fn at_least(value: f64, min: f64) -> bool {
+    value.is_finite() && value >= min
+}
+
+/// Seconds as a `Duration`, never panicking: NaN and anything not above zero is zero, and
+/// anything beyond a year (infinity included) is a year.
+pub fn seconds(value: f64) -> Duration {
+    const YEAR: Duration = Duration::from_secs(365 * 24 * 3600);
+    if value.is_nan() || value <= 0.0 {
+        return Duration::ZERO;
+    }
+    Duration::try_from_secs_f64(value).map_or(YEAR, |d| d.min(YEAR))
+}
+
 /// Build a reqwest client with per-phase timeouts (connect, and each read), like httpx's.
 pub fn build_http(
     timeout_s: f64,
     verify_tls: bool,
     redirects: Policy,
 ) -> Result<reqwest::Client, RequestError> {
-    let timeout = Duration::from_secs_f64(timeout_s);
+    let timeout = seconds(timeout_s);
     reqwest::Client::builder()
         .connect_timeout(connect_timeout(timeout))
         .read_timeout(timeout)
@@ -395,7 +410,7 @@ impl Client {
             let delay = match &outcome {
                 Ok((response, retry_after)) if policy.retry_statuses.contains(&response.status) => {
                     match retry_after {
-                        Some(hint) => Duration::from_secs_f64(hint.min(policy.max_delay)),
+                        Some(hint) => seconds(hint.min(policy.max_delay)),
                         None => policy.delay(attempt),
                     }
                 }
@@ -435,6 +450,21 @@ mod tests {
         assert_eq!(policy.delay(1), Duration::from_secs_f64(0.5));
         assert_eq!(policy.delay(2), Duration::from_secs_f64(1.0));
         assert_eq!(policy.delay(3), Duration::from_secs_f64(1.5));
+    }
+
+    #[test]
+    fn seconds_never_panics() {
+        assert_eq!(seconds(f64::NAN), Duration::ZERO);
+        assert_eq!(seconds(-1.0), Duration::ZERO);
+        assert_eq!(seconds(f64::INFINITY), Duration::from_secs(365 * 24 * 3600));
+        assert_eq!(seconds(1e30), Duration::from_secs(365 * 24 * 3600));
+        assert_eq!(seconds(0.25), Duration::from_millis(250));
+        let nan = RetryPolicy {
+            base_delay: f64::NAN,
+            jitter: f64::NAN,
+            ..RetryPolicy::default()
+        };
+        assert_eq!(nan.problems().len(), 2);
     }
 
     #[test]

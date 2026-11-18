@@ -133,6 +133,50 @@ fn userinfo_in(text: &str, hint: &str) -> Result<(), String> {
     }
 }
 
+/// A boolean as pydantic took one: `true`/`false`, `0`/`1`, or a word such as "yes" or "off".
+fn lax_bool<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum BoolLike {
+        Bool(bool),
+        Int(i64),
+        Text(String),
+    }
+    let unreadable =
+        || serde::de::Error::custom("Input should be a valid boolean, unable to interpret input");
+    match BoolLike::deserialize(deserializer)
+        .map_err(|_| serde::de::Error::custom("Input should be a valid boolean"))?
+    {
+        BoolLike::Bool(b) => Ok(b),
+        BoolLike::Int(0) => Ok(false),
+        BoolLike::Int(1) => Ok(true),
+        BoolLike::Int(_) => Err(serde::de::Error::custom(
+            "Input should be a valid boolean, unable to interpret input",
+        )),
+        BoolLike::Text(t) => match t.trim().to_lowercase().as_str() {
+            "0" | "off" | "f" | "false" | "n" | "no" => Ok(false),
+            "1" | "on" | "t" | "true" | "y" | "yes" => Ok(true),
+            _ => Err(unreadable()),
+        },
+    }
+}
+
+/// An integer as pydantic took one: an integer, a float without a fraction, or digits in a string.
+fn lax_int(value: Option<&toml::Value>) -> Result<Option<i64>, String> {
+    match value {
+        None => Ok(None),
+        Some(toml::Value::Integer(n)) => Ok(Some(*n)),
+        Some(toml::Value::Float(f)) if f.is_finite() && f.fract() == 0.0 => Ok(Some(*f as i64)),
+        Some(toml::Value::Float(_)) => {
+            Err("Input should be a valid integer, got a number with a fractional part".into())
+        }
+        Some(toml::Value::String(t)) => t.trim().parse().map(Some).map_err(|_| {
+            "Input should be a valid integer, unable to parse string as an integer".into()
+        }),
+        Some(_) => Err("Input should be a valid integer".into()),
+    }
+}
+
 fn default_timeout() -> f64 {
     10.0
 }
@@ -158,7 +202,7 @@ pub struct Dhis2InstanceConfig {
     pub url: String,
     #[serde(default = "default_timeout")]
     pub timeout_s: f64,
-    #[serde(default = "default_true")]
+    #[serde(default = "default_true", deserialize_with = "lax_bool")]
     pub verify_tls: bool,
     pub checks: Option<Vec<String>>,
     #[serde(default)]
@@ -182,7 +226,7 @@ pub struct OgsInstanceConfig {
     pub url: String,
     #[serde(default = "default_timeout")]
     pub timeout_s: f64,
-    #[serde(default = "default_true")]
+    #[serde(default = "default_true", deserialize_with = "lax_bool")]
     pub verify_tls: bool,
     pub checks: Option<Vec<String>>,
     #[serde(default)]
@@ -199,7 +243,7 @@ pub struct HttpInstanceConfig {
     pub url: String,
     #[serde(default = "default_timeout")]
     pub timeout_s: f64,
-    #[serde(default = "default_true")]
+    #[serde(default = "default_true", deserialize_with = "lax_bool")]
     pub verify_tls: bool,
     pub checks: Option<Vec<String>>,
     #[serde(default)]
@@ -485,7 +529,7 @@ struct RawConfig {
     auth: Option<AuthConfig>,
     #[serde(default)]
     ui: UiConfig,
-    concurrency: Option<i64>,
+    concurrency: Option<toml::Value>,
     retry: Option<RetryPolicy>,
 }
 
@@ -540,7 +584,7 @@ impl CheckerConfig {
                 {
                     errors.push((format!("{loc}.webhook_url"), e));
                 }
-                if slack.timeout_s <= 0.0 {
+                if !positive_finite(slack.timeout_s) {
                     errors.push((format!("{loc}.timeout_s"), GT_ZERO.into()));
                 }
                 if errors.len() == before
@@ -560,7 +604,7 @@ impl CheckerConfig {
                 {
                     errors.push((format!("{loc}.url"), e));
                 }
-                if webhook.timeout_s <= 0.0 {
+                if !positive_finite(webhook.timeout_s) {
                     errors.push((format!("{loc}.timeout_s"), GT_ZERO.into()));
                 }
                 if errors.len() == before && webhook.url.is_some() == webhook.url_env.is_some() {
@@ -602,7 +646,13 @@ impl CheckerConfig {
             ));
         }
 
-        let concurrency = raw.concurrency.unwrap_or(DEFAULT_CONCURRENCY as i64);
+        let concurrency = match lax_int(raw.concurrency.as_ref()) {
+            Ok(n) => n.unwrap_or(DEFAULT_CONCURRENCY as i64),
+            Err(message) => {
+                errors.push(("concurrency".into(), message));
+                DEFAULT_CONCURRENCY as i64
+            }
+        };
         if concurrency < 1 {
             errors.push(("concurrency".into(), GT_ZERO.into()));
         } else if concurrency > 100 {
@@ -774,7 +824,7 @@ fn instance(value: toml::Value, key_loc: &str) -> Result<InstanceConfig, Vec<(St
             None
         }
     };
-    if timeout_s <= 0.0 {
+    if !positive_finite(timeout_s) {
         errors.push((format!("{loc}.timeout_s"), GT_ZERO.into()));
     }
     if check_names.as_ref().is_some_and(Vec::is_empty) {
@@ -872,6 +922,11 @@ fn http_params(
         "json_equals": json_equals,
         "headers": h.headers,
     })
+}
+
+/// Above zero and finite: NaN and infinity are no timeout.
+fn positive_finite(value: f64) -> bool {
+    value > 0.0 && value.is_finite()
 }
 
 /// pydantic's message for a broken cross-field rule.
@@ -1265,6 +1320,38 @@ mod tests {
         let text = errors("[instances.s]\nkind = \"nope\"\nurl = \"https://x\"");
         assert!(
             text.contains("expected tags: 'dhis2', 'ogs', 'chap', 'caps', 'http'"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn lenient_values_like_pydantic() {
+        let cfg = CheckerConfig::parse(
+            "concurrency = 5.0\n[instances.a]\nurl = \"https://x\"\ntoken = \"t\"\nverify_tls = \"false\"",
+        )
+        .unwrap();
+        assert_eq!(cfg.concurrency, 5);
+        assert!(!cfg.instances["a"].verify_tls);
+        assert_eq!(
+            CheckerConfig::parse("concurrency = \"7\"")
+                .unwrap()
+                .concurrency,
+            7
+        );
+        assert!(errors("concurrency = 5.5").contains(
+            "concurrency: Input should be a valid integer, got a number with a fractional part"
+        ));
+        let text =
+            errors("[instances.a]\nurl = \"https://x\"\ntoken = \"t\"\nverify_tls = \"maybe\"");
+        assert!(text.contains("instances.a.dhis2.verify_tls: Input should be a valid boolean, unable to interpret input"), "{text}");
+        let text = errors("[instances.a]\nurl = \"https://x\"\ntoken = \"t\"\ntimeout_s = nan");
+        assert!(
+            text.contains("instances.a.dhis2.timeout_s: Input should be greater than 0"),
+            "{text}"
+        );
+        let text = errors("[retry]\nbase_delay = nan");
+        assert!(
+            text.contains("retry.base_delay: Input should be greater than or equal to 0"),
             "{text}"
         );
     }

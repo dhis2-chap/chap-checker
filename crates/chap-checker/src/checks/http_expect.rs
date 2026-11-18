@@ -47,7 +47,7 @@ async fn run(ctx: &mut CheckContext) -> CheckResult {
         let http = build_http(
             ctx.target.timeout_s,
             ctx.target.verify_tls,
-            Policy::limited(5),
+            redirects(&url, &expect),
         )?;
         let mut request = http.get(&url);
         for (name, value) in &expect.headers {
@@ -151,6 +151,24 @@ async fn run(ctx: &mut CheckContext) -> CheckResult {
     )
     .details(d)
     .since(start)
+}
+
+/// Up to five redirects; with configured headers, none to another origin, which would otherwise
+/// receive them (reqwest drops only its own credential headers on a cross-origin hop).
+fn redirects(url: &str, expect: &Expect) -> Policy {
+    if expect.headers.is_empty() {
+        return Policy::limited(5);
+    }
+    let origin = url::Url::parse(url).ok().map(|u| u.origin());
+    Policy::custom(move |attempt| {
+        if attempt.previous().len() >= 5 {
+            attempt.error("too many redirects")
+        } else if origin.as_ref() != Some(&attempt.url().origin()) {
+            attempt.stop()
+        } else {
+            attempt.follow()
+        }
+    })
 }
 
 /// Equal as JSON, or as text when one side is a string (`"200"` matches `200`).

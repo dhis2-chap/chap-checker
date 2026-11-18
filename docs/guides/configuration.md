@@ -153,7 +153,7 @@ url = "https://climate-demo.dhis2.org/"
 body_contains = "Climate"
 ```
 
-Redirects are followed (up to five) and the status checked is the final one's.
+Redirects are followed (up to five) and the status checked is the final one's. With `headers` set, a redirect to another origin (host, port or scheme) is not followed, so the headers never reach a server you didn't name; the check then sees the redirect's own status.
 
 Alerts, the state file, `verify --json` and the dashboard treat every kind the
 same way. JSON output carries a `target_kind` field per run, and dashboard

@@ -285,10 +285,23 @@ impl Daemon {
     }
 
     /// Refresh, then sleep `interval_s`, forever.
+    /// A cycle that panics is logged and the loop goes on: a daemon that stops refreshing while
+    /// it keeps serving its last snapshot would look healthy and be blind.
     pub async fn run_loop(self: Arc<Self>) {
+        use futures::FutureExt;
         loop {
-            self.refresh_once().await;
-            tokio::time::sleep(std::time::Duration::from_secs_f64(self.interval_s)).await;
+            if let Err(panic) = std::panic::AssertUnwindSafe(self.refresh_once())
+                .catch_unwind()
+                .await
+            {
+                let why = panic
+                    .downcast_ref::<String>()
+                    .cloned()
+                    .or_else(|| panic.downcast_ref::<&str>().map(|s| (*s).to_owned()))
+                    .unwrap_or_default();
+                tracing::error!("refresh cycle failed: {why}");
+            }
+            tokio::time::sleep(crate::http::seconds(self.interval_s)).await;
         }
     }
 

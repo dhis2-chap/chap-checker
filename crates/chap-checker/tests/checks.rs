@@ -545,3 +545,52 @@ async fn http_plugin_expectations() {
     let r = one(run(&t(json!({"expect_status": [401]}))).await);
     assert_eq!(r.status, Status::Ok, "a protected URL can count as up");
 }
+
+#[tokio::test]
+async fn http_headers_never_follow_a_redirect_to_another_origin() {
+    let elsewhere = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(0)
+        .mount(&elsewhere)
+        .await;
+    let server = MockServer::start().await;
+    mount(
+        &server,
+        "/",
+        ResponseTemplate::new(302)
+            .insert_header("Location", format!("{}/landing", elsewhere.uri())),
+    )
+    .await;
+    let with_header = plain(
+        &server,
+        TargetKind::Http,
+        json!({"headers": {"X-Api-Key": "secret"}}),
+    );
+    let r = run(&with_header).await.into_iter().next().unwrap();
+    assert_eq!(r.status, Status::Fail, "{}", r.message);
+    assert!(
+        r.message.starts_with("Unexpected status 302"),
+        "{}",
+        r.message
+    );
+    elsewhere.verify().await;
+
+    // Without headers there is nothing to leak, so the redirect is followed as before.
+    let elsewhere2 = MockServer::start().await;
+    mount(&elsewhere2, "/landing", ResponseTemplate::new(200)).await;
+    server.reset().await;
+    mount(
+        &server,
+        "/",
+        ResponseTemplate::new(302)
+            .insert_header("Location", format!("{}/landing", elsewhere2.uri())),
+    )
+    .await;
+    let r = run(&plain(&server, TargetKind::Http, serde_json::Value::Null))
+        .await
+        .into_iter()
+        .next()
+        .unwrap();
+    assert_eq!(r.status, Status::Ok, "{}", r.message);
+}

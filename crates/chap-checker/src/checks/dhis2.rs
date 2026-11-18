@@ -218,7 +218,7 @@ async fn chap_route(ctx: &mut CheckContext) -> CheckResult {
         .took(elapsed);
     };
     let route_details = without_nulls(route);
-    if route.get("disabled").and_then(Value::as_bool) == Some(true) {
+    if route.get("disabled").and_then(lax_json_bool) == Some(true) {
         return CheckResult::new(
             NAME,
             Status::Warn,
@@ -265,7 +265,7 @@ fn route_list(body: &Value) -> Result<Vec<Map<String, Value>>, usize> {
         }
         if route
             .get("disabled")
-            .is_some_and(|v| !v.is_null() && !v.is_boolean())
+            .is_some_and(|v| !v.is_null() && lax_json_bool(v).is_none())
         {
             problems += 1;
         }
@@ -656,6 +656,24 @@ fn ms(start: Instant) -> f64 {
     start.elapsed().as_secs_f64() * 1000.0
 }
 
+/// A JSON boolean as pydantic read one: `true`/`false`, 0/1, or a word such as "true" or "no".
+fn lax_json_bool(value: &Value) -> Option<bool> {
+    match value {
+        Value::Bool(b) => Some(*b),
+        Value::Number(n) => match n.as_i64() {
+            Some(0) => Some(false),
+            Some(1) => Some(true),
+            _ => None,
+        },
+        Value::String(t) => match t.trim().to_lowercase().as_str() {
+            "0" | "off" | "f" | "false" | "n" | "no" => Some(false),
+            "1" | "on" | "t" | "true" | "y" | "yes" => Some(true),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 /// Python truthiness for a JSON value.
 fn truthy(value: &Value) -> bool {
     match value {
@@ -695,5 +713,13 @@ mod tests {
         assert_eq!(route_list(&json!([])), Err(1));
         assert_eq!(route_list(&json!({})).unwrap().len(), 0);
         assert_eq!(route_list(&json!({"routes": [{"code": 1}]})), Err(1));
+        assert_eq!(
+            route_list(&json!({"routes": [{"code": "chap", "disabled": "true"}]}))
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(lax_json_bool(&json!("true")), Some(true));
+        assert_eq!(lax_json_bool(&json!("maybe")), None);
     }
 }
