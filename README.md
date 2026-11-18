@@ -6,6 +6,10 @@
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Documentation](https://img.shields.io/badge/docs-mkdocs-blue.svg)](https://dhis2-chap.github.io/chap-checker/)
 
+> [!WARNING]
+> At this time, `chap-checker` is mostly an internal tool for the Chap team.
+> It is not built or supported as a general-purpose monitoring product.
+
 An uptime monitor for the servers around Chap: DHIS2 instances that
 integrate with `chap-core` through a DHIS2 route, chap-core itself, CAPS,
 [Open Geo Service](https://github.com/dhis2/open-geo-service) deployments,
@@ -34,6 +38,10 @@ chap-checker --version
 # Upgrade to the latest release later:
 uv tool upgrade chap-checker
 ```
+
+`uv tool upgrade` stays within the version an install was pinned to: a tool
+installed as `chap-checker==0.12.0` stays on 0.12.0. Move such an install with
+`uv tool install chap-checker@latest`.
 
 ## Quick start
 

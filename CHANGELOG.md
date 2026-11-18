@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Changed
+
+- The README and the docs say that chap-checker is mostly an internal tool
+  for the Chap team, and how to move an install pinned to an exact version
+  (`uv tool install chap-checker@latest`; `uv tool upgrade` keeps the pin).
+
 ## [1.0.0] — 2026-11-18
 
 chap-checker is now a single Rust binary, organised as an uptime monitor with
