@@ -3,6 +3,11 @@
 [![Rust 2024](https://img.shields.io/badge/rust-2024-orange.svg)](https://github.com/dhis2-chap/chap-checker/blob/main/crates/chap-checker/Cargo.toml)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 
+!!! warning
+    At this time, `chap-checker` is mostly an internal tool for the Chap
+    team. It is not built or supported as a general-purpose monitoring
+    product.
+
 An uptime monitor for the servers around Chap: DHIS2 instances that integrate
 with `chap-core` through a DHIS2 route, chap-core itself, CAPS, Open Geo
 Service deployments, and any other URL. Each kind of server is a plugin with
@@ -46,6 +51,10 @@ chap-checker --version
 # Upgrade to the latest release later:
 uv tool upgrade chap-checker
 ```
+
+`uv tool upgrade` stays within the version an install was pinned to: a tool
+installed as `chap-checker==0.12.0` stays on 0.12.0. Move such an install with
+`uv tool install chap-checker@latest`.
 
 chap-checker is a single binary written in Rust. PyPI carries a wheel per
 platform (Linux x86_64 and aarch64, macOS Intel and Apple silicon, Windows),

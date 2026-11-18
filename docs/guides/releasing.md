@@ -79,6 +79,9 @@ uv tool upgrade chap-checker     # or: uvx chap-checker --version
 chap-checker --version
 ```
 
+A host installed with an exact pin (`chap-checker==0.12.0`) ignores
+`uv tool upgrade`; move it with `uv tool install chap-checker@latest`.
+
 Both pages update on success:
 
 - <https://pypi.org/project/chap-checker/>
