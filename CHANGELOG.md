@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-11-18
+
 chap-checker is now a single Rust binary, organised as an uptime monitor with
 a plugin per kind of server. It still installs from PyPI with
 `uvx chap-checker` / `uv tool install chap-checker` (now as a wheel per
@@ -355,7 +357,8 @@ answers every route with the same status and JSON.
 
 For 0.1.x / 0.2.x release notes, see the [GitHub Releases page](https://github.com/dhis2-chap/chap-checker/releases).
 
-[Unreleased]: https://github.com/dhis2-chap/chap-checker/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/dhis2-chap/chap-checker/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/dhis2-chap/chap-checker/compare/v0.12.0...v1.0.0
 [0.12.0]: https://github.com/dhis2-chap/chap-checker/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.11.0
 [0.10.0]: https://github.com/dhis2-chap/chap-checker/releases/tag/v0.10.0
