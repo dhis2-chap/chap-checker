@@ -6,6 +6,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-11-19
+
 ### Changed
 
 - **The TUI's overview leads with what is wrong.** Failing instances come
@@ -426,7 +428,8 @@ answers every route with the same status and JSON.
 
 For 0.1.x / 0.2.x release notes, see the [GitHub Releases page](https://github.com/dhis2-chap/chap-checker/releases).
 
-[Unreleased]: https://github.com/dhis2-chap/chap-checker/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/dhis2-chap/chap-checker/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/dhis2-chap/chap-checker/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/dhis2-chap/chap-checker/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/dhis2-chap/chap-checker/compare/v0.12.0...v1.0.0
 [0.12.0]: https://github.com/dhis2-chap/chap-checker/compare/v0.11.0...v0.12.0
