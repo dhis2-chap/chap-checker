@@ -41,5 +41,5 @@ We patch the latest `1.x` release. Older releases don't get backports: please up
 
 | Version  | Supported |
 |----------|-----------|
-| 1.1.x    | Yes       |
-| < 1.1.0  | No        |
+| 1.2.x    | Yes       |
+| < 1.2.0  | No        |
